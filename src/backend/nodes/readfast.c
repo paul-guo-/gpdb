@@ -2878,6 +2878,7 @@ _readModifyTable(void)
 	readPlanInfo((Plan *)local_node);
 	READ_ENUM_FIELD(operation, CmdType);
 	READ_BOOL_FIELD(canSetTag);
+	READ_UINT_FIELD(nominalRelation);
 	READ_NODE_FIELD(resultRelations);
 	READ_INT_FIELD(resultRelIndex);
 	READ_NODE_FIELD(plans);

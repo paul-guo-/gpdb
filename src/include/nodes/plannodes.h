@@ -359,6 +359,7 @@ typedef struct ModifyTable
 	Plan		plan;
 	CmdType		operation;		/* INSERT, UPDATE, or DELETE */
 	bool		canSetTag;		/* do we set the command tag/es_processed? */
+	Index		nominalRelation;	/* Parent RT index for use of EXPLAIN */
 	List	   *resultRelations;	/* integer list of RT indexes */
 	int			resultRelIndex; /* index of first resultRel in plan's list */
 	List	   *plans;			/* plan(s) producing source data */

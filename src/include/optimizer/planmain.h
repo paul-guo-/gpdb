@@ -209,6 +209,7 @@ extern Repeat *make_repeat(List *tlist,
 						   Plan *subplan);
 extern ModifyTable *make_modifytable(PlannerInfo *root,
 				 CmdType operation, bool canSetTag,
+				 Index nominalRelation,
 				 List *resultRelations, List *subplans,
 				 List *withCheckOptionLists, List *returningLists,
 				 List *is_split_updates,
