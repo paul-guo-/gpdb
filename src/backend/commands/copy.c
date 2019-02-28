@@ -3610,7 +3610,6 @@ CopyFrom(CopyState cstate)
 	GpDistributionData	*distData = NULL; /* distribution data used to compute target seg */
 	uint64		processed = 0;
 	bool		useHeapMultiInsert;
-#define MAX_BUFFERED_TUPLES 1000
 	int			nTotalBufferedTuples = 0;
 	Size		totalBufferedTuplesSize = 0;
 	int			i;
@@ -4195,7 +4194,7 @@ CopyFrom(CopyState cstate)
 				resultRelInfoList = list_append_unique_ptr(resultRelInfoList, resultRelInfo);
 				if (resultRelInfo->bufferedTuples == NULL)
 				{
-					resultRelInfo->bufferedTuples = palloc(MAX_BUFFERED_TUPLES * sizeof(HeapTuple));
+					resultRelInfo->bufferedTuples = palloc(MAX_MULTI_INSERT_TUPLES * sizeof(HeapTuple));
 					resultRelInfo->nBufferedTuples = 0;
 					resultRelInfo->bufferedTuplesSize = 0;
 				}
@@ -4215,11 +4214,11 @@ CopyFrom(CopyState cstate)
 				 * the tuples are exceptionally wide.
 				 */
 				/*
-				 * GPDB_92_MERGE_FIXME: MAX_BUFFERED_TUPLES and 65535 might not be
+				 * GPDB_92_MERGE_FIXME: MAX_MULTI_INSERT_TUPLES and MAX_MULTI_INSERT_SIZE might not be
 				 * the best value for partition table
 				 */
-				if (nTotalBufferedTuples == MAX_BUFFERED_TUPLES ||
-					totalBufferedTuplesSize > 65535)
+				if (nTotalBufferedTuples == MAX_MULTI_INSERT_TUPLES ||
+					totalBufferedTuplesSize > MAX_MULTI_INSERT_SIZE)
 				{
 					cdbFlushInsertBatches(resultRelInfoList, cstate, estate, mycid, hi_options,
 										  slot, firstBufferedLineNo);

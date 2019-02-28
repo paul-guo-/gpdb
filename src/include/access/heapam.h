@@ -34,6 +34,9 @@
 
 typedef struct BulkInsertStateData *BulkInsertState;
 
+#define MAX_MULTI_INSERT_TUPLES	1000
+#define MAX_MULTI_INSERT_SIZE	65535
+
 /*
  * Possible lock modes for a tuple.
  */

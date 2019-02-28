@@ -2979,7 +2979,6 @@ heap_multi_insert(Relation relation, HeapTuple *tuples, int ntuples,
 				  CommandId cid, int options, BulkInsertState bistate, TransactionId xid)
 {
 	bool        isFrozen = (xid == FrozenTransactionId);
-	HeapTuple  *heaptuples;
 	int			i;
 	int			ndone;
 	PGAlignedBlock scratch;
@@ -2988,6 +2987,10 @@ heap_multi_insert(Relation relation, HeapTuple *tuples, int ntuples,
 	Size		saveFreeSpace;
 	bool		need_tuple_data = RelationIsLogicallyLogged(relation);
 	bool		need_cids = RelationIsAccessibleInLogicalDecoding(relation);
+	/* Declare it as static to let this memory be not on stack. */
+	static HeapTuple	heaptuples[MAX_MULTI_INSERT_TUPLES];
+
+	Assert(ntuples <= MAX_MULTI_INSERT_TUPLES);
 
 	/* currently not needed (thus unsupported) for heap_multi_insert() */
 	AssertArg(!(options & HEAP_INSERT_NO_LOGICAL));
@@ -2997,7 +3000,6 @@ heap_multi_insert(Relation relation, HeapTuple *tuples, int ntuples,
 												   HEAP_DEFAULT_FILLFACTOR);
 
 	/* Toast and set header data in all the tuples */
-	heaptuples = palloc(ntuples * sizeof(HeapTuple));
 	for (i = 0; i < ntuples; i++)
 		heaptuples[i] = heap_prepare_insert(relation, tuples[i],
 											xid, cid, options, isFrozen);

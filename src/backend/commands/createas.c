@@ -46,6 +46,7 @@
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
 #include "utils/rel.h"
 #include "utils/rls.h"
 #include "utils/snapmgr.h"
@@ -75,6 +76,11 @@ typedef struct
 
 	struct AppendOnlyInsertDescData *ao_insertDesc; /* descriptor to AO tables */
 	struct AOCSInsertDescData *aocs_insertDes;      /* descriptor for aocs */
+
+	MemoryContext	mi_context; /* A temporary memory context for multi insert */
+	HeapTuple		mi_tuples[MAX_MULTI_INSERT_TUPLES]; /* buffered tuples for a multi insert batch. */
+	int				mi_tuples_num; /* How many buffered tuples for a multi insert batch. */
+	int				mi_tuples_size; /* Total tuple size for a multi insert batch. */
 } DR_intorel;
 
 static void intorel_startup_dummy(DestReceiver *self, int operation, TupleDesc typeinfo);
@@ -742,9 +748,39 @@ intorel_initplan(struct QueryDesc *queryDesc, int eflags)
 	myState->hi_options = HEAP_INSERT_SKIP_FSM |
 		(XLogIsNeeded() ? 0 : HEAP_INSERT_SKIP_WAL);
 	myState->bistate = GetBulkInsertState();
+	memset(myState->mi_tuples, 0, sizeof(HeapTuple) * MAX_MULTI_INSERT_TUPLES);
+	myState->mi_tuples_num = 0;
+	myState->mi_tuples_size = 0;
+
+	/*
+	 * Create a temporary memory context so that we can reset once per
+	 * multi insert batch.
+	 */
+	myState->mi_context = AllocSetContextCreate(CurrentMemoryContext,
+												"intorel_multi_insert",
+												ALLOCSET_DEFAULT_SIZES);
 
 	/* Not using WAL requires smgr_targblock be initially invalid */
 	Assert(RelationGetTargetBlock(intoRelationDesc) == InvalidBlockNumber);
+}
+
+static void
+intorel_flush_multi_insert(DR_intorel *myState)
+{
+	MemoryContext oldcontext;
+
+	oldcontext = MemoryContextSwitchTo(myState->mi_context);
+
+	heap_multi_insert(myState->rel, myState->mi_tuples,
+					   myState->mi_tuples_num, myState->output_cid,
+					   myState->hi_options, myState->bistate,
+					   GetCurrentTransactionId());
+
+	MemoryContextReset(myState->mi_context);
+	MemoryContextSwitchTo(oldcontext);
+
+	myState->mi_tuples_num = 0;
+	myState->mi_tuples_size = 0;
 }
 
 /*
@@ -778,12 +814,15 @@ intorel_receive(TupleTableSlot *slot, DestReceiver *self)
 	else
 	{
 		HeapTuple	tuple;
+		MemoryContext oldcontext;
 
 		/*
-		 * get the heap tuple out of the tuple table slot, making sure we have a
-		 * writable copy
+		 * Get the heap tuple out of the tuple table slot, making sure we have a
+		 * writable copy.
 		 */
-		tuple = ExecMaterializeSlot(slot);
+		oldcontext = MemoryContextSwitchTo(myState->mi_context);
+		tuple = ExecCopySlotHeapTuple(slot);
+		MemoryContextSwitchTo(oldcontext);
 
 		/*
 		 * force assignment of new OID (see comments in ExecInsert)
@@ -791,12 +830,12 @@ intorel_receive(TupleTableSlot *slot, DestReceiver *self)
 		if (myState->rel->rd_rel->relhasoids)
 			HeapTupleSetOid(tuple, InvalidOid);
 
-		heap_insert(myState->rel,
-					tuple,
-					myState->output_cid,
-					myState->hi_options,
-					myState->bistate,
-					GetCurrentTransactionId());
+		myState->mi_tuples[myState->mi_tuples_num++] = tuple;
+		myState->mi_tuples_size += tuple->t_len;
+
+		if (myState->mi_tuples_num >= MAX_MULTI_INSERT_TUPLES ||
+			myState->mi_tuples_size >= MAX_MULTI_INSERT_SIZE)
+			intorel_flush_multi_insert(myState);
 	}
 
 	/* We know this is a newly created relation, so there are no indexes */
@@ -816,6 +855,9 @@ intorel_shutdown(DestReceiver *self)
 	if (into_rel == NULL)
 		return;
 
+	if (myState->mi_tuples_num != 0)
+		intorel_flush_multi_insert(myState);
+
 	FreeBulkInsertState(myState->bistate);
 
 	/* If we skipped using WAL, must heap_sync before commit */
@@ -826,6 +868,10 @@ intorel_shutdown(DestReceiver *self)
 		appendonly_insert_finish(myState->ao_insertDesc);
 	else if (RelationIsAoCols(into_rel) && myState->aocs_insertDes)
 		aocs_insert_finish(myState->aocs_insertDes);
+
+	if (myState->mi_context)
+		MemoryContextDelete(myState->mi_context);
+	myState->mi_context = NULL;
 
 	/* close rel, but keep lock until commit */
 	heap_close(into_rel, NoLock);
