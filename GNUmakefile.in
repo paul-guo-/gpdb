@@ -26,6 +26,7 @@ all:
 ifeq ($(with_openssl), yes)
 	$(MAKE) -C contrib/sslinfo all
 endif
+	$(MAKE) -C contrib/postgres_fdw all
 	$(MAKE) -C gpAux/extensions all
 	$(MAKE) -C gpAux/gpperfmon all
 	$(MAKE) -C gpMgmt all
@@ -61,6 +62,7 @@ install:
 ifeq ($(with_openssl), yes)
 	$(MAKE) -C contrib/sslinfo $@
 endif
+	$(MAKE) -C contrib/postgres_fdw $@
 	$(MAKE) -C gpMgmt $@
 	$(MAKE) -C gpAux/extensions $@
 	$(MAKE) -C gpAux/gpperfmon $@
@@ -147,6 +149,7 @@ ifeq ($(with_openssl), yes)
 ICW_TARGETS += contrib/sslinfo
 endif
 ICW_TARGETS += gpcontrib src/bin gpMgmt/bin
+ICW_TARGETS += contrib/postgres_fdw
 
 $(call recurse,installcheck-world, $(ICW_TARGETS),installcheck)
 
