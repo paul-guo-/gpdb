@@ -311,6 +311,8 @@ extern int gp_fts_mark_mirror_down_grace_period;
 extern int gp_gang_creation_retry_count; /* How many retries ? */
 extern int gp_gang_creation_retry_timer; /* How long between retries */
 
+extern int	Gp_max_ic_worker;	/* GUC var */
+
 /*
  * Parameter Gp_max_packet_size
  *

@@ -3301,6 +3301,16 @@ struct config_int ConfigureNamesInt_gp[] =
 	},
 
 	{
+		{"gp_max_ic_worker", PGC_BACKEND, GP_ARRAY_TUNING, /* What is GP_ARRAY_TUNING? */
+			gettext_noop("max ic worker number"),
+			NULL
+		},
+		&Gp_max_ic_worker,
+		4, 1, 64,
+		NULL, NULL, NULL
+	},
+
+	{
 		{"gp_max_packet_size", PGC_BACKEND, GP_ARRAY_TUNING,
 			gettext_noop("Sets the max packet size for the Interconnect."),
 			NULL

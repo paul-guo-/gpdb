@@ -169,6 +169,7 @@ bool		gp_enable_slow_cursor_testmode = false;
  */
 uint32		Gp_listener_port;
 
+int			Gp_max_ic_worker; /* max Interconnect worker */
 int			Gp_max_packet_size; /* max Interconnect packet size */
 
 int			Gp_interconnect_queue_depth = 4;	/* max number of messages

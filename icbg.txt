@@ -1,0 +1,54 @@
+Remove the doc or move it to other places with a real desgin finally.
+
+Run interconnect in bg worker.
+
+Pros:
+ - decouple interconnect code & database handling.
+ - async network io. (current just udp async).
+ - Half background thread (process) so less context switch overhead.
+   Thinking about some mordern network s/w: nginx, memcached, etc.
+ - Setup earlier so save interconnect setup time when query executing.
+ - Easy to monitor & tune network itself.
+ - pthread (udp interconnect rx) is natually against current pg code.
+ - Flexible worker number.
+ - Can we prioritize/schedule network traffic?
+ - Can we leverage system optimization (RSS? CPU binding?)
+ - Easier to do some further optimization. (See Long term below).
+ - Easier to leverage some userspace networking or faster networking tech
+   if we really want to do. (e.g. easy to run dpdk+udp but it is hard to do
+   based on current udp implementation).
+ - Suspect: previously too many connections could slow down (tcp hashtable,
+   etc, locking, TBD). e.g. if many tcp ports are used, bind() tends to be slow.
+   in my centos6 dev environment.
+ - easier to be lack of tcp port with previous code. 
+   Address already in use: https://github.com/greenplum-db/gpdb/issues/8883
+ - too many ports: more possible for port conflicts with using ports.
+ - disable overcommit: affects pthread?
+ - Why tcp not udp? in the long run suspect cross cdc; also udp limitation
+   on real environment like Azure and WAN.
+ - Our reliable UDP is probably not that efficient and reliable. Use professional
+   tcp.
+ - Segments on the same node. Use UDS (easy to manage the files in all with
+   our algorithm). Locality aware: Easy to manage using our solution.
+ - Could we use simple memory copy for slice tables on the same node or on
+   the same postmaster?
+ - huge page.
+
+Cons:
+ - lock
+
+Implmentation:
+ Short term:
+  - Sharing port or each port for one node (current gpdb)?
+    Prefer previous one. Multiple ports among multiple nodes?
+	Previous interconnect tcp limitation (so why we use udp). Azure issue.
+	Share port will lead to lock, etc optimization issue? Let's see.
+  - Remove old ic code or keep them as an alternative in the PoC?
+
+ Long term:
+  - Add hearbeat among segments & master for interconnect.
+  - Do we still need to implement udp? Still keep the API.
+  - gang reset, failover, bg worker reset, flexible expansion/shrink of workers.
+  - segments on same node: tcp vs domain socket perf vs shm.
+    Do we need to change to domain socket or shm? Sense the topology?
+  - Other network requirement among segments (so broader to as a service?)

@@ -141,6 +141,7 @@
 #include "utils/dynamic_loader.h"
 #include "utils/faultinjector.h"
 #include "utils/gdd.h"
+#include "utils/icbg.h"
 #include "utils/memutils.h"
 #include "utils/ps_status.h"
 #include "utils/timeout.h"
