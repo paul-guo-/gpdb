@@ -168,7 +168,7 @@ typedef struct PgFdwScanState
 
 	/* Greenplum: parallel retrieving */
 	bool		is_parallel;
-	int64		token;
+	char		*token;
 	List		*endpoints_list;
 } PgFdwScanState;
 
@@ -348,8 +348,7 @@ static void greenplumEndMppForeignScan(ForeignScanState *node);
 static int greenplumCheckIsGreenplum(ForeignServer *server, UserMapping *user);
 static int greenplumGetRemoteMppSize(ForeignServer *server, UserMapping *user);
 static void create_custom_cursor(ForeignScanState *node, const char *cursor_sql);
-static void wait_endpoints_ready(ForeignScanState *node, ForeignServer *server, UserMapping *user, int64 token);
-static void get_endpoints_info(PGconn *conn, int cursor_number, int session_id, List **endpoints_list, int64 *token);
+static void get_endpoints_info(PGconn *conn, int cursor_number, int session_id, List **endpoints_list, char **token);
 static void create_and_execute_parallel_cursor(ForeignScanState *node);
 static void execute_parallel_cursor(ForeignScanState *node);
 static void create_parallel_cursor(ForeignScanState *node);
@@ -997,7 +996,6 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 		int32   dbid;
 		Value   *foreign_username;
 		Value   *token_val;
-		char    *token_str;
 
 		/* Find the value of foreign sever option "dbname" */
 		foreach(cell, server->options)
@@ -1013,7 +1011,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 
 		foreign_username = linitial(list_nth(fsplan->fdw_private, FdwScanPrivateUserName));
 		token_val = linitial(list_nth(fsplan->fdw_private, FdwScanPrivateToken));
-		fsstate->token = atoll(strVal(token_val));
+		fsstate->token = pstrdup(strVal(token_val));
 		fsstate->endpoints_list = list_nth(fsplan->fdw_private, FdwScanPrivateEndpoints);
 
 		if (process_no < 0)
@@ -1037,9 +1035,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 
 			user->options = NIL;
 			user->options = lappend(user->options, makeDefElem(pstrdup("user"), (Node *)foreign_username));
-           //FIXME: type of token has been changed 
-			//token_str = printToken(fsstate->token);
-			//user->options = lappend(user->options, makeDefElem(pstrdup("password"), (Node *)makeString(token_str)));
+			user->options = lappend(user->options, makeDefElem(pstrdup("password"), (Node *)makeString(fsstate->token)));
 
 			//fsstate->conn = GetCustomConnection(server, user, false, dbid, true);
 		}
@@ -1232,6 +1228,8 @@ postgresEndForeignScan(ForeignScanState *node)
 	/* Release remote connection */
 	ReleaseConnection(fsstate->conn);
 	fsstate->conn = NULL;
+    pfree(fsstate->token);
+    fsstate->token = NULL;
 
 	/* MemoryContexts will be deleted automatically. */
 }
@@ -3350,8 +3348,6 @@ greenplumBeginMppForeignScan(ForeignScanState *node, int eflags)
 
 	if (!fsstate->cursor_exists)
 		create_and_execute_parallel_cursor(node);
-
-	wait_endpoints_ready(node, server, user, fsstate->token);
 }
 
 static void
@@ -3415,85 +3411,23 @@ get_session_id(PGconn *conn, int *session_id)
 }
 
 static void
-wait_endpoints_ready(ForeignScanState *node,
-					 ForeignServer *server,
-					 UserMapping *user,
-					 int64 token)
-{
-	StringInfoData buf;
-	PGconn	   *conn;
-
-	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
-	PGconn	   *executeConn = fsstate->conn;
-
-	initStringInfo(&buf);
-    //FIXME
-	//appendStringInfo(&buf, "SELECT status FROM gp_endpoints WHERE token = '"TOKEN_NAME_FORMAT_STR"'", token);
-
-	conn = GetConnection(server, user, false);
-
-	while (true)
-	{
-		bool		all_endpoints_ready = true;
-		PGresult   *res;
-		PGresult   *executeRes;
-
-		/*
-		 * The connection running `EXECUTE PARALLEL CURSOR` should be busy
-		 * waiting now, unless it fails
-		 */
-		if (PQsocket(executeConn) < 0 || pqReadReady(executeConn))
-		{
-			executeRes = pgfdw_get_result(executeConn, fsstate->query);
-			pgfdw_report_error(ERROR, executeRes, executeConn, true, fsstate->query);
-		}
-
-		CHECK_FOR_INTERRUPTS();
-
-		res = pgfdw_exec_query(conn, buf.data);
-		if (PQresultStatus(res) != PGRES_TUPLES_OK)
-			pgfdw_report_error(ERROR, res, conn, true, buf.data);
-
-		if (PQntuples(res) == 0)
-			pgfdw_report_error(ERROR, res, conn, true, buf.data);
-
-		for (int row = 0; row < PQntuples(res); ++row)
-		{
-			if (strcmp(PQgetvalue(res, row, 0), "READY") != 0)
-			{
-				all_endpoints_ready = false;
-				break;
-			}
-		}
-
-		PQclear(res);
-
-		if (all_endpoints_ready)
-			break;
-	}
-}
-
-static void
 get_endpoints_info(PGconn *conn,
 				   int cursor_number,
 				   int session_id,
 				   List **fdw_private,
-				   int64 *token)
+				   char **token)
 {
 	StringInfoData sql_buf;
 	PGresult   *res;
 	List	   *endpoints_list;
 	char	   *foreign_username = NULL;
-	char	   *token_str = palloc0(21);        /* length 21 = length of max int64 value + '\0' */
 
 	initStringInfo(&sql_buf);
 	appendStringInfo(&sql_buf,
-					 "SELECT hostname, port, dbid, token, pg_get_userbyid(userid) FROM gp_endpoints "
+					 "SELECT hostname, port, dbid, token, pg_get_userbyid(userid), endpointname  FROM gp_endpoints "
 					 "WHERE sessionid=%d AND cursorname = 'c%d'",
 					 session_id, cursor_number);
 
-    //FIXME
-	*token = 0;
 	endpoints_list = NIL;
 
 	res = pgfdw_exec_query(conn, sql_buf.data);
@@ -3520,20 +3454,19 @@ get_endpoints_info(PGconn *conn,
 
 		endpoints_list = lappend(endpoints_list, endpoint);
 
-        //FIXME
-        //if (*token == InvalidToken)
-        //	*token = parseToken(PQgetvalue(res, row, 3));
-        //else if (*token != parseToken(PQgetvalue(res, row, 3)))
-        //	pgfdw_report_error(ERROR, res, conn, true, sql_buf.data);
+        if (*token == NULL)
+		    *token = pstrdup(PQgetvalue(res, row, 3));
+        //FIXME strncmp?
+        else if (strcmp(*token,pstrdup(PQgetvalue(res, row, 3))) != 0)
+        	pgfdw_report_error(ERROR, res, conn, true, sql_buf.data);
 
 		if (row == 0)
 			foreign_username = pstrdup(PQgetvalue(res, row, 4));
 	}
 
-	pg_lltoa(*token, token_str);
 	/* The order should be same as enum FdwScanPrivateIndex definition */
 	*fdw_private = lappend(*fdw_private, endpoints_list);
-	*fdw_private = lappend(*fdw_private, list_make1(makeString(token_str)));
+	*fdw_private = lappend(*fdw_private, list_make1(makeString(*token)));
 	*fdw_private = lappend(*fdw_private, list_make1(makeString(foreign_username)));
 
 	PQclear(res);
@@ -3573,7 +3506,6 @@ static void
 create_and_execute_parallel_cursor(ForeignScanState *node)
 {
 	int			session_id;
-	int64		token;
 	ForeignScan *foreign_scan;
 
 	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
@@ -3584,7 +3516,6 @@ create_and_execute_parallel_cursor(ForeignScanState *node)
 	get_session_id(fsstate->conn, &session_id);
 	create_parallel_cursor(node);
 	get_endpoints_info(fsstate->conn, fsstate->cursor_number, session_id,
-					   &(foreign_scan->fdw_private), &token);
+					   &(foreign_scan->fdw_private), &fsstate->token);
 	execute_parallel_cursor(node);
-	fsstate->token = token;
 }
