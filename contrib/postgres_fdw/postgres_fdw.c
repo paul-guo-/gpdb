@@ -170,6 +170,7 @@ typedef struct PgFdwScanState
 	bool		is_parallel;
 	char		*token;
 	List		*endpoints_list;
+    char        *endpointName;
 } PgFdwScanState;
 
 /*
@@ -1023,6 +1024,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 			host = list_nth(endpoint, 0);
 			port = list_nth(endpoint, 1);
 			dbid = atoi(strVal(list_nth(endpoint, 2)));
+			fsstate->endpointName = pstrdup(strVal(list_nth(endpoint, 3)));
 
 			server->options = NIL;
 			server->options = lappend(server->options, makeDefElem(pstrdup("host"), (Node *)host));
@@ -1229,7 +1231,9 @@ postgresEndForeignScan(ForeignScanState *node)
 	ReleaseConnection(fsstate->conn);
 	fsstate->conn = NULL;
     pfree(fsstate->token);
+    pfree(fsstate->endpointName);
     fsstate->token = NULL;
+    fsstate->endpointName = NULL;
 
 	/* MemoryContexts will be deleted automatically. */
 }
@@ -2228,10 +2232,8 @@ fetch_more_data(ForeignScanState *node)
 		fetch_size = 100;
 
 		if (fsstate->is_parallel)
-            //FIXME
-            Assert(false);
-			//snprintf(sql, sizeof(sql), "RETRIEVE %d FROM \""TOKEN_NAME_FORMAT_STR"\"",
-			//	fetch_size, fsstate->token);
+			snprintf(sql, sizeof(sql), "RETRIEVE %d FROM ENDPOINT %s",
+				fetch_size, fsstate->endpointName);
 		else
 			snprintf(sql, sizeof(sql), "FETCH %d FROM c%u",
 				fetch_size, fsstate->cursor_number);
@@ -3259,6 +3261,10 @@ greenplumBeginMppForeignScan(ForeignScanState *node, int eflags)
 	 * We'll save private state in node->fdw_state.
 	 */
 	fsstate = (PgFdwScanState *) palloc0(sizeof(PgFdwScanState));
+    /*
+     * endpointName is only used on segment
+     */
+    fsstate->endpointName = NULL;
 	node->fdw_state = (void *) fsstate;
 
 	/*
@@ -3442,6 +3448,7 @@ get_endpoints_info(PGconn *conn,
 		char	   *host;
 		char	   *port;
 		char	   *dbid;
+        char       *endpointName;
 		List	   *endpoint = NIL;
 
 		if (PQnfields(res) != 5)
@@ -3450,7 +3457,9 @@ get_endpoints_info(PGconn *conn,
 		host = pstrdup(PQgetvalue(res, row, 0));
 		port = pstrdup(PQgetvalue(res, row, 1));
 		dbid = pstrdup(PQgetvalue(res, row, 2));
-		endpoint = list_make3(makeString(host), makeString(port), makeString(dbid));
+		endpointName = pstrdup(PQgetvalue(res, row, 5));
+
+		endpoint = list_make4(makeString(host), makeString(port), makeString(dbid), makeString(endpointName));
 
 		endpoints_list = lappend(endpoints_list, endpoint);
 
