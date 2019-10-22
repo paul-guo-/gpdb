@@ -2,11 +2,11 @@
 -- create FDW objects
 -- ===================================================================
 -- start_ignore
-DROP EXTENSION postgres_fdw CASCADE;
-DROP TYPE user_enum CASCADE;
-DROP FUNCTION postgres_fdw_abs(int) CASCADE;
-DROP OPERATOR ===(int, int) CASCADE;
-DROP TABLE loc1;
+DROP EXTENSION IF EXISTS postgres_fdw CASCADE;
+DROP TYPE IF EXISTS user_enum CASCADE;
+DROP FUNCTION IF EXISTS postgres_fdw_abs(int) CASCADE;
+DROP OPERATOR IF EXISTS ===(int, int) CASCADE;
+DROP TABLE IF EXISTS loc1;
 -- end_ignore
 
 SET optimizer=off;

@@ -78,7 +78,7 @@ static unsigned int prep_stmt_number = 0;
 static bool xact_got_connection = false;
 
 /* prototypes of private functions */
-static PGconn *connect_pg_server(ForeignServer *server, UserMapping *user);
+static PGconn *connect_pg_server(ForeignServer *server, UserMapping *user, bool is_retrieve);
 static void disconnect_pg_server(ConnCacheEntry *entry);
 static void check_conn_params(const char **keywords, const char **values);
 static void configure_remote_session(PGconn *conn);
@@ -112,7 +112,7 @@ PGconn *
 GetConnection(ForeignServer *server, UserMapping *user,
 			  bool will_prep_stmt)
 {
-	return GetCustomConnection(server, user, will_prep_stmt, 0, true);
+	return GetCustomConnection(server, user, will_prep_stmt, 0, true, false);
 }
 
 /*
@@ -125,7 +125,7 @@ GetConnection(ForeignServer *server, UserMapping *user,
  */
 PGconn *
 GetCustomConnection(ForeignServer *server, UserMapping *user,
-			  bool will_prep_stmt, int dbid, bool reusable)
+			  bool will_prep_stmt, int dbid, bool reusable, bool is_retrieve)
 {
 	bool		found;
 	ConnCacheEntry *entry;
@@ -232,7 +232,7 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 			GetSysCacheHashValue1(USERMAPPINGOID, ObjectIdGetDatum(umoid));
 
 		/* Now try to make the connection */
-		entry->conn = connect_pg_server(server, user);
+		entry->conn = connect_pg_server(server, user, is_retrieve);
 		elog(DEBUG3, "new postgres_fdw connection %p for server \"%s\"",
 			 entry->conn, server->servername);
 	}
@@ -240,7 +240,8 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 	/*
 	 * Start a new transaction or subtransaction if needed.
 	 */
-	begin_remote_xact(entry);
+	if (!is_retrieve)
+		begin_remote_xact(entry);
 
 	/* Remember if caller will prepare statements */
 	entry->have_prep_stmt |= will_prep_stmt;
@@ -252,7 +253,7 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
  * Connect to remote server using specified server and user mapping properties.
  */
 static PGconn *
-connect_pg_server(ForeignServer *server, UserMapping *user)
+connect_pg_server(ForeignServer *server, UserMapping *user, bool is_retrieve)
 {
 	PGconn	   *volatile conn = NULL;
 
@@ -327,7 +328,8 @@ connect_pg_server(ForeignServer *server, UserMapping *user)
 				   errhint("Target server's authentication method must be changed.")));
 
 		/* Prepare new session for use */
-		configure_remote_session(conn);
+		if (!is_retrieve)
+			configure_remote_session(conn);
 
 		pfree(keywords);
 		pfree(values);

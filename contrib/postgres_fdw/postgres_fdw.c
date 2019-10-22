@@ -49,6 +49,7 @@ PG_MODULE_MAGIC;
 
 /* Default CPU cost to process 1 row (above and beyond cpu_tuple_cost). */
 #define DEFAULT_FDW_TUPLE_COST		0.01
+#define GP_ENDPOINT_COLUMN_NUM			6
 
 /*
  * FDW-specific planner information kept in RelOptInfo.fdw_private for a
@@ -170,7 +171,7 @@ typedef struct PgFdwScanState
 	bool		is_parallel;
 	char		*token;
 	List		*endpoints_list;
-    char        *endpointName;
+	char		*endpointName;
 } PgFdwScanState;
 
 /*
@@ -350,8 +351,6 @@ static int greenplumCheckIsGreenplum(ForeignServer *server, UserMapping *user);
 static int greenplumGetRemoteMppSize(ForeignServer *server, UserMapping *user);
 static void create_custom_cursor(ForeignScanState *node, const char *cursor_sql);
 static void get_endpoints_info(PGconn *conn, int cursor_number, int session_id, List **endpoints_list, char **token);
-static void create_and_execute_parallel_cursor(ForeignScanState *node);
-static void execute_parallel_cursor(ForeignScanState *node);
 static void create_parallel_cursor(ForeignScanState *node);
 
 /*
@@ -1039,7 +1038,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 			user->options = lappend(user->options, makeDefElem(pstrdup("user"), (Node *)foreign_username));
 			user->options = lappend(user->options, makeDefElem(pstrdup("password"), (Node *)makeString(fsstate->token)));
 
-			//fsstate->conn = GetCustomConnection(server, user, false, dbid, true);
+			fsstate->conn = GetCustomConnection(server, user, false, dbid, false, true);
 		}
 	}
 
@@ -1230,10 +1229,16 @@ postgresEndForeignScan(ForeignScanState *node)
 	/* Release remote connection */
 	ReleaseConnection(fsstate->conn);
 	fsstate->conn = NULL;
-    pfree(fsstate->token);
-    pfree(fsstate->endpointName);
-    fsstate->token = NULL;
-    fsstate->endpointName = NULL;
+	if (fsstate->token)
+	{
+	  pfree(fsstate->token);
+	  fsstate->token = NULL;
+	}
+	if (fsstate->endpointName)
+	{
+		pfree(fsstate->endpointName);
+		fsstate->endpointName = NULL;
+	}
 
 	/* MemoryContexts will be deleted automatically. */
 }
@@ -3261,10 +3266,10 @@ greenplumBeginMppForeignScan(ForeignScanState *node, int eflags)
 	 * We'll save private state in node->fdw_state.
 	 */
 	fsstate = (PgFdwScanState *) palloc0(sizeof(PgFdwScanState));
-    /*
-     * endpointName is only used on segment
-     */
-    fsstate->endpointName = NULL;
+	/*
+	 * endpointName is only used on segment
+	 */
+	fsstate->endpointName = NULL;
 	node->fdw_state = (void *) fsstate;
 
 	/*
@@ -3288,7 +3293,7 @@ greenplumBeginMppForeignScan(ForeignScanState *node, int eflags)
 	 * Get connection to the foreign server.  Connection manager will
 	 * establish new connection if necessary.
 	 */
-	fsstate->conn = GetCustomConnection(server, user, false, 0, false);
+	fsstate->conn = GetConnection(server, user, false);
 
 	/* Assign a unique ID for my cursor */
 	fsstate->cursor_number = GetCursorNumber(fsstate->conn);
@@ -3353,15 +3358,13 @@ greenplumBeginMppForeignScan(ForeignScanState *node, int eflags)
 		fsstate->param_values = NULL;
 
 	if (!fsstate->cursor_exists)
-		create_and_execute_parallel_cursor(node);
+		create_parallel_cursor(node);
 }
 
 static void
 greenplumEndMppForeignScan(ForeignScanState *node)
 {
 	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
-	PGresult *res;
-	StringInfoData buf;
 
 	/* if fsstate is NULL, we are in EXPLAIN; nothing to do */
 	if (fsstate == NULL)
@@ -3370,28 +3373,7 @@ greenplumEndMppForeignScan(ForeignScanState *node)
 	/* Close the cursor if open, to prevent accumulation of cursors */
 	if (fsstate->cursor_exists)
 	{
-		if (PQisBusy(fsstate->conn))
-		{
-			/* Limit nodes need to end the query. NOTE: avoid cancelling by
-			 * mistake, for instance, not all endpoints are retrieved */
-			char errbuf[256];
-			memset(errbuf, 0, sizeof(errbuf));
-
-			PGcancel *cn = PQgetCancel(fsstate->conn);
-			PQcancel(cn, errbuf, 256);
-		}
-		else
-		{
-			initStringInfo(&buf);
-			appendStringInfo(&buf, "EXECUTE PARALLEL CURSOR c%u;",
-							 fsstate->cursor_number);
-			res = PQgetResult(fsstate->conn);
-
-			if (PQresultStatus(res) != PGRES_COMMAND_OK)
-				pgfdw_report_error(ERROR, res, fsstate->conn, true, buf.data);
-
-			close_cursor(fsstate->conn, fsstate->cursor_number);
-		}
+        close_cursor(fsstate->conn, fsstate->cursor_number);
 	}
 
 	/* Release remote connection */
@@ -3448,10 +3430,10 @@ get_endpoints_info(PGconn *conn,
 		char	   *host;
 		char	   *port;
 		char	   *dbid;
-        char       *endpointName;
+		char	   *endpointName;
 		List	   *endpoint = NIL;
 
-		if (PQnfields(res) != 5)
+		if (PQnfields(res) != GP_ENDPOINT_COLUMN_NUM)
 			pgfdw_report_error(ERROR, res, conn, true, sql_buf.data);
 
 		host = pstrdup(PQgetvalue(res, row, 0));
@@ -3463,11 +3445,11 @@ get_endpoints_info(PGconn *conn,
 
 		endpoints_list = lappend(endpoints_list, endpoint);
 
-        if (*token == NULL)
-		    *token = pstrdup(PQgetvalue(res, row, 3));
-        //FIXME strncmp?
-        else if (strcmp(*token,pstrdup(PQgetvalue(res, row, 3))) != 0)
-        	pgfdw_report_error(ERROR, res, conn, true, sql_buf.data);
+		if (*token == NULL)
+			*token = pstrdup(PQgetvalue(res, row, 3));
+		//FIXME strncmp?
+		else if (strcmp(*token,pstrdup(PQgetvalue(res, row, 3))) != 0)
+			pgfdw_report_error(ERROR, res, conn, true, sql_buf.data);
 
 		if (row == 0)
 			foreign_username = pstrdup(PQgetvalue(res, row, 4));
@@ -3485,46 +3467,17 @@ static void
 create_parallel_cursor(ForeignScanState *node)
 {
 	StringInfoData buf;
+	int			session_id;
+	ForeignScan *foreign_scan;
 	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
 
 	initStringInfo(&buf);
-	appendStringInfo(&buf, "DECLARE c%u PARALLEL CURSOR FOR\n%s",
+	appendStringInfo(&buf, "DECLARE c%u PARALLEL RETRIEVE CURSOR FOR\n%s",
 					 fsstate->cursor_number, fsstate->query);
 
 	create_custom_cursor(node, buf.data);
-}
-
-static void
-execute_parallel_cursor(ForeignScanState *node)
-{
-	StringInfoData buf;
-	PGconn	   *conn;
-	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
-
-	conn = fsstate->conn;
-
-	initStringInfo(&buf);
-	appendStringInfo(&buf, "EXECUTE PARALLEL CURSOR c%u", fsstate->cursor_number);
-
-	/* We don't want to block main thread, so we don't use PQexec for results. */
-	if (!PQsendQuery(conn, buf.data))
-		pgfdw_report_error(ERROR, NULL, conn, false, buf.data);
-}
-
-static void
-create_and_execute_parallel_cursor(ForeignScanState *node)
-{
-	int			session_id;
-	ForeignScan *foreign_scan;
-
-	PgFdwScanState *fsstate = (PgFdwScanState *) node->fdw_state;
-
 	foreign_scan = (ForeignScan *) node->ss.ps.plan;
-
-	/* get session id for fetching endpoints info of parallel cursor */
 	get_session_id(fsstate->conn, &session_id);
-	create_parallel_cursor(node);
 	get_endpoints_info(fsstate->conn, fsstate->cursor_number, session_id,
 					   &(foreign_scan->fdw_private), &fsstate->token);
-	execute_parallel_cursor(node);
 }
