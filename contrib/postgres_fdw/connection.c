@@ -62,7 +62,6 @@ typedef struct ConnCacheEntry
 	bool		invalidated;	/* true if reconnect is pending */
 	uint32		server_hashvalue;	/* hash value of foreign server OID */
 	uint32		mapping_hashvalue;	/* hash value of user mapping OID */
-	bool 		reusable;			/* if the connection is reusable */
 } ConnCacheEntry;
 
 /*
@@ -112,7 +111,7 @@ PGconn *
 GetConnection(ForeignServer *server, UserMapping *user,
 			  bool will_prep_stmt)
 {
-	return GetCustomConnection(server, user, will_prep_stmt, 0, true, false);
+	return GetCustomConnection(server, user, will_prep_stmt, 0, false);
 }
 
 /*
@@ -125,7 +124,7 @@ GetConnection(ForeignServer *server, UserMapping *user,
  */
 PGconn *
 GetCustomConnection(ForeignServer *server, UserMapping *user,
-			  bool will_prep_stmt, int dbid, bool reusable, bool is_retrieve)
+			  bool will_prep_stmt, int dbid, bool is_retrieve)
 {
 	bool		found;
 	ConnCacheEntry *entry;
@@ -169,14 +168,13 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 	 * Find or create cached entry for requested connection.
 	 */
 	entry = hash_search(ConnectionHash, &key, HASH_ENTER, &found);
-	if (!found || !entry->reusable || !reusable)
+	if (!found)
 	{
 		/*
 		 * We need only clear "conn" here; remaining fields will be filled
 		 * later when "conn" is set.
 		 */
 		entry->conn = NULL;
-		entry->reusable = reusable;
 	}
 
 	/* Reject further use of connections which failed abort cleanup. */
@@ -873,16 +871,6 @@ pgfdw_xact_callback(XactEvent event, void *arg)
 		if (PQstatus(entry->conn) != CONNECTION_OK ||
 			PQtransactionStatus(entry->conn) != PQTRANS_IDLE ||
 			entry->changing_xact_state)
-		{
-			elog(DEBUG3, "discarding connection %p", entry->conn);
-			disconnect_pg_server(entry);
-		}
-
-		/*
-		 * Close the not reusable connection, we don't leave it there for
-		 * sharing
-		 */
-		if (!entry->reusable)
 		{
 			elog(DEBUG3, "discarding connection %p", entry->conn);
 			disconnect_pg_server(entry);

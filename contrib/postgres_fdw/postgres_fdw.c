@@ -1038,7 +1038,7 @@ postgresBeginForeignScan(ForeignScanState *node, int eflags)
 			user->options = lappend(user->options, makeDefElem(pstrdup("user"), (Node *)foreign_username));
 			user->options = lappend(user->options, makeDefElem(pstrdup("password"), (Node *)makeString(fsstate->token)));
 
-			fsstate->conn = GetCustomConnection(server, user, false, dbid, false, true);
+			fsstate->conn = GetCustomConnection(server, user, false, dbid, true);
 		}
 	}
 
