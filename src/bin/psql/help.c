@@ -137,6 +137,7 @@ usage(unsigned short int pager)
 	env = getenv("PGUSER");
 	if (!env)
 		env = user;
+	fprintf(output, _("      --utility-mode       utility mode connection (Use by care else may cause data inconsistency).\n"));
 	fprintf(output, _("  -U, --username=USERNAME  database user name (default: \"%s\")\n"), env);
 	fprintf(output, _("  -w, --no-password        never prompt for password\n"));
 	fprintf(output, _("  -W, --password           force password prompt (should happen automatically)\n"));

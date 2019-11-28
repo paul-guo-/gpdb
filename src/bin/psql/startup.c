@@ -79,6 +79,7 @@ struct adhoc_opts
 	bool		no_psqlrc;
 	bool		single_txn;
 	bool		list_dbs;
+	bool		utility_conn;
 	SimpleActionList actions;
 };
 
@@ -174,6 +175,23 @@ main(int argc, char *argv[])
 	SetVariable(pset.vars, "PROMPT3", DEFAULT_PROMPT3);
 
 	parse_psql_options(argc, argv, &options);
+
+	/* gpdb specific: Update PGOPTIONS to enable utility mode. */
+	if (options.utility_conn)
+	{
+		char *ori_pgoptions;
+		char *new_pgoptions;
+
+		ori_pgoptions = getenv("PGOPTIONS");
+		new_pgoptions = psprintf("PGOPTIONS=-c gp_session_role=utility %s",
+								 ori_pgoptions ? ori_pgoptions : "");
+		if (putenv(new_pgoptions) != 0)
+		{
+			fprintf(stderr, _("can not set env variable to enable utility mode"));
+			exit(EXIT_FAILURE);
+		}
+	}
+
 
 	/*
 	 * If no action was specified and we're in non-interactive mode, treat it
@@ -445,6 +463,7 @@ parse_psql_options(int argc, char *argv[], struct adhoc_opts * options)
 		{"expanded", no_argument, NULL, 'x'},
 		{"no-psqlrc", no_argument, NULL, 'X'},
 		{"help", optional_argument, NULL, 1},
+		{"utility-mode", no_argument, NULL, 1000}, /* gpdb specific. Starts from 1000 */
 		{NULL, 0, NULL, 0}
 	};
 
@@ -642,6 +661,9 @@ parse_psql_options(int argc, char *argv[], struct adhoc_opts * options)
 
 					exit(EXIT_SUCCESS);
 				}
+				break;
+			case 1000:
+				options->utility_conn = true;
 				break;
 			default:
 		unknown_option:
