@@ -76,6 +76,8 @@ DtxStateToString(DtxState state)
 			return "Notifying Abort (Some Prepared)";
 		case DTX_STATE_NOTIFYING_ABORT_PREPARED:
 			return "Notifying Abort Prepared";
+		case DTX_STATE_RETRY_COMMIT_ONEPHASE:
+			return "Retry Commit (One Phase)";
 		case DTX_STATE_RETRY_COMMIT_PREPARED:
 			return "Retry Commit Prepared";
 		case DTX_STATE_RETRY_ABORT_PREPARED:
@@ -104,6 +106,8 @@ DtxProtocolCommandToString(DtxProtocolCommand command)
 			return "Distributed Commit Prepared";
 		case DTX_PROTOCOL_COMMAND_ABORT_PREPARED:
 			return "Distributed Abort Prepared";
+		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_ONEPHASE:
+			return "Retry Distributed Commit (one-phase)";
 		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED:
 			return "Retry Distributed Commit Prepared";
 		case DTX_PROTOCOL_COMMAND_RETRY_ABORT_PREPARED:
@@ -138,10 +142,10 @@ DtxContextToString(DtxContext context)
 			return "Segment Entry DB Singleton";
 		case DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT:
 			return "Segment Auto-Commit Implicit";
-		case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
-			return "Segment Two-Phase Explicit Writer";
-		case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
-			return "Segment Two-Phase Implicit Writer";
+		case DTX_CONTEXT_QE_EXPLICIT_WRITER:
+			return "Segment Explicit Writer";
+		case DTX_CONTEXT_QE_IMPLICIT_WRITER:
+			return "Segment Implicit Writer";
 		case DTX_CONTEXT_QE_READER:
 			return "Segment Reader";
 		case DTX_CONTEXT_QE_PREPARED:

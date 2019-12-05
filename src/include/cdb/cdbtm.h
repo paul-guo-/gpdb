@@ -75,6 +75,7 @@ typedef enum
 	 * _PREPARED means that the QE processes have done the first phase of two-phase commit.
 	 */
 	DTX_STATE_NOTIFYING_ABORT_PREPARED,
+	DTX_STATE_RETRY_COMMIT_ONEPHASE,
 	DTX_STATE_RETRY_COMMIT_PREPARED,
 	DTX_STATE_RETRY_ABORT_PREPARED
 }	DtxState;
@@ -99,6 +100,7 @@ typedef enum
 	DTX_PROTOCOL_COMMAND_COMMIT_PREPARED,
 	/* for explicit transaction that doesn't write any xlog */
 	DTX_PROTOCOL_COMMAND_ABORT_PREPARED,
+	DTX_PROTOCOL_COMMAND_RETRY_COMMIT_ONEPHASE,
 	DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED,
 	DTX_PROTOCOL_COMMAND_RETRY_ABORT_PREPARED,
 	DTX_PROTOCOL_COMMAND_RECOVERY_COMMIT_PREPARED,
@@ -158,7 +160,7 @@ typedef enum
 	 * Note that this state can happen even if there are no writer queries (because this
 	 *   state is entered when the BEGIN statement is processed).
 	 */
-	DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER,
+	DTX_CONTEXT_QE_EXPLICIT_WRITER,
 
 	/**
 	 * On a QE that is the root of a query, this context means that the
@@ -168,7 +170,7 @@ typedef enum
 	 * Same as _AUTO_COMMIT_IMPLICIT except that we need a two-phase commit because
 	 *   of the dirty data.
 	 */
-	DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER,
+	DTX_CONTEXT_QE_IMPLICIT_WRITER,
 
 	/**
 	 * On a QE that is not the root of a query, this context is used.  This can happen

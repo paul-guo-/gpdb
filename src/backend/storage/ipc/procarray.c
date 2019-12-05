@@ -2256,8 +2256,8 @@ GetSnapshotData(Snapshot snapshot, DtxContext distributedTransactionContext)
 	 * GP: Distributed snapshot.
 	 */
 	Assert(distributedTransactionContext == DTX_CONTEXT_QD_DISTRIBUTED_CAPABLE ||
-		   distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
-		   distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER ||
+		   distributedTransactionContext == DTX_CONTEXT_QE_EXPLICIT_WRITER ||
+		   distributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER ||
 		   distributedTransactionContext == DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT ||
 		   distributedTransactionContext == DTX_CONTEXT_QE_ENTRY_DB_SINGLETON ||
 		   distributedTransactionContext == DTX_CONTEXT_LOCAL_ONLY ||
@@ -2267,8 +2267,8 @@ GetSnapshotData(Snapshot snapshot, DtxContext distributedTransactionContext)
 	SnapshotResetDslm(snapshot);
 
 	/* executor copy distributed snapshot from QEDtxContextInfo */
-	if ((distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
-		 distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER ||
+	if ((distributedTransactionContext == DTX_CONTEXT_QE_EXPLICIT_WRITER ||
+		 distributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER ||
 		 distributedTransactionContext == DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT ||
 		 distributedTransactionContext == DTX_CONTEXT_QE_ENTRY_DB_SINGLETON ||
 		 distributedTransactionContext == DTX_CONTEXT_QE_READER) &&
@@ -2590,8 +2590,8 @@ GetSnapshotData(Snapshot snapshot, DtxContext distributedTransactionContext)
 	 * into the shared snapshot. Note: we need to use the shared local
 	 * snapshot for the "Local Implicit using Distributed Snapshot" case, too.
 	 */
-	if (distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
-		distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER ||
+	if (distributedTransactionContext == DTX_CONTEXT_QE_EXPLICIT_WRITER ||
+		distributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER ||
 		distributedTransactionContext == DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT)
 	{
 		Assert(SharedLocalSnapshotSlot != NULL);
@@ -3192,8 +3192,8 @@ HaveVirtualXIDsDelayingChkpt(VirtualTransactionId *vxids, int nvxids)
 void
 UpdateSerializableCommandId(CommandId curcid)
 {
-	if ((DistributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
-		 DistributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER) &&
+	if ((DistributedTransactionContext == DTX_CONTEXT_QE_EXPLICIT_WRITER ||
+		 DistributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER) &&
 		 SharedLocalSnapshotSlot != NULL &&
 		 FirstSnapshotSet)
 	{

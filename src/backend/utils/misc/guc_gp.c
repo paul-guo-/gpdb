@@ -153,7 +153,7 @@ bool		Debug_datumstream_write_use_small_initial_buffers = false;
 bool		gp_create_table_random_default_distribution = true;
 bool		gp_allow_non_uniform_partitioning_ddl = true;
 bool		gp_enable_exchange_default_partition = false;
-int			dtx_phase2_retry_count = 0;
+int			dtx_retry_count = 0;
 
 bool		log_dispatch_stats = false;
 
@@ -448,6 +448,7 @@ static const struct config_enum_entry debug_dtm_action_protocol_options[] = {
 	{"commit_onephase", DTX_PROTOCOL_COMMAND_COMMIT_ONEPHASE},
 	{"commit_prepared", DTX_PROTOCOL_COMMAND_COMMIT_PREPARED},
 	{"abort_prepared", DTX_PROTOCOL_COMMAND_ABORT_PREPARED},
+	{"retry_commit_onephase", DTX_PROTOCOL_COMMAND_RETRY_COMMIT_ONEPHASE},
 	{"retry_commit_prepared", DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED},
 	{"retry_abort_prepared", DTX_PROTOCOL_COMMAND_RETRY_ABORT_PREPARED},
 	{"recovery_commit_prepared", DTX_PROTOCOL_COMMAND_RECOVERY_COMMIT_PREPARED},
@@ -3992,12 +3993,12 @@ struct config_int ConfigureNamesInt_gp[] =
 	},
 
 	{
-		{"dtx_phase2_retry_count", PGC_SUSET, DEVELOPER_OPTIONS,
-			gettext_noop("Maximum number of retries during two phase commit after which master PANICs."),
+		{"dtx_retry_count", PGC_SUSET, DEVELOPER_OPTIONS,
+			gettext_noop("Maximum number of retries during one or two phase commit after which master PANICs."),
 			NULL,
 			GUC_SUPERUSER_ONLY |  GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE
 		},
-		&dtx_phase2_retry_count,
+		&dtx_retry_count,
 		10, 0, INT_MAX,
 		NULL, NULL, NULL
 	},

@@ -2201,8 +2201,8 @@ SetSharedTransactionId_writer(DtxContext distributedTransactionContext)
 	Assert(LWLockHeldByMe(SharedLocalSnapshotSlot->slotLock));
 
 	Assert(distributedTransactionContext == DTX_CONTEXT_QD_DISTRIBUTED_CAPABLE ||
-		   distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
-		   distributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER ||
+		   distributedTransactionContext == DTX_CONTEXT_QE_EXPLICIT_WRITER ||
+		   distributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER ||
 		   distributedTransactionContext == DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT);
 
 	ereportif(Debug_print_full_dtm, LOG,
@@ -2367,8 +2367,8 @@ StartTransaction(void)
 		}
 		break;
 
-		case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
-		case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+		case DTX_CONTEXT_QE_EXPLICIT_WRITER:
+		case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 		case DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT:
 		{
 			/* If we're running in test-mode insert a delay in writer. */
@@ -2402,9 +2402,9 @@ StartTransaction(void)
 			MyTmGxact->distribTimeStamp = QEDtxContextInfo.distributedTimeStamp;
 
 			if (DistributedTransactionContext ==
-				DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER ||
+				DTX_CONTEXT_QE_EXPLICIT_WRITER ||
 				DistributedTransactionContext ==
-				DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER)
+				DTX_CONTEXT_QE_IMPLICIT_WRITER)
 			{
 				Assert(QEDtxContextInfo.distributedTimeStamp != 0);
 				Assert(QEDtxContextInfo.distributedXid !=
@@ -3563,7 +3563,7 @@ StartTransactionCommand(void)
 		case TBLOCK_DEFAULT:
 			StartTransaction();
 
-			if (DistributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER)
+			if (DistributedTransactionContext == DTX_CONTEXT_QE_IMPLICIT_WRITER)
 			{
 				/*
 				 * Pretend we executed an explicit BEGIN.
@@ -6294,8 +6294,8 @@ EndLocalDistribXact(bool isCommit)
 	 */
 	switch (DistributedTransactionContext)
 	{
-		case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
-		case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+		case DTX_CONTEXT_QE_EXPLICIT_WRITER:
+		case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 		case DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT:
 			LocalDistribXact_ChangeState(MyProc->pgprocno,
 										 isCommit ?

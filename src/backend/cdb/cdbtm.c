@@ -73,7 +73,7 @@ typedef struct TmControlBlock
 
 extern bool Test_print_direct_dispatch_info;
 
-#define DTX_PHASE2_SLEEP_TIME_BETWEEN_RETRIES_MSECS 100
+#define DTX_SLEEP_TIME_BETWEEN_RETRIES_MSECS 100
 
 volatile DistributedTransactionTimeStamp *shmDistribTimeStamp;
 volatile DistributedTransactionId *shmGIDSeq;
@@ -460,6 +460,8 @@ doNotifyingOnePhaseCommit(void)
 {
 	bool		succeeded;
 	volatile int savedInterruptHoldoffCount;
+	int			retry = 0;
+	MemoryContext oldcontext = CurrentMemoryContext;;
 
 	if (MyTmGxactLocal->dtxSegments == NIL)
 		return;
@@ -471,12 +473,83 @@ doNotifyingOnePhaseCommit(void)
 
 	savedInterruptHoldoffCount = InterruptHoldoffCount;
 
-	succeeded = currentDtxDispatchProtocolCommand(DTX_PROTOCOL_COMMAND_COMMIT_ONEPHASE, true);
+	PG_TRY();
+	{
+		succeeded = currentDtxDispatchProtocolCommand(DTX_PROTOCOL_COMMAND_COMMIT_ONEPHASE, true);
+	}
+	PG_CATCH();
+	{
+		/*
+		 * restore the previous value, which is reset to 0 in errfinish.
+		 */
+		MemoryContextSwitchTo(oldcontext);
+		InterruptHoldoffCount = savedInterruptHoldoffCount;
+		succeeded = false;
+		FlushErrorState();
+	}
+	PG_END_TRY();
+
 	if (!succeeded)
 	{
 		Assert(MyTmGxactLocal->state == DTX_STATE_NOTIFYING_ONE_PHASE_COMMIT);
-		elog(ERROR, "one phase commit failed");
+		ereport(DTM_DEBUG5,
+				(errmsg("marking retry needed for transaction "
+						"'One Phase Commit' to one segment"),
+				TM_ERRDETAIL));
+
+		setCurrentDtxState(DTX_STATE_RETRY_COMMIT_ONEPHASE);
+		setDistributedTransactionContext(DTX_CONTEXT_QD_RETRY_PHASE_2);
 	}
+
+	while (!succeeded && dtx_retry_count > retry++)
+	{
+		/*
+		 * sleep for brief duration before retry, to increase chances of
+		 * success if first try failed due to segment panic/restart. Otherwise
+		 * all the retries complete in less than a sec, defeating the purpose
+		 * of the retry.
+		 */
+		pg_usleep(DTX_SLEEP_TIME_BETWEEN_RETRIES_MSECS * 1000);
+
+		ereport(WARNING,
+				(errmsg("the transaction 'One Phase Commit' "
+						"failed to one segment. Retrying ... try %d", retry),
+				TM_ERRDETAIL));
+
+		/*
+		 * We must succeed in delivering the commit to all segment instances,
+		 * or any failed segment instances must be marked INVALID.
+		 */
+		elog(NOTICE, "Releasing segworker group to retry.");
+		ResetAllGangs();
+
+		savedInterruptHoldoffCount = InterruptHoldoffCount;
+		PG_TRY();
+		{
+			succeeded = currentDtxDispatchProtocolCommand(DTX_PROTOCOL_COMMAND_RETRY_COMMIT_ONEPHASE, true);
+		}
+		PG_CATCH();
+		{
+			/*
+			 * restore the previous value, which is reset to 0 in errfinish.
+			 */
+			MemoryContextSwitchTo(oldcontext);
+			InterruptHoldoffCount = savedInterruptHoldoffCount;
+			succeeded = false;
+			FlushErrorState();
+		}
+		PG_END_TRY();
+	}
+
+	/* No need to panic since the databae is consistent. */
+	if (!succeeded)
+		ereport(ERROR,
+				(errmsg("unable to complete 'One Phase Commit'"),
+				TM_ERRDETAIL));
+
+	ereport(DTM_DEBUG5,
+			(errmsg("the transaction 'One Phase Commit' succeeded."),
+			TM_ERRDETAIL));
 }
 
 static void
@@ -532,7 +605,7 @@ doNotifyingCommitPrepared(void)
 		setDistributedTransactionContext(DTX_CONTEXT_QD_RETRY_PHASE_2);
 	}
 
-	while (!succeeded && dtx_phase2_retry_count > retry++)
+	while (!succeeded && dtx_retry_count > retry++)
 	{
 		/*
 		 * sleep for brief duration before retry, to increase chances of
@@ -540,7 +613,7 @@ doNotifyingCommitPrepared(void)
 		 * all the retries complete in less than a sec, defeating the purpose
 		 * of the retry.
 		 */
-		pg_usleep(DTX_PHASE2_SLEEP_TIME_BETWEEN_RETRIES_MSECS * 1000);
+		pg_usleep(DTX_SLEEP_TIME_BETWEEN_RETRIES_MSECS * 1000);
 
 		ereport(WARNING,
 				(errmsg("the distributed transaction 'Commit Prepared' broadcast "
@@ -599,7 +672,7 @@ retryAbortPrepared(void)
 	volatile int savedInterruptHoldoffCount;
 	MemoryContext oldcontext = CurrentMemoryContext;;
 
-	while (!succeeded && dtx_phase2_retry_count > retry++)
+	while (!succeeded && dtx_retry_count > retry++)
 	{
 		/*
 		 * By deallocating the gang, we will force a new gang to connect to
@@ -615,7 +688,7 @@ retryAbortPrepared(void)
 			 * all the retries complete in less than a sec, defeating the purpose
 			 * of the retry.
 			 */
-			pg_usleep(DTX_PHASE2_SLEEP_TIME_BETWEEN_RETRIES_MSECS * 1000);
+			pg_usleep(DTX_SLEEP_TIME_BETWEEN_RETRIES_MSECS * 1000);
 		}
 
 		ResetAllGangs();
@@ -1465,7 +1538,7 @@ setupRegularDtxContext(void)
 			/* Continue in this context.  Do not touch QEDtxContextInfo, etc. */
 			break;
 
-		case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
+		case DTX_CONTEXT_QE_EXPLICIT_WRITER:
 			/* Allow this for copy...???  Do not touch QEDtxContextInfo, etc. */
 			break;
 
@@ -1478,7 +1551,7 @@ setupRegularDtxContext(void)
 				 * DTX_CONTEXT_QD_RETRY_PHASE_2,
 				 * DTX_CONTEXT_QE_ENTRY_DB_SINGLETON,
 				 * DTX_CONTEXT_QE_AUTO_COMMIT_IMPLICIT,
-				 * DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER,
+				 * DTX_CONTEXT_QE_IMPLICIT_WRITER,
 				 * DTX_CONTEXT_QE_READER, DTX_CONTEXT_QE_PREPARED
 				 */
 
@@ -1674,12 +1747,12 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 					 * create the transactions to influence the behavior of
 					 * StartTransaction.
 					 */
-					setDistributedTransactionContext(DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER);
+					setDistributedTransactionContext(DTX_CONTEXT_QE_EXPLICIT_WRITER);
 
 					doQEDistributedExplicitBegin();
 				}
 				else
-					setDistributedTransactionContext(DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER);
+					setDistributedTransactionContext(DTX_CONTEXT_QE_IMPLICIT_WRITER);
 			}
 			else if (haveDistributedSnapshot)
 			{
@@ -1713,7 +1786,7 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 			}
 			break;
 
-		case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+		case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 /*
 		elog(NOTICE, "We should have left this transition state '%s' at the end of the previous command...",
 			 DtxContextToString(DistributedTransactionContext));
@@ -1731,7 +1804,7 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 				 DtxContextToString(DistributedTransactionContext));
 			break;
 
-		case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
+		case DTX_CONTEXT_QE_EXPLICIT_WRITER:
 			Assert(IsTransactionOrTransactionBlock());
 			break;
 
@@ -1875,14 +1948,9 @@ performDtxProtocolPrepare(const char *gid)
 static void
 performDtxProtocolCommitOnePhase(const char *gid)
 {
-	DistributedTransactionTimeStamp distribTimeStamp;
-	DistributedTransactionId gxid;
 	elog(DTM_DEBUG5,
 		 "performDtxProtocolCommitOnePhase going to call CommitTransaction for distributed transaction %s", gid);
 
-	dtxCrackOpenGid(gid, &distribTimeStamp, &gxid);
-	Assert(gxid == getDistributedTransactionId());
-	Assert(distribTimeStamp == getDistributedTransactionTimestamp());
 	MyTmGxactLocal->isOnePhaseCommit = true;
 
 	StartTransactionCommand();
@@ -1898,6 +1966,34 @@ performDtxProtocolCommitOnePhase(const char *gid)
 
 	finishDistributedTransactionContext("performDtxProtocolCommitOnePhase -- Commit onephase", false);
 	MyProc->localDistribXactData.state = LOCALDISTRIBXACT_STATE_NONE;
+}
+
+static void
+performDtxProtocolRetryCommitOnePhase(const char *gid)
+{
+	//TransactionId xid;
+
+	PG_TRY();
+	{
+		wait_for_mirror();
+		/*
+		 * TODO:
+		 * Now check if gid/xid is committed or not.
+		 * If yes, succeeds,
+		 * If no, fail.
+		 * Concern: The clog info could disappear after vacuum so it is possible
+		 * that we could not find the gid/xid info in a short window though
+		 * the possibility is rare.
+		 *
+		 * Refer DistributedLog_CommittedCheck() to get xid from gid,
+		 * Refer TransactionIdDidCommit() to get the transaction status.
+		 */
+	}
+	PG_CATCH();
+	{
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
 }
 
 /**
@@ -2008,8 +2104,8 @@ performDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 					elog(ERROR, "Distributed transaction %s not found", gid);
 					break;
 
-				case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
-				case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+				case DTX_CONTEXT_QE_EXPLICIT_WRITER:
+				case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 					if (dtxProtocolCommand == DTX_PROTOCOL_COMMAND_COMMIT_ONEPHASE)
 						performDtxProtocolCommitOnePhase(gid);
 					else
@@ -2049,8 +2145,8 @@ performDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 					AbortOutOfAnyTransaction();
 					break;
 
-				case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
-				case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+				case DTX_CONTEXT_QE_EXPLICIT_WRITER:
+				case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 					AbortOutOfAnyTransaction();
 					break;
 
@@ -2086,6 +2182,11 @@ performDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 			performDtxProtocolAbortPrepared(gid, /* raiseErrorIfNotFound */ true);
 			break;
 
+		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_ONEPHASE:
+			requireDistributedTransactionContext(DTX_CONTEXT_LOCAL_ONLY);
+			performDtxProtocolRetryCommitOnePhase(gid);
+			break;
+
 		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED:
 			requireDistributedTransactionContext(DTX_CONTEXT_LOCAL_ONLY);
 			performDtxProtocolCommitPrepared(gid, /* raiseErrorIfNotFound */ false);
@@ -2118,13 +2219,13 @@ performDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 					setupQEDtxContext(contextInfo);
 					StartTransactionCommand();
 					break;
-				case DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER:
+				case DTX_CONTEXT_QE_IMPLICIT_WRITER:
 
 					/*
 					 * We already marked this QE to be writer, and transaction
 					 * is open.
 					 */
-				case DTX_CONTEXT_QE_TWO_PHASE_EXPLICIT_WRITER:
+				case DTX_CONTEXT_QE_EXPLICIT_WRITER:
 				case DTX_CONTEXT_QE_READER:
 					break;
 				default:
