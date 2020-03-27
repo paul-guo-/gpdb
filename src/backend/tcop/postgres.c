@@ -4468,6 +4468,8 @@ check_forbidden_in_gpdb_handlers(char firstchar)
 }
 
 
+extern  void performDtxProtocolPrepare(const char *gid);
+
 /* ----------------------------------------------------------------
  * PostgresMain
  *	   postgres main loop -- all backends, interactive or otherwise start here
@@ -4488,6 +4490,7 @@ PostgresMain(int argc, char *argv[],
 	StringInfoData input_message;
 	sigjmp_buf	local_sigjmp_buf;
 	volatile bool send_ready_for_query = true;
+	volatile bool query_prepared = false;
 	bool		disable_idle_in_transaction_timeout = false;
 
 	/*
@@ -4983,7 +4986,8 @@ PostgresMain(int argc, char *argv[],
 				pgstat_report_activity(STATE_IDLE, NULL);
 			}
 
-			ReadyForQuery(whereToSendOutput);
+			ReadyForQuery(whereToSendOutput, query_prepared);
+			query_prepared = false;
 			send_ready_for_query = false;
 		}
 
@@ -5240,10 +5244,21 @@ PostgresMain(int argc, char *argv[],
 						}
 					}
 					else
+					{
 						exec_mpp_query(query_string,
 									   serializedQuerytree, serializedQuerytreelen,
 									   serializedPlantree, serializedPlantreelen,
 									   serializedQueryDispatchDesc, serializedQueryDispatchDesclen);
+						/* Do Prepare */
+						if (Gp_is_writer)
+						{
+							char        gid[TMGIDSIZE];
+							elog(WARNING, "gxid = %d", MyTmGxact->gxid);
+							dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
+							performDtxProtocolPrepare(gid);
+							query_prepared = true;
+						}
+					}
 
 					SetUserIdAndContext(GetOuterUserId(), false);
 

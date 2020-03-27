@@ -229,7 +229,7 @@ NullCommand(CommandDest dest)
  * ----------------
  */
 void
-ReadyForQuery(CommandDest dest)
+ReadyForQuery(CommandDest dest, bool query_prepared)
 {
 	switch (dest)
 	{
@@ -247,6 +247,10 @@ ReadyForQuery(CommandDest dest)
 
 					pq_beginmessage(&buf, 'x');
 					pq_sendbyte(&buf, TransactionDidWriteXLog());
+					pq_endmessage(&buf);
+
+					pq_beginmessage(&buf, 'y');
+					pq_sendbyte(&buf, query_prepared);
 					pq_endmessage(&buf);
 				}
 

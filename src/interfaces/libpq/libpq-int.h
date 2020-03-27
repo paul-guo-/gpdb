@@ -471,6 +471,7 @@ struct pg_conn
 	PGresult   *next_result;	/* next result (used in single-row mode) */
 
 	char		wrote_xlog;
+	char		query_prepared;
 
 	/* Assorted state for SSL, GSS, etc */
 

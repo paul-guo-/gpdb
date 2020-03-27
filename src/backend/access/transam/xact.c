@@ -220,6 +220,7 @@ typedef struct TransactionStateData
 	int			parallelModeLevel;		/* Enter/ExitParallelMode counter */
 	bool		executorSaysXactDoesWrites;	/* GP executor says xact does writes */
 	bool		executorDidWriteXLog;	/* QE has wrote xlog */
+	bool		executorDidPrepared;
 	struct TransactionStateData *parent;		/* back link to parent */
 
 	struct TransactionStateData *fastLink;        /* back link to jump to parent for efficient search */
@@ -259,6 +260,7 @@ static TransactionStateData TopTransactionStateData = {
 	0,							/* parallelMode */
 	false,						/* executorSaysXactDoesWrites */
 	false,						/* executorDidWriteXLog */
+	false,						/* */
 	NULL						/* link to parent state block */
 };
 
@@ -464,6 +466,14 @@ ExecutorDidWriteXLog(void)
 	return s->executorDidWriteXLog;
 }
 
+bool
+ExecutorDidPrepared(void)
+{
+	TransactionState s = CurrentTransactionState;
+	return s->executorDidPrepared;
+}
+
+
 void
 GetAllTransactionXids(
 	DistributedTransactionId	*distribXid,
@@ -550,6 +560,12 @@ void
 MarkCurrentTransactionWriteXLogOnExecutor(void)
 {
 	CurrentTransactionState->executorDidWriteXLog = true;
+}
+
+void
+MarkCurrentTransactionPreparedOnExecutor(void)
+{
+	CurrentTransactionState->executorDidPrepared = true;
 }
 
 /*
