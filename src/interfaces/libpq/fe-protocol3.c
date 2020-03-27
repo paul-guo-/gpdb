@@ -188,6 +188,11 @@ pqParseInput3(PGconn *conn)
 			if (pqGetc(&conn->wrote_xlog, conn))
 				return;
 		}
+		else if (id == 'y')
+		{
+			if (pqGetc(&conn->query_prepared, conn))
+				return;
+		}
 #endif
 		else if (conn->asyncStatus != PGASYNC_BUSY)
 		{

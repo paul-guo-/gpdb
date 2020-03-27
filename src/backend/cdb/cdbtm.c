@@ -846,6 +846,12 @@ prepareDtxTransaction(void)
 	Assert(MyTmGxactLocal->state == DTX_STATE_ACTIVE_DISTRIBUTED);
 	Assert(MyTmGxact->gxid > FirstDistributedTransactionId);
 
+	if (ExecutorDidPrepared())
+	{
+		setCurrentDtxState(DTX_STATE_PREPARED);
+		return;
+	}
+
 	doPrepareTransaction();
 }
 
@@ -1946,10 +1952,13 @@ sendDtxExplicitBegin(void)
 	rememberDtxExplicitBegin();
 }
 
+extern void
+performDtxProtocolPrepare(const char *gid);
+
 /**
  * On the QD, run the Prepare operation.
  */
-static void
+void
 performDtxProtocolPrepare(const char *gid)
 {
 	StartTransactionCommand();
