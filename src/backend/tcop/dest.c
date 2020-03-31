@@ -229,7 +229,7 @@ NullCommand(CommandDest dest)
  * ----------------
  */
 void
-ReadyForQuery(CommandDest dest, bool query_prepared)
+ReadyForQuery(CommandDest dest)
 {
 	switch (dest)
 	{
@@ -249,8 +249,8 @@ ReadyForQuery(CommandDest dest, bool query_prepared)
 					pq_sendbyte(&buf, TransactionDidWriteXLog());
 					pq_endmessage(&buf);
 
-					pq_beginmessage(&buf, 'y');
-					pq_sendbyte(&buf, query_prepared);
+					pq_beginmessage(&buf, 'z');
+					pq_sendbyte(&buf, DistributedTransactionContext == DTX_CONTEXT_QE_PREPARED);
 					pq_endmessage(&buf);
 				}
 
