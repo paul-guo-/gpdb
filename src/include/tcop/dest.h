@@ -140,7 +140,7 @@ extern void EndCommand(const char *commandTag, CommandDest dest);
 /* Additional functions that go with destination management, more or less. */
 
 extern void NullCommand(CommandDest dest);
-extern void ReadyForQuery(CommandDest dest, bool query_prepared);
+extern void ReadyForQuery(CommandDest dest);
 
 extern void sendQEDetails(void);
 

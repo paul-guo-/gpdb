@@ -994,6 +994,8 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
  * Caller may supply either a Query (representing utility command) or
  * a PlannedStmt (representing a planned DML command), but not both.
  */
+extern  void performDtxProtocolPrepare(const char *gid);
+
 static void
 exec_mpp_query(const char *query_string,
 			   const char * serializedQuerytree, int serializedQuerytreelen,
@@ -1351,6 +1353,14 @@ exec_mpp_query(const char *query_string,
 					(errcode(ERRCODE_FAULT_INJECT),
 					 errmsg("Raise ERROR for debug_dtm_action = %d, commandTag = %s",
 							Debug_dtm_action, commandTag)));
+		}
+
+		/* Do Prepare */
+		if (Gp_is_writer)
+		{
+			char        gid[TMGIDSIZE];
+			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
+			performDtxProtocolPrepare(gid);
 		}
 
 		/*
@@ -4468,8 +4478,6 @@ check_forbidden_in_gpdb_handlers(char firstchar)
 }
 
 
-extern  void performDtxProtocolPrepare(const char *gid);
-
 /* ----------------------------------------------------------------
  * PostgresMain
  *	   postgres main loop -- all backends, interactive or otherwise start here
@@ -4490,7 +4498,6 @@ PostgresMain(int argc, char *argv[],
 	StringInfoData input_message;
 	sigjmp_buf	local_sigjmp_buf;
 	volatile bool send_ready_for_query = true;
-	volatile bool query_prepared = false;
 	bool		disable_idle_in_transaction_timeout = false;
 
 	/*
@@ -4986,8 +4993,7 @@ PostgresMain(int argc, char *argv[],
 				pgstat_report_activity(STATE_IDLE, NULL);
 			}
 
-			ReadyForQuery(whereToSendOutput, query_prepared);
-			query_prepared = false;
+			ReadyForQuery(whereToSendOutput);
 			send_ready_for_query = false;
 		}
 
@@ -5249,15 +5255,6 @@ PostgresMain(int argc, char *argv[],
 									   serializedQuerytree, serializedQuerytreelen,
 									   serializedPlantree, serializedPlantreelen,
 									   serializedQueryDispatchDesc, serializedQueryDispatchDesclen);
-						/* Do Prepare */
-						if (Gp_is_writer)
-						{
-							char        gid[TMGIDSIZE];
-							elog(WARNING, "gxid = %d", MyTmGxact->gxid);
-							dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
-							performDtxProtocolPrepare(gid);
-							query_prepared = true;
-						}
 					}
 
 					SetUserIdAndContext(GetOuterUserId(), false);
