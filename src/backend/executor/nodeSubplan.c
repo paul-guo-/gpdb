@@ -1047,6 +1047,9 @@ PG_TRY();
 	{			
 		needDtx = isCurrentDtxActivated();
 
+		/* queryDesc->possible_eager_prepare: How to set? Seem that it should be no.*/
+		queryDesc->possible_eager_prepare = false;
+
 		/*
 		 * This call returns after launching the threads that send the
 		 * command to the appropriate segdbs.  It does not wait for them
@@ -1054,7 +1057,8 @@ PG_TRY();
 		 */
 		CdbDispatchPlan(queryDesc,
 						estate->es_param_exec_vals,
-						needDtx, true);
+						needDtx,
+						true);
 
 		/*
 		 * Set up the interconnect for execution of the initplan root slice.

@@ -598,9 +598,14 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			if (estate->es_sliceTable->slices[0].gangType != GANGTYPE_UNALLOCATED ||
 				estate->es_sliceTable->slices[0].children)
 			{
+				queryDesc->possible_eager_prepare =
+					queryDesc->possible_eager_prepare &&
+					estate->es_sliceTable->slices[0].gangType == GANGTYPE_PRIMARY_WRITER;
+				/* FIXME: Other dispatch plan code to specify eager_prepare. */
 				CdbDispatchPlan(queryDesc,
 								estate->es_param_exec_vals,
-								needDtx, true);
+								needDtx,
+								true);
 			}
 		}
 

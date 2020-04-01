@@ -107,8 +107,8 @@ int	max_tm_gxacts = 100;
 #define GP_OPT_SERIALIZABLE								(4 << 1)
 
 #define GP_OPT_READ_ONLY         						0x0010
-
 #define GP_OPT_EXPLICT_BEGIN      						0x0020
+#define GP_OPT_DO_EAGER_PREPARE      					0x0040
 
 /*=========================================================================
  * FUNCTIONS PROTOTYPES
@@ -386,7 +386,7 @@ doDispatchSubtransactionInternalCmd(DtxProtocolCommand cmdType)
 	serializedDtxContextInfo = qdSerializeDtxContextInfo(&serializedDtxContextInfoLen,
 														 false /* wantSnapshot */ ,
 														 false /* inCursor */ ,
-														 mppTxnOptions(true),
+														 mppTxnOptions(true, false), /* what should be set? */
 														 "doDispatchSubtransactionInternalCmd");
 
 	dtxFormGID(gid, getDistributedTransactionTimestamp(), getDistributedTransactionId());
@@ -1064,7 +1064,7 @@ tmShmemInit(void)
  * after the statement.
  */
 int
-mppTxnOptions(bool needDtx)
+mppTxnOptions(bool needDtx, bool doEagerPrepare)
 {
 	int			options = 0;
 
@@ -1090,6 +1090,9 @@ mppTxnOptions(bool needDtx)
 
 	if (isCurrentDtxActivated() && MyTmGxactLocal->explicitBeginRemembered)
 		options |= GP_OPT_EXPLICT_BEGIN;
+
+	if (doEagerPrepare)
+		options |= GP_OPT_DO_EAGER_PREPARE;
 
 	elog(DTM_DEBUG5,
 		 "mppTxnOptions txnOptions = 0x%x, needDtx = %s, explicitBegin = %s, isoLevel = %s, readOnly = %s.",
@@ -1135,6 +1138,12 @@ bool
 isMppTxOptions_ExplicitBegin(int txnOptions)
 {
 	return ((txnOptions & GP_OPT_EXPLICT_BEGIN) != 0);
+}
+
+bool
+isMppTxOptions_DoEagerPrepare(int txnOptions)
+{
+	return ((txnOptions & GP_OPT_DO_EAGER_PREPARE) != 0);
 }
 
 /*=========================================================================
@@ -1615,6 +1624,8 @@ setupRegularDtxContext(void)
 		 DtxContextToString(DistributedTransactionContext));
 }
 
+bool DoEagerPrepare;;
+
 /**
  * Called on the QE when a query to process has been received.
  *
@@ -1643,6 +1654,7 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 
 	needDtx = isMppTxOptions_NeedDtx(txnOptions);
 	explicitBegin = isMppTxOptions_ExplicitBegin(txnOptions);
+	DoEagerPrepare = isMppTxOptions_DoEagerPrepare(txnOptions);
 
 	haveDistributedSnapshot = dtxContextInfo->haveDistributedSnapshot;
 	isSharedLocalSnapshotSlotPresent = (SharedLocalSnapshotSlot != NULL);
@@ -1856,8 +1868,11 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 
 		case DTX_CONTEXT_QE_PREPARED:
 		case DTX_CONTEXT_QE_FINISH_PREPARED:
+		// Do we need to do sanity check?
+#if 0
 			elog(ERROR, "We should not be trying to execute a query in state '%s'",
 				 DtxContextToString(DistributedTransactionContext));
+#endif
 			break;
 
 		default:

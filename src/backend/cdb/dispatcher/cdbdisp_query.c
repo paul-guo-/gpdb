@@ -517,7 +517,7 @@ cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase),
+								  mppTxnOptions(needTwoPhase, false), /* ? */
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -588,7 +588,7 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase),
+								  mppTxnOptions(needTwoPhase, false), /* ? */
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -654,7 +654,7 @@ cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc,
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  true /* wantSnapshot */ ,
 								  queryDesc->extended_query,
-								  mppTxnOptions(planRequiresTxn),
+								  mppTxnOptions(planRequiresTxn, queryDesc->possible_eager_prepare),
 								  "cdbdisp_buildPlanQueryParms");
 
 	return pQueryParms;

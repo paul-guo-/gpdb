@@ -995,6 +995,7 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
  * a PlannedStmt (representing a planned DML command), but not both.
  */
 extern  void performDtxProtocolPrepare(const char *gid);
+extern bool DoEagerPrepare;
 
 static void
 exec_mpp_query(const char *query_string,
@@ -1356,11 +1357,13 @@ exec_mpp_query(const char *query_string,
 		}
 
 		/* Do Prepare */
-		if (Gp_is_writer)
+		if (Gp_is_writer && DoEagerPrepare)
 		{
 			char        gid[TMGIDSIZE];
+			elog(WARNING, "Doing EagerPrepare");
 			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
 			performDtxProtocolPrepare(gid);
+			DoEagerPrepare = false;
 		}
 
 		/*
@@ -1744,6 +1747,8 @@ exec_simple_query(const char *query_string)
 		portal = CreatePortal("", true, true);
 		/* Don't display the portal in pg_cursors */
 		portal->visible = false;
+
+		portal->possible_eager_prepare = (lnext(parsetree_item) == NULL);
 
 		/*
 		 * We don't have to copy anything into the portal, because everything
