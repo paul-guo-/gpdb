@@ -241,6 +241,7 @@ ReadyForQuery(CommandDest dest)
 
 				if (Gp_role == GP_ROLE_EXECUTE)
 				{
+					/* FIXME: Combine them */
 					pq_beginmessage(&buf, 'k');
 					pq_sendint64(&buf, VmemTracker_GetMaxReservedVmemBytes());
 					pq_endmessage(&buf);

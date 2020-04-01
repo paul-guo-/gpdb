@@ -225,6 +225,8 @@ ProcessQuery(Portal portal,
 									GP_INSTRUMENT_OPTS);
 	queryDesc->ddesc = portal->ddesc;
 
+	queryDesc->possible_eager_prepare = portal->possible_eager_prepare;
+
 	/* GPDB hook for collecting query info */
 	if (query_info_collect_hook)
 		(*query_info_collect_hook)(METRICS_QUERY_SUBMIT, queryDesc);
@@ -360,6 +362,7 @@ ChoosePortalStrategy(List *stmts)
 	/* Note For CreateTableAs, we still use PORTAL_MULTI_QUERY (not like PG)
 	 * since QE needs to use DestRemote to deliver completionTag to QD and
 	 * use DestIntoRel to insert tuples into the table(s).
+	 * What should we do for CTAS?
 	 */
 	if (list_length(stmts) == 1)
 	{
@@ -618,6 +621,12 @@ PortalStart(Portal portal, ParamListInfo params,
 		 * Determine the portal execution strategy
 		 */
 		portal->strategy = ChoosePortalStrategy(portal->stmts);
+
+		/* PORTAL_ONE_MOD_WITH? */
+		if (portal->possible_eager_prepare &&
+			!(portal->strategy == PORTAL_ONE_RETURNING ||
+			 portal->strategy == PORTAL_MULTI_QUERY))
+			portal->possible_eager_prepare = false;
 
 		/* Initialize the backoff entry for this backend */
 		PortalBackoffEntryInit(portal);
@@ -1403,6 +1412,7 @@ PortalRunMulti(Portal portal,
 {
 	bool		active_snapshot_set = false;
 	ListCell   *stmtlist_item;
+	bool		possible_eager_prepare;
 
 	/*
 	 * If the destination is DestRemoteExecute, change to DestNone.  The
@@ -1423,9 +1433,15 @@ PortalRunMulti(Portal portal,
 	 * Loop to handle the individual queries generated from a single parsetree
 	 * by analysis and rewrite.
 	 */
+	possible_eager_prepare = portal->possible_eager_prepare;
 	foreach(stmtlist_item, portal->stmts)
 	{
 		Node	   *stmt = (Node *) lfirst(stmtlist_item);
+
+		if (lnext(stmtlist_item) != NULL)
+			portal->possible_eager_prepare = false;
+		else
+			portal->possible_eager_prepare = possible_eager_prepare;
 
 		/*
 		 * If we got a cancel signal in prior command, quit

@@ -297,6 +297,7 @@ typedef struct QueryDesc
 
 	/* This is always set NULL by the core system, but plugins can change it */
 	struct Instrumentation *totaltime;	/* total time spent in ExecutorRun */
+	bool		possible_eager_prepare;
 } QueryDesc;
 
 /* in pquery.c */
