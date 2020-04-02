@@ -109,6 +109,7 @@ int	max_tm_gxacts = 100;
 #define GP_OPT_READ_ONLY         						0x0010
 
 #define GP_OPT_EXPLICT_BEGIN      						0x0020
+#define GP_OPT_NO_EAGER_PREPARE   						0x0040
 
 /*=========================================================================
  * FUNCTIONS PROTOTYPES
@@ -384,7 +385,7 @@ doDispatchSubtransactionInternalCmd(DtxProtocolCommand cmdType)
 	serializedDtxContextInfo = qdSerializeDtxContextInfo(&serializedDtxContextInfoLen,
 														 false /* wantSnapshot */ ,
 														 false /* inCursor */ ,
-														 mppTxnOptions(true),
+														 mppTxnOptions(true, false),
 														 "doDispatchSubtransactionInternalCmd");
 
 	dtxFormGID(gid, getDistributedTransactionTimestamp(), getDistributedTransactionId());
@@ -1062,7 +1063,7 @@ tmShmemInit(void)
  * after the statement.
  */
 int
-mppTxnOptions(bool needDtx)
+mppTxnOptions(bool needDtx, bool noEagerPrepare)
 {
 	int			options = 0;
 
@@ -1085,6 +1086,9 @@ mppTxnOptions(bool needDtx)
 
 	if (XactReadOnly)
 		options |= GP_OPT_READ_ONLY;
+
+	if (noEagerPrepare)
+		options |= GP_OPT_NO_EAGER_PREPARE;
 
 	if (isCurrentDtxActivated() && MyTmGxactLocal->explicitBeginRemembered)
 		options |= GP_OPT_EXPLICT_BEGIN;
@@ -1135,6 +1139,11 @@ isMppTxOptions_ExplicitBegin(int txnOptions)
 	return ((txnOptions & GP_OPT_EXPLICT_BEGIN) != 0);
 }
 
+bool
+isMppTxOptions_NoEagerPrepare(int txnOptions)
+{
+	return ((txnOptions & GP_OPT_NO_EAGER_PREPARE) != 0);
+}
 /*=========================================================================
  * HELPER FUNCTIONS
  */
@@ -1960,13 +1969,10 @@ sendDtxExplicitBegin(void)
 	rememberDtxExplicitBegin();
 }
 
-extern void
-performDtxProtocolPrepare(const char *gid);
-
 /**
  * On the QD, run the Prepare operation.
  */
-void
+extern void
 performDtxProtocolPrepare(const char *gid)
 {
 	StartTransactionCommand();

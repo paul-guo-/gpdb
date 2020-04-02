@@ -994,8 +994,6 @@ pg_plan_queries(List *querytrees, int cursorOptions, ParamListInfo boundParams)
  * Caller may supply either a Query (representing utility command) or
  * a PlannedStmt (representing a planned DML command), but not both.
  */
-extern  void performDtxProtocolPrepare(const char *gid);
-
 static void
 exec_mpp_query(const char *query_string,
 			   const char * serializedQuerytree, int serializedQuerytreelen,
@@ -1353,14 +1351,6 @@ exec_mpp_query(const char *query_string,
 					(errcode(ERRCODE_FAULT_INJECT),
 					 errmsg("Raise ERROR for debug_dtm_action = %d, commandTag = %s",
 							Debug_dtm_action, commandTag)));
-		}
-
-		/* Do Prepare */
-		if (Gp_is_writer)
-		{
-			char        gid[TMGIDSIZE];
-			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
-			performDtxProtocolPrepare(gid);
 		}
 
 		/*

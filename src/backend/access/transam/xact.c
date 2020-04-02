@@ -93,6 +93,7 @@ int			XactIsoLevel;
 
 bool		DefaultXactReadOnly = false;
 bool		XactReadOnly;
+bool		NoEagerPrepare;
 
 bool		DefaultXactDeferrable = false;
 bool		XactDeferrable;
@@ -2409,6 +2410,8 @@ StartTransaction(void)
 				QEDtxContextInfo.distributedTxnOptions);
 			XactReadOnly = isMppTxOptions_ReadOnly(
 				QEDtxContextInfo.distributedTxnOptions);
+			NoEagerPrepare = isMppTxOptions_NoEagerPrepare(
+				QEDtxContextInfo.distributedTxnOptions);
 
 			/*
 			 * MPP: we're a QE Writer.
@@ -3725,7 +3728,19 @@ CommitTransactionCommand(void)
 			 */
 		case TBLOCK_INPROGRESS:
 		case TBLOCK_SUBINPROGRESS:
-			CommandCounterIncrement();
+			if (DistributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER &&
+				!NoEagerPrepare)
+			{
+				prepareGID = MemoryContextAlloc(TopTransactionContext, TMGIDSIZE);
+				dtxFormGID(prepareGID, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
+				PrepareTransaction();
+				s->blockState = TBLOCK_DEFAULT;
+				DistributedTransactionContext = DTX_CONTEXT_QE_PREPARED;
+			}
+			else
+			{
+				CommandCounterIncrement();
+			}
 			break;
 
 			/*

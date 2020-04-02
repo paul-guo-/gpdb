@@ -106,7 +106,7 @@ static int fillSliceVector(SliceTable *sliceTable,
 static char *buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 				   int *finalLen);
 
-static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, bool planRequiresTxn);
+static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, bool planRequiresTxn, bool noEagerPrepare);
 static DispatchCommandQueryParms *cdbdisp_buildUtilityQueryParms(struct Node *stmt, int flags, List *oid_assignments);
 static DispatchCommandQueryParms *cdbdisp_buildCommandQueryParms(const char *strCommand, int flags);
 
@@ -473,7 +473,7 @@ cdbdisp_dispatchCommandInternal(DispatchCommandQueryParms *pQueryParms,
 	Assert(primaryGang);
 
 	cdbdisp_makeDispatchResults(ds, 1, flags & DF_CANCEL_ON_ERROR);
-	cdbdisp_makeDispatchParams (ds, 1, queryText, queryTextLength);
+	cdbdisp_makeDispatchParams(ds, 1, queryText, queryTextLength);
 
 	cdbdisp_dispatchToGang(ds, primaryGang, -1);
 
@@ -517,7 +517,7 @@ cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase),
+								  mppTxnOptions(needTwoPhase, false),
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -588,7 +588,7 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase),
+								  mppTxnOptions(needTwoPhase, false),
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -596,7 +596,8 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 
 static DispatchCommandQueryParms *
 cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc,
-							bool planRequiresTxn)
+							bool planRequiresTxn,
+							bool noEagerPrepare)
 {
 	char	   *splan,
 			   *sddesc;
@@ -654,7 +655,7 @@ cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc,
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  true /* wantSnapshot */ ,
 								  queryDesc->extended_query,
-								  mppTxnOptions(planRequiresTxn),
+								  mppTxnOptions(planRequiresTxn, noEagerPrepare),
 								  "cdbdisp_buildPlanQueryParms");
 
 	return pQueryParms;
@@ -1072,7 +1073,22 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 	sliceVector = palloc0(nTotalSlices * sizeof(SliceVec));
 	nSlices = fillSliceVector(sliceTbl, rootIdx, sliceVector, nTotalSlices);
 
-	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn);
+
+	bool noEagerPrepare = false;
+	for (iSlice = 0; iSlice < nSlices; iSlice++)
+	{
+		Gang	   *primaryGang = NULL;
+		ExecSlice  *slice = sliceVector[iSlice].slice;
+
+		if (!slice || slice->gangType != GANGTYPE_PRIMARY_WRITER)
+			continue;
+
+		primaryGang = slice->primaryGang;
+		if (planRequiresTxn && primaryGang->size == 1)
+			noEagerPrepare = true;
+	}
+
+	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn, noEagerPrepare);
 	queryText = buildGpQueryString(pQueryParms, &queryTextLength);
 
 	/*
