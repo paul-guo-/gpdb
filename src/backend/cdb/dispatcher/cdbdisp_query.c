@@ -106,9 +106,9 @@ static int fillSliceVector(SliceTable *sliceTable,
 static char *buildGpQueryString(DispatchCommandQueryParms *pQueryParms,
 				   int *finalLen);
 
-static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, bool planRequiresTxn, bool noEagerPrepare);
-static DispatchCommandQueryParms *cdbdisp_buildUtilityQueryParms(struct Node *stmt, int flags, List *oid_assignments);
-static DispatchCommandQueryParms *cdbdisp_buildCommandQueryParms(const char *strCommand, int flags);
+static DispatchCommandQueryParms *cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc, int txnOption);
+static DispatchCommandQueryParms *cdbdisp_buildUtilityQueryParms(struct Node *stmt, int flags, List *oid_assignments, int txnOption);
+static DispatchCommandQueryParms *cdbdisp_buildCommandQueryParms(const char *strCommand, int flags, int txnOption);
 
 static void cdbdisp_dispatchCommandInternal(DispatchCommandQueryParms *pQueryParms,
 											int flags, List *segments,
@@ -310,7 +310,11 @@ CdbDispatchSetCommand(const char *strCommand, bool cancelOnError)
 		 "CdbDispatchSetCommand for command = '%s'",
 		 strCommand);
 
-	pQueryParms = cdbdisp_buildCommandQueryParms(strCommand, DF_NONE);
+	int txnOption = mppTxnOptions(false, !IsFirstDispatchInTransaction());
+	if (IsFirstDispatchInTransaction())
+		MarkNotFirstDispatchInTransaction();
+
+	pQueryParms = cdbdisp_buildCommandQueryParms(strCommand, DF_NONE, txnOption);
 
 	ds = cdbdisp_makeDispatcherState(false);
 
@@ -400,7 +404,11 @@ CdbDispatchCommandToSegments(const char *strCommand,
 		   "CdbDispatchCommand: %s (needTwoPhase = %s)",
 		   strCommand, (needTwoPhase ? "true" : "false"));
 
-	pQueryParms = cdbdisp_buildCommandQueryParms(strCommand, flags);
+	int txnOption = mppTxnOptions(needTwoPhase, !IsFirstDispatchInTransaction());
+	if (IsFirstDispatchInTransaction())
+		MarkNotFirstDispatchInTransaction();
+
+	pQueryParms = cdbdisp_buildCommandQueryParms(strCommand, flags, txnOption);
 
 	return cdbdisp_dispatchCommandInternal(pQueryParms,
 										   flags,
@@ -438,7 +446,11 @@ CdbDispatchUtilityStatement(struct Node *stmt,
 		   "CdbDispatchUtilityStatement: %s (needTwoPhase = %s)",
 		   debug_query_string, (needTwoPhase ? "true" : "false"));
 
-	pQueryParms = cdbdisp_buildUtilityQueryParms(stmt, flags, oid_assignments);
+	int txnOption = mppTxnOptions(needTwoPhase, !IsFirstDispatchInTransaction());
+	if (IsFirstDispatchInTransaction())
+		MarkNotFirstDispatchInTransaction();
+
+	pQueryParms = cdbdisp_buildUtilityQueryParms(stmt, flags, oid_assignments, txnOption);
 
 	return cdbdisp_dispatchCommandInternal(pQueryParms,
 										   flags,
@@ -498,9 +510,8 @@ cdbdisp_dispatchCommandInternal(DispatchCommandQueryParms *pQueryParms,
 }
 
 static DispatchCommandQueryParms *
-cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
+cdbdisp_buildCommandQueryParms(const char *strCommand, int flags, int txnOption)
 {
-	bool needTwoPhase = flags & DF_NEED_TWO_PHASE;
 	bool withSnapshot = flags & DF_WITH_SNAPSHOT;
 	DispatchCommandQueryParms *pQueryParms;
 
@@ -517,7 +528,7 @@ cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase, false),
+								  txnOption,
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -526,13 +537,13 @@ cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
 static DispatchCommandQueryParms *
 cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 				int flags,
-				List *oid_assignments)
+				List *oid_assignments,
+				int txnOption)
 {
 	char *serializedQuerytree = NULL;
 	char *serializedQueryDispatchDesc = NULL;
 	int serializedQuerytree_len = 0;
 	int serializedQueryDispatchDesc_len = 0;
-	bool needTwoPhase = flags & DF_NEED_TWO_PHASE;
 	bool withSnapshot = flags & DF_WITH_SNAPSHOT;
 	QueryDispatchDesc *qddesc;
 	Query *q;
@@ -588,7 +599,7 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase, false),
+								  txnOption,
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -596,8 +607,7 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 
 static DispatchCommandQueryParms *
 cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc,
-							bool planRequiresTxn,
-							bool noEagerPrepare)
+							int txnOption)
 {
 	char	   *splan,
 			   *sddesc;
@@ -655,7 +665,7 @@ cdbdisp_buildPlanQueryParms(struct QueryDesc *queryDesc,
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  true /* wantSnapshot */ ,
 								  queryDesc->extended_query,
-								  mppTxnOptions(planRequiresTxn, noEagerPrepare),
+								  txnOption, 
 								  "cdbdisp_buildPlanQueryParms");
 
 	return pQueryParms;
@@ -1073,22 +1083,31 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 	sliceVector = palloc0(nTotalSlices * sizeof(SliceVec));
 	nSlices = fillSliceVector(sliceTbl, rootIdx, sliceVector, nTotalSlices);
 
-
 	bool noEagerPrepare = false;
-	for (iSlice = 0; iSlice < nSlices; iSlice++)
+	if (IsFirstDispatchInTransaction())
 	{
-		Gang	   *primaryGang = NULL;
-		ExecSlice  *slice = sliceVector[iSlice].slice;
+		MarkNotFirstDispatchInTransaction();
+		for (iSlice = 0; iSlice < nSlices; iSlice++)
+		{
+			Gang	   *primaryGang = NULL;
+			ExecSlice  *slice = sliceVector[iSlice].slice;
 
-		if (!slice || slice->gangType != GANGTYPE_PRIMARY_WRITER)
-			continue;
+			if (!slice || slice->gangType != GANGTYPE_PRIMARY_WRITER)
+				continue;
 
-		primaryGang = slice->primaryGang;
-		if (planRequiresTxn && primaryGang->size == 1)
-			noEagerPrepare = true;
+			primaryGang = slice->primaryGang;
+			if (planRequiresTxn && primaryGang->size == 1)
+				noEagerPrepare = true;
+			break;
+		}
+	}
+	else
+	{
+		noEagerPrepare = true;
 	}
 
-	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn, noEagerPrepare);
+	int txnOption = mppTxnOptions(planRequiresTxn, noEagerPrepare);
+	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, txnOption); 
 	queryText = buildGpQueryString(pQueryParms, &queryTextLength);
 
 	/*
@@ -1318,7 +1337,11 @@ CdbDispatchCopyStart(struct CdbCopy *cdbCopy, Node *stmt, int flags)
 		   "CdbDispatchCopyStart: %s (needTwoPhase = %s)",
 		   debug_query_string, (needTwoPhase ? "true" : "false"));
 
-	pQueryParms = cdbdisp_buildUtilityQueryParms(stmt, flags, NULL);
+	int txnOption = mppTxnOptions(needTwoPhase, !IsFirstDispatchInTransaction());
+	if (IsFirstDispatchInTransaction())
+		MarkNotFirstDispatchInTransaction();
+
+	pQueryParms = cdbdisp_buildUtilityQueryParms(stmt, flags, NULL, txnOption);
 
 	/*
 	 * Dispatch the command.

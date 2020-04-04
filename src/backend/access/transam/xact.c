@@ -223,6 +223,7 @@ typedef struct TransactionStateData
 	bool		executorDidWriteXLog;	/* QE has wrote xlog */
 	bool		executorDidPrepared;
 	struct TransactionStateData *parent;		/* back link to parent */
+	bool		firstDispatchInTransaction;
 
 	struct TransactionStateData *fastLink;        /* back link to jump to parent for efficient search */
 } TransactionStateData;
@@ -474,6 +475,12 @@ ExecutorDidPrepared(void)
 	return s->executorDidPrepared;
 }
 
+bool
+IsFirstDispatchInTransaction(void)
+{
+	TransactionState s = CurrentTransactionState;
+	return s->firstDispatchInTransaction;
+}
 
 void
 GetAllTransactionXids(
@@ -564,11 +571,16 @@ MarkCurrentTransactionWriteXLogOnExecutor(void)
 }
 
 void
-MarkCurrentTransactionPreparedOnExecutor(void)
+MarkCurrentTransactionPreparedOnExecutor(bool prepared)
 {
-	CurrentTransactionState->executorDidPrepared = true;
+	CurrentTransactionState->executorDidPrepared = prepared;
 }
 
+void
+MarkNotFirstDispatchInTransaction(void)
+{
+	CurrentTransactionState->firstDispatchInTransaction = false;
+}
 /*
  *	GetStableLatestTransactionId
  *
@@ -2333,6 +2345,7 @@ StartTransaction(void)
 	nUnreportedXids = 0;
 	s->didLogXid = false;
 	s->executorDidWriteXLog = false;
+	s->firstDispatchInTransaction = true;
 
 	/*
 	 * must initialize resource-management stuff first

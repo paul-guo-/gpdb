@@ -1872,6 +1872,10 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 			break;
 
 		case DTX_CONTEXT_QE_PREPARED:
+			setDistributedTransactionContext(DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER);
+			NoEagerPrepare = true;
+			break;
+
 		case DTX_CONTEXT_QE_FINISH_PREPARED:
 			elog(ERROR, "We should not be trying to execute a query in state '%s'",
 				 DtxContextToString(DistributedTransactionContext));
@@ -1972,7 +1976,7 @@ sendDtxExplicitBegin(void)
 /**
  * On the QD, run the Prepare operation.
  */
-extern void
+static void
 performDtxProtocolPrepare(const char *gid)
 {
 	StartTransactionCommand();

@@ -159,6 +159,7 @@ typedef struct GlobalTransactionData
 	bool		valid;			/* TRUE if PGPROC entry is in proc array */
 	bool		ondisk;			/* TRUE if prepare state file is on disk */
 	char		gid[GIDSIZE];	/* The GID assigned to the prepared xact */
+	bool		isEagerPrepare;
 }	GlobalTransactionData;
 
 /*
@@ -368,6 +369,7 @@ MarkAsPreparing(TransactionId xid,
 	PGPROC	   *proc;
 	PGXACT	   *pgxact;
 	int			i;
+	bool		found = false;
 
 	if (strlen(gid) >= GIDSIZE)
 		ereport(ERROR,
@@ -395,24 +397,30 @@ MarkAsPreparing(TransactionId xid,
 	for (i = 0; i < TwoPhaseState->numPrepXacts; i++)
 	{
 		gxact = TwoPhaseState->prepXacts[i];
-		if (strcmp(gxact->gid, gid) == 0)
-		{
+		if (strcmp(gxact->gid, gid) != 0)
+			continue;
+
+		if (!gxact->isEagerPrepare)
 			ereport(ERROR,
 					(errcode(ERRCODE_DUPLICATE_OBJECT),
 					 errmsg("transaction identifier \"%s\" is already in use",
-							gid)));
-		}
+						 gid)));
+		found = true;
+		break;
 	}
 
 	/* Get a free gxact from the freelist */
-	if (TwoPhaseState->freeGXacts == NULL)
-		ereport(ERROR,
-				(errcode(ERRCODE_OUT_OF_MEMORY),
-				 errmsg("maximum number of prepared transactions reached"),
-				 errhint("Increase max_prepared_transactions (currently %d).",
+	if (!found)
+	{
+		if (TwoPhaseState->freeGXacts == NULL)
+			ereport(ERROR,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("maximum number of prepared transactions reached"),
+					 errhint("Increase max_prepared_transactions (currently %d).",
 						 max_prepared_xacts)));
-	gxact = TwoPhaseState->freeGXacts;
-	TwoPhaseState->freeGXacts = gxact->next;
+		gxact = TwoPhaseState->freeGXacts;
+		TwoPhaseState->freeGXacts = gxact->next;
+	}
 
 	proc = &ProcGlobal->allProcs[gxact->pgprocno];
 	pgxact = &ProcGlobal->allPgXact[gxact->pgprocno];
@@ -453,6 +461,7 @@ MarkAsPreparing(TransactionId xid,
 	gxact->locking_backend = MyBackendId;
 	gxact->valid = false;
 	gxact->ondisk = false;
+	gxact->isEagerPrepare = (DistributedTransactionContext == DTX_CONTEXT_QE_TWO_PHASE_IMPLICIT_WRITER && !NoEagerPrepare);
 	strcpy(gxact->gid, gid);
 
 	/* And insert it into the active array */

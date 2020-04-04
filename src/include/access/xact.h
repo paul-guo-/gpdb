@@ -49,6 +49,7 @@ extern PGDLLIMPORT int XactIsoLevel;
 /* Xact read-only state */
 extern bool DefaultXactReadOnly;
 extern bool XactReadOnly;
+extern bool NoEagerPrepare;
 
 /*
  * Xact is deferrable -- only meaningful (currently) for read only
@@ -363,6 +364,7 @@ extern bool IsAbortedTransactionBlockState(void);
 extern bool TransactionDidWriteXLog(void);
 extern bool ExecutorDidWriteXLog(void);
 extern bool ExecutorDidPrepared(void);
+extern bool IsFirstDispatchInTransaction(void);
 extern void GetAllTransactionXids(
 	DistributedTransactionId	*distribXid,
 	TransactionId				*localXid,
@@ -375,7 +377,8 @@ extern TransactionId GetStableLatestTransactionId(void);
 extern SubTransactionId GetCurrentSubTransactionId(void);
 extern void MarkCurrentTransactionIdLoggedIfAny(void);
 extern void MarkCurrentTransactionWriteXLogOnExecutor(void);
-extern void MarkCurrentTransactionPreparedOnExecutor(void);
+extern void MarkCurrentTransactionPreparedOnExecutor(bool prepared);
+extern void MarkNotFirstDispatchInTransaction(void);
 extern bool SubTransactionIsActive(SubTransactionId subxid);
 extern CommandId GetCurrentCommandId(bool used);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);

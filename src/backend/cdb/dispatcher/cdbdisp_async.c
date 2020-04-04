@@ -909,8 +909,7 @@ processResults(CdbDispatchResult *dispatchResult)
 		if (segdbDesc->conn->wrote_xlog)
 			MarkCurrentTransactionWriteXLogOnExecutor();
 
-		if (segdbDesc->conn->query_prepared)
-			MarkCurrentTransactionPreparedOnExecutor();
+		MarkCurrentTransactionPreparedOnExecutor(segdbDesc->conn->query_prepared);
 
 		/*
 		 * Attach the PGresult object to the CdbDispatchResult object.
