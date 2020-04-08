@@ -267,6 +267,8 @@ autostats_get_cmdtype(QueryDesc *queryDesc, AutoStatsCmdType * pcmdType, Oid *pr
 	*prelationOid = relationOid;
 }
 
+static List *autostats_list = NULL;
+
 /*
  * This method takes a decision to run analyze based on the query and the number of modified tuples based
  * on the policy set via gp_autostats_mode. The following modes are currently supported:
@@ -278,10 +280,7 @@ autostats_get_cmdtype(QueryDesc *queryDesc, AutoStatsCmdType * pcmdType, Oid *pr
 void
 auto_stats(AutoStatsCmdType cmdType, Oid relationOid, uint64 ntuples, bool inFunction)
 {
-	TimestampTz start;
 	bool		policyCheck = false;
-
-	start = GetCurrentTimestamp();
 
 	if (Gp_role != GP_ROLE_DISPATCH || relationOid == InvalidOid
 		|| rel_is_partitioned(relationOid)
@@ -342,16 +341,36 @@ auto_stats(AutoStatsCmdType cmdType, Oid relationOid, uint64 ntuples, bool inFun
 			 ntuples);
 	}
 
-	autostats_issue_analyze(relationOid);
+	MemoryContext oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+	autostats_list = lappend_oid(autostats_list, relationOid);
+	MemoryContextSwitchTo(oldcontext);
+}
 
-	if (log_duration)
+void flush_auto_stats()
+{
+	Oid oid;
+	TimestampTz start;
+	start = GetCurrentTimestamp();
+	ListCell *cell;
+
+	foreach(cell, autostats_list)
 	{
-		long		secs;
-		int			usecs;
-		int			msecs;
+		oid = lfirst_oid(cell);
 
-		TimestampDifference(start, GetCurrentTimestamp(), &secs, &usecs);
-		msecs = usecs / 1000;
-		elog(LOG, "duration: %ld.%03d ms Auto-ANALYZE", secs * 1000 + msecs, usecs % 1000);
+		/* TODO: sanity check oid. */
+		autostats_issue_analyze(oid);
+
+		if (log_duration)
+		{
+			long		secs;
+			int			usecs;
+			int			msecs;
+
+			TimestampDifference(start, GetCurrentTimestamp(), &secs, &usecs);
+			msecs = usecs / 1000;
+			elog(LOG, "duration: %ld.%03d ms Auto-ANALYZE", secs * 1000 + msecs, usecs % 1000);
+		}
 	}
+	list_free(autostats_list);
+	autostats_list = NULL;
 }

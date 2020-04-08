@@ -298,6 +298,7 @@ extern void redoDistributedCommitRecord(TMGXACT_LOG *gxact_log);
 extern void redoDistributedForgetCommitRecord(TMGXACT_LOG *gxact_log);
 
 extern void setupDtxTransaction(void);
+extern void setCurrentDtxState(DtxState state);
 extern DtxState getCurrentDtxState(void);
 extern bool isCurrentDtxActivated(void);
 

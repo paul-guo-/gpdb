@@ -910,7 +910,12 @@ processResults(CdbDispatchResult *dispatchResult)
 			MarkCurrentTransactionWriteXLogOnExecutor();
 
 		if (segdbDesc->conn->query_prepared)
+		{
 			MarkCurrentTransactionPreparedOnExecutor();
+			// else if elog(ERROR) on another node would
+			// fail with "We should not be trying to execute a query in state"
+			setCurrentDtxState(DTX_STATE_PREPARED);
+		}
 
 		/*
 		 * Attach the PGresult object to the CdbDispatchResult object.

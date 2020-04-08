@@ -58,6 +58,7 @@
 #include "parser/analyze.h"
 #include "parser/parser.h"
 #include "pg_getopt.h"
+#include "postmaster/autostats.h"
 #include "postmaster/autovacuum.h"
 #include "postmaster/fts.h"
 #include "postmaster/postmaster.h"
@@ -1128,7 +1129,10 @@ exec_mpp_query(const char *query_string,
 	 * Choose the command type from either the Query or the PlannedStmt.
 	 */
     if ( utilityStmt )
+	{
     	commandType = CMD_UTILITY;
+		Assert(DoEagerPrepare == false);
+	}
     else
 	/*
 	 * Get (possibly 0) parameters.
@@ -1360,7 +1364,7 @@ exec_mpp_query(const char *query_string,
 		if (Gp_is_writer && DoEagerPrepare)
 		{
 			char        gid[TMGIDSIZE];
-			elog(WARNING, "Doing EagerPrepare");
+			//elog(WARNING, "Doing EagerPrepare");
 			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
 			performDtxProtocolPrepare(gid);
 			DoEagerPrepare = false;
@@ -1567,6 +1571,7 @@ exec_simple_query(const char *query_string)
 	bool		was_logged = false;
 	bool		isTopLevel;
 	char		msec_str[32];
+	bool		snapshot_set;
 
 	if (Gp_role != GP_ROLE_EXECUTE)
 		increment_command_count();
@@ -1645,7 +1650,6 @@ exec_simple_query(const char *query_string)
 	foreach(parsetree_item, parsetree_list)
 	{
 		Node	   *parsetree = (Node *) lfirst(parsetree_item);
-		bool		snapshot_set = false;
 		const char *commandTag;
 		char		completionTag[COMPLETION_TAG_BUFSIZE];
 		List	   *querytree_list,
@@ -1653,6 +1657,8 @@ exec_simple_query(const char *query_string)
 		Portal		portal;
 		DestReceiver *receiver;
 		int16		format;
+
+		snapshot_set = false;
 
 		/*
 		 * Get the command name for use in status display (it also becomes the
@@ -1901,6 +1907,14 @@ exec_simple_query(const char *query_string)
 	TRACE_POSTGRESQL_QUERY_DONE(query_string);
 
 	debug_query_string = NULL;
+
+#if 0
+	StartTransactionCommand();
+	PushActiveSnapshot(GetTransactionSnapshot());
+	flush_auto_stats(); /* TODO: call it in other places for other cases. memory context, libpq protocol? */
+	PopActiveSnapshot();
+	CommitTransactionCommand();
+#endif
 }
 
 /*

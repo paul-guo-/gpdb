@@ -44,5 +44,6 @@ extern void autostats_get_cmdtype(QueryDesc *queryDesc,
 					  AutoStatsCmdType *pcmdType, Oid *prelationOid);
 extern void auto_stats(AutoStatsCmdType cmdType, Oid relationOid,
 		   uint64 ntuples, bool inFunction);
+extern void flush_auto_stats(void);
 
 #endif   /* AUTOSTATS_H */

@@ -121,7 +121,6 @@ static void doNotifyingAbort(void);
 static void retryAbortPrepared(void);
 static void doQEDistributedExplicitBegin();
 static void currentDtxActivate(void);
-static void setCurrentDtxState(DtxState state);
 
 static bool isDtxQueryDispatcher(void);
 static void performDtxProtocolCommitPrepared(const char *gid, bool raiseErrorIfNotFound);
@@ -270,7 +269,7 @@ currentDtxActivate(void)
 	GxactLockTableInsert(MyTmGxact->gxid);
 }
 
-static void
+void
 setCurrentDtxState(DtxState state)
 {
 	MyTmGxactLocal->state = state;
@@ -446,8 +445,10 @@ doPrepareTransaction(void)
 			(errmsg("The distributed transaction 'Prepare' broadcast succeeded to the segments"),
 			TM_ERRDETAIL));
 
-	Assert(MyTmGxactLocal->state == DTX_STATE_PREPARING);
-	setCurrentDtxState(DTX_STATE_PREPARED);
+	/* processResults() set the state. */
+	Assert(MyTmGxactLocal->state == DTX_STATE_PREPARED);
+	//Assert(MyTmGxactLocal->state == DTX_STATE_PREPARING);
+	//setCurrentDtxState(DTX_STATE_PREPARED);
 
 	SIMPLE_FAULT_INJECTOR("dtm_broadcast_prepare");
 
@@ -843,7 +844,8 @@ prepareDtxTransaction(void)
 		 "prepareDtxTransaction called with state = %s",
 		 DtxStateToString(MyTmGxactLocal->state));
 
-	Assert(MyTmGxactLocal->state == DTX_STATE_ACTIVE_DISTRIBUTED);
+	Assert(MyTmGxactLocal->state == DTX_STATE_ACTIVE_DISTRIBUTED ||
+		   MyTmGxactLocal->state == DTX_STATE_PREPARED);
 	Assert(MyTmGxact->gxid > FirstDistributedTransactionId);
 
 	if (ExecutorDidPrepared())
@@ -908,6 +910,17 @@ rollbackDtxTransaction(void)
 			break;
 
 		case DTX_STATE_PREPARED:
+			/* else 
+			 *
+			 * postgres=#  INSERT INTO INSERT_TBL(y) VALUES ('Y');
+WARNING:  the distributed transaction broadcast failed to one or more segments
+DETAIL:  gid=1586327824-0000000002, state=Notifying Abort Prepared
+ERROR:  new row for relation "insert_tbl" violates check constraint "insert_tbl_con"  (seg2 192.168.235.128:7004 pid=7659)
+DETAIL:  Failing row contains (44, Y, -44).
+			*/
+			if (ExecutorDidPrepared())
+				setCurrentDtxState(DTX_STATE_NOTIFYING_ABORT_SOME_PREPARED);
+			else
 			setCurrentDtxState(DTX_STATE_NOTIFYING_ABORT_PREPARED);
 			break;
 
@@ -1868,11 +1881,8 @@ setupQEDtxContext(DtxContextInfo *dtxContextInfo)
 
 		case DTX_CONTEXT_QE_PREPARED:
 		case DTX_CONTEXT_QE_FINISH_PREPARED:
-		// Do we need to do sanity check?
-#if 0
 			elog(ERROR, "We should not be trying to execute a query in state '%s'",
 				 DtxContextToString(DistributedTransactionContext));
-#endif
 			break;
 
 		default:

@@ -2332,6 +2332,7 @@ StartTransaction(void)
 	nUnreportedXids = 0;
 	s->didLogXid = false;
 	s->executorDidWriteXLog = false;
+	s->executorDidPrepared = false;
 
 	/*
 	 * must initialize resource-management stuff first
@@ -2498,10 +2499,8 @@ StartTransaction(void)
 		break;
 	
 		case DTX_CONTEXT_QE_PREPARED:
-#if 0
 			elog(FATAL, "Unexpected segment distribute transaction context: '%s'",
 				 DtxContextToString(DistributedTransactionContext));
-#endif
 			break;
 	
 		default:

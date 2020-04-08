@@ -118,6 +118,8 @@ CreateQueryDesc(PlannedStmt *plannedstmt,
 	if (Gp_role != GP_ROLE_EXECUTE)
 		increment_command_count();
 
+	qd->possible_eager_prepare = false;
+
 	return qd;
 }
 
@@ -622,12 +624,15 @@ PortalStart(Portal portal, ParamListInfo params,
 		 */
 		portal->strategy = ChoosePortalStrategy(portal->stmts);
 
-		/* PORTAL_ONE_MOD_WITH? */
+#if 0
+		/*
+		 * Optimize for the simple implicit insert/update/delete case,
+		 * though we still need to determine via the command type.
+		 * */
 		if (portal->possible_eager_prepare &&
-			!(portal->strategy == PORTAL_ONE_RETURNING ||
-			 portal->strategy == PORTAL_MULTI_QUERY))
+			portal->strategy != PORTAL_MULTI_QUERY)
 			portal->possible_eager_prepare = false;
-
+#endif
 		/* Initialize the backoff entry for this backend */
 		PortalBackoffEntryInit(portal);
 
@@ -1440,8 +1445,13 @@ PortalRunMulti(Portal portal,
 
 		if (lnext(stmtlist_item) != NULL)
 			portal->possible_eager_prepare = false;
-		else
+		else if (IsA(stmt, PlannedStmt) &&
+			(((PlannedStmt *) stmt)->commandType == CMD_INSERT ||
+			 ((PlannedStmt *) stmt)->commandType == CMD_UPDATE ||
+			 ((PlannedStmt *) stmt)->commandType == CMD_DELETE))
 			portal->possible_eager_prepare = possible_eager_prepare;
+		else
+			portal->possible_eager_prepare = false;
 
 		/*
 		 * If we got a cancel signal in prior command, quit

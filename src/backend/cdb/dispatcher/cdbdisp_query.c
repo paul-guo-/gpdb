@@ -517,7 +517,7 @@ cdbdisp_buildCommandQueryParms(const char *strCommand, int flags)
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase, false), /* ? */
+								  mppTxnOptions(needTwoPhase, false),
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -588,7 +588,7 @@ cdbdisp_buildUtilityQueryParms(struct Node *stmt,
 	pQueryParms->serializedDtxContextInfo =
 		qdSerializeDtxContextInfo(&pQueryParms->serializedDtxContextInfolen,
 								  withSnapshot, false,
-								  mppTxnOptions(needTwoPhase, false), /* ? */
+								  mppTxnOptions(needTwoPhase, false),
 								  "cdbdisp_dispatchCommandInternal");
 
 	return pQueryParms;
@@ -1071,6 +1071,29 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 	nTotalSlices = sliceTbl->numSlices;
 	sliceVector = palloc0(nTotalSlices * sizeof(SliceVec));
 	nSlices = fillSliceVector(sliceTbl, rootIdx, sliceVector, nTotalSlices);
+
+	if (queryDesc->possible_eager_prepare)
+	{
+		for (iSlice = 0; iSlice < nSlices; iSlice++)
+		{
+			Gang	   *primaryGang = NULL;
+			ExecSlice  *slice = sliceVector[iSlice].slice;
+
+			if (!slice || slice->gangType != GANGTYPE_PRIMARY_WRITER)
+				continue;
+
+			primaryGang = slice->primaryGang;
+			/* TODO: ?  
+			 * 1. begin; 2pc.
+			 * 2. one phase.
+			 * */
+			if (isDtxExplicitBegin() || (planRequiresTxn && primaryGang->size == 1))
+			{
+				queryDesc->possible_eager_prepare = false;
+				break;
+			}
+		}
+	}
 
 	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn);
 	queryText = buildGpQueryString(pQueryParms, &queryTextLength);
