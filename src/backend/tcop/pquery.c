@@ -324,8 +324,8 @@ ProcessQuery(Portal portal,
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
 		/* MPP-4082. Issue automatic ANALYZE if conditions are satisfied. */
-		bool inFunction = false;
-		auto_stats(cmdType, relationOid, queryDesc->es_processed, inFunction);
+		auto_stats(cmdType, relationOid, queryDesc->es_processed,
+				   false, queryDesc->possible_eager_prepare);
 	}
 
 	FreeQueryDesc(queryDesc);

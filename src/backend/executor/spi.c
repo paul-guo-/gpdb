@@ -2665,7 +2665,7 @@ _SPI_pquery(QueryDesc *queryDesc, bool fire_triggers, uint64 tcount)
 
 		/* MPP-14001: Running auto_stats */
 		if (Gp_role == GP_ROLE_DISPATCH)
-			auto_stats(cmdType, relationOid, queryDesc->es_processed, true /* inFunction */);
+			auto_stats(cmdType, relationOid, queryDesc->es_processed, true /* inFunction */, queryDesc->possible_eager_prepare);
 	}
 	PG_CATCH();
 	{

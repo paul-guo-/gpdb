@@ -1908,13 +1908,7 @@ exec_simple_query(const char *query_string)
 
 	debug_query_string = NULL;
 
-#if 0
-	StartTransactionCommand();
-	PushActiveSnapshot(GetTransactionSnapshot());
 	flush_auto_stats(); /* TODO: call it in other places for other cases. memory context, libpq protocol? */
-	PopActiveSnapshot();
-	CommitTransactionCommand();
-#endif
 }
 
 /*

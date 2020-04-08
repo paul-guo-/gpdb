@@ -18,6 +18,7 @@
  */
 #include "postgres.h"
 
+#include "access/xact.h"
 #include "catalog/catalog.h"
 #include "cdb/cdbvars.h"
 #include "cdb/cdbpartition.h"
@@ -32,6 +33,8 @@
 #include "utils/acl.h"
 #include "utils/guc.h"
 #include "utils/lsyscache.h"
+#include "utils/memutils.h"
+#include "utils/snapmgr.h"
 #include "utils/syscache.h"
 #include "utils/timestamp.h"
 
@@ -278,9 +281,12 @@ static List *autostats_list = NULL;
  *					an automatic analyze is issued.
  */
 void
-auto_stats(AutoStatsCmdType cmdType, Oid relationOid, uint64 ntuples, bool inFunction)
+auto_stats(AutoStatsCmdType cmdType, Oid relationOid, uint64 ntuples, bool inFunction, bool eagerPrepare)
 {
+	TimestampTz	start;
 	bool		policyCheck = false;
+
+	start = GetCurrentTimestamp();
 
 	if (Gp_role != GP_ROLE_DISPATCH || relationOid == InvalidOid
 		|| rel_is_partitioned(relationOid)
@@ -341,36 +347,92 @@ auto_stats(AutoStatsCmdType cmdType, Oid relationOid, uint64 ntuples, bool inFun
 			 ntuples);
 	}
 
-	MemoryContext oldcontext = MemoryContextSwitchTo(TopMemoryContext);
-	autostats_list = lappend_oid(autostats_list, relationOid);
-	MemoryContextSwitchTo(oldcontext);
-}
-
-void flush_auto_stats()
-{
-	Oid oid;
-	TimestampTz start;
-	start = GetCurrentTimestamp();
-	ListCell *cell;
-
-	foreach(cell, autostats_list)
+	if (eagerPrepare)
 	{
-		oid = lfirst_oid(cell);
-
-		/* TODO: sanity check oid. */
-		autostats_issue_analyze(oid);
+		MemoryContext oldcontext = MemoryContextSwitchTo(TopMemoryContext);
+		autostats_list = lappend_oid(autostats_list, relationOid);
+		MemoryContextSwitchTo(oldcontext);
+	}
+	else
+	{
+		autostats_issue_analyze(relationOid);
 
 		if (log_duration)
 		{
-			long		secs;
-			int			usecs;
-			int			msecs;
+			long        secs;
+			int         usecs;
+			int         msecs;
 
 			TimestampDifference(start, GetCurrentTimestamp(), &secs, &usecs);
 			msecs = usecs / 1000;
 			elog(LOG, "duration: %ld.%03d ms Auto-ANALYZE", secs * 1000 + msecs, usecs % 1000);
 		}
 	}
+}
+
+void flush_auto_stats()
+{
+	TimestampTz start;
+	ListCell *cell;
+
+	if (list_length(autostats_list) == 0)
+		return;
+
+	PortalContext = NULL;
+	start = GetCurrentTimestamp();
+	StartTransactionCommand();
+	PushActiveSnapshot(GetTransactionSnapshot());
+	/* A bit ugly hacking: vacuum analyze needs PortalContext. */
+	PortalContext = AllocSetContextCreate(TopMemoryContext,
+										  "PortalHeapMemory",
+										  ALLOCSET_SMALL_MINSIZE,
+										  ALLOCSET_SMALL_INITSIZE,
+										  ALLOCSET_SMALL_MAXSIZE);
+ 
+	PG_TRY();
+	{
+		foreach(cell, autostats_list)
+		{
+			HeapTuple	tuple;
+			Oid oid = lfirst_oid(cell);
+
+			/*
+			 * Skip analyzing if the relation does not exist. This is possible
+			 * in theory since auto_stats is running in a separate transaction.
+			 */
+			tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(oid));
+			if (!HeapTupleIsValid(tuple))
+				continue;
+
+			autostats_issue_analyze(oid);
+
+			if (log_duration)
+			{
+				long		secs;
+				int			usecs;
+				int			msecs;
+
+				TimestampDifference(start, GetCurrentTimestamp(), &secs, &usecs);
+				msecs = usecs / 1000;
+				/* TODO: test and check the logs. */
+				elog(LOG, "duration: %ld.%03d ms Auto-ANALYZE", secs * 1000 + msecs, usecs % 1000);
+			}
+		}
+	}
+	PG_CATCH();
+	{
+		list_free(autostats_list);
+		autostats_list = NULL;
+		if (PortalContext)
+			MemoryContextDelete(PortalContext);
+		PG_RE_THROW();
+	}
+	PG_END_TRY();
+
 	list_free(autostats_list);
 	autostats_list = NULL;
+	MemoryContextDelete(PortalContext);
+
+	PopActiveSnapshot();
+	CommitTransactionCommand();
 }

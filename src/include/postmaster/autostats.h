@@ -43,7 +43,7 @@ extern const char *autostats_cmdtype_to_string(AutoStatsCmdType cmdType);
 extern void autostats_get_cmdtype(QueryDesc *queryDesc,
 					  AutoStatsCmdType *pcmdType, Oid *prelationOid);
 extern void auto_stats(AutoStatsCmdType cmdType, Oid relationOid,
-		   uint64 ntuples, bool inFunction);
+		   uint64 ntuples, bool inFunction, bool eagerPrepare);
 extern void flush_auto_stats(void);
 
 #endif   /* AUTOSTATS_H */

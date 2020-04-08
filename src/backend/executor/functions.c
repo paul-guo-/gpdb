@@ -1025,7 +1025,7 @@ postquel_end(execution_state *es)
 
 		/* MPP-14001: Running auto_stats */
 		if (Gp_role == GP_ROLE_DISPATCH)
-			auto_stats(cmdType, relationOid, es->qd->es_processed, true /* inFunction */);
+			auto_stats(cmdType, relationOid, es->qd->es_processed, true /* inFunction */, es->qd->possible_eager_prepare /* TODO: What? */);
 	}
 
 	(*es->qd->dest->rDestroy) (es->qd->dest);

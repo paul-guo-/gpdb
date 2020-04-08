@@ -15288,7 +15288,7 @@ ATExecExpandTableCTAS(AlterTableCmd *rootCmd, Relation rel, AlterTableCmd *cmd)
 		ExecutorFinish(queryDesc);
 		ExecutorEnd(queryDesc);
 
-		auto_stats(cmdType, relationOid, queryDesc->es_processed, false);
+		auto_stats(cmdType, relationOid, queryDesc->es_processed, false, false);
 
 		FreeQueryDesc(queryDesc);
 
@@ -15821,6 +15821,7 @@ ATExecSetDistributedBy(Relation rel, Node *node, AlterTableCmd *cmd)
 			auto_stats(cmdType,
 					   relationOid,
 					   queryDesc->es_processed,
+					   false,
 					   false);
 
 		FreeQueryDesc(queryDesc);
