@@ -403,6 +403,7 @@ void flush_auto_stats()
 			tuple = SearchSysCache1(RELOID, ObjectIdGetDatum(oid));
 			if (!HeapTupleIsValid(tuple))
 				continue;
+			ReleaseSysCache(tuple);
 
 			autostats_issue_analyze(oid);
 
