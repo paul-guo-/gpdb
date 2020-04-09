@@ -272,6 +272,7 @@ extern bool	Debug_print_full_dtm;
 extern bool	Debug_print_snapshot_dtm;
 extern bool Debug_disable_distributed_snapshot;
 extern bool Debug_abort_after_distributed_prepared;
+extern bool gp_enable_eager_prepare;
 extern bool Debug_appendonly_print_insert;
 extern bool Debug_appendonly_print_insert_tuple;
 extern bool Debug_appendonly_print_scan;

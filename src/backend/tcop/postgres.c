@@ -1364,6 +1364,7 @@ exec_mpp_query(const char *query_string,
 		if (Gp_is_writer && DoEagerPrepare)
 		{
 			char        gid[TMGIDSIZE];
+
 			//elog(WARNING, "Doing EagerPrepare");
 			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
 			performDtxProtocolPrepare(gid);
@@ -1754,7 +1755,8 @@ exec_simple_query(const char *query_string)
 		/* Don't display the portal in pg_cursors */
 		portal->visible = false;
 
-		portal->possible_eager_prepare = (lnext(parsetree_item) == NULL);
+		portal->possible_eager_prepare = gp_enable_eager_prepare &&
+										 (lnext(parsetree_item) == NULL);
 
 		/*
 		 * We don't have to copy anything into the portal, because everything

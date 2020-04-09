@@ -600,7 +600,7 @@ standard_ExecutorStart(QueryDesc *queryDesc, int eflags)
 			{
 				queryDesc->possible_eager_prepare =
 					queryDesc->possible_eager_prepare &&
-					estate->es_sliceTable->slices[0].gangType == GANGTYPE_PRIMARY_WRITER;
+					(estate->es_sliceTable->slices[0].gangType == GANGTYPE_PRIMARY_WRITER);
 				/* FIXME: Other dispatch plan code to specify eager_prepare. */
 				CdbDispatchPlan(queryDesc,
 								estate->es_param_exec_vals,

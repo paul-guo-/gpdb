@@ -113,6 +113,7 @@ bool		Debug_print_full_dtm = false;
 bool		Debug_print_snapshot_dtm = false;
 bool		Debug_disable_distributed_snapshot = false;
 bool		Debug_abort_after_distributed_prepared = false;
+bool		gp_enable_eager_prepare = false;
 bool		Debug_appendonly_print_insert = false;
 bool		Debug_appendonly_print_insert_tuple = false;
 bool		Debug_appendonly_print_scan = false;
@@ -1155,6 +1156,17 @@ struct config_bool ConfigureNamesBool_gp[] =
 		},
 		&Debug_abort_after_distributed_prepared,
 		false,
+		NULL, NULL, NULL
+	},
+
+	{
+		{"gp_enable_eager_prepare", PGC_USERSET, DEVELOPER_OPTIONS,
+			gettext_noop("Enable eager prepare for 2PC optimization"),
+			NULL,
+			GUC_NO_SHOW_ALL | GUC_NOT_IN_SAMPLE /* TODO: Is this OK? */
+		},
+		&gp_enable_eager_prepare,
+		true,
 		NULL, NULL, NULL
 	},
 

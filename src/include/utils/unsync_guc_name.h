@@ -50,6 +50,7 @@
 		"db_user_namespace",
 		"deadlock_timeout",
 		"debug_abort_after_distributed_prepared",
+		"gp_enable_eager_prepare",
 		"Debug_appendonly_print_append_block",
 		"debug_appendonly_print_blockdirectory",
 		"debug_appendonly_print_compaction",
