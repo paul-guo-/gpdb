@@ -51,7 +51,8 @@ oneTrailingNewlinePQ(PQExpBuffer buf)
  */
 CdbDispatchResult *
 cdbdisp_makeResult(struct CdbDispatchResults *meleeResults,
-				   struct SegmentDatabaseDescriptor *segdbDesc, int sliceIndex)
+				   struct SegmentDatabaseDescriptor *segdbDesc, int sliceIndex,
+				   bool eager_prepare)
 {
 	CdbDispatchResult *dispatchResult;
 	int			meleeIndex;
@@ -76,6 +77,7 @@ cdbdisp_makeResult(struct CdbDispatchResults *meleeResults,
 	dispatchResult->error_message = createPQExpBuffer();
 	dispatchResult->numrowsrejected = 0;
 	dispatchResult->numrowscompleted = 0;
+	dispatchResult->eager_prepare = eager_prepare;
 
 	if (PQExpBufferBroken(dispatchResult->resultbuf) ||
 		PQExpBufferBroken(dispatchResult->error_message))

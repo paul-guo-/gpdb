@@ -14,6 +14,9 @@
 #include "cdb/cdbdtxcontextinfo.h"
 #include "cdb/cdbpublic.h"
 #include "nodes/plannodes.h"
+#ifndef FRONTEND
+#include "port/atomics.h"
+#endif
 
 struct Gang;
 
@@ -196,6 +199,7 @@ typedef struct TMGXACT_UTILITY_MODE_REDO
 	TMGXACT_LOG	gxact_log;
 }	TMGXACT_UTILITY_MODE_REDO;
 
+#ifndef FRONTEND
 typedef struct TMGXACT
 {
 	DistributedTransactionTimeStamp	distribTimeStamp;
@@ -215,7 +219,9 @@ typedef struct TMGXACT
 
 	bool						includeInCkpt;
 	int							sessionId;
+	pg_atomic_uint32			finished_reader_number;
 }	TMGXACT;
+#endif
 
 typedef struct TMGXACTLOCAL
 {

@@ -217,10 +217,12 @@ typedef struct TransactionStateData
 	bool		prevXactReadOnly;		/* entry-time xact r/o state */
 	bool		startedInRecovery;		/* did we start in recovery? */
 	bool		didLogXid;		/* has xid been included in WAL record? */
+	bool		doingPrepare;
 	int			parallelModeLevel;		/* Enter/ExitParallelMode counter */
 	bool		executorSaysXactDoesWrites;	/* GP executor says xact does writes */
 	bool		executorDidWriteXLog;	/* QE has wrote xlog */
-	bool		executorDidPrepared;
+	bool		executorHavePrepared;
+	bool		executorHaveNoPrepared;
 	struct TransactionStateData *parent;		/* back link to parent */
 
 	struct TransactionStateData *fastLink;        /* back link to jump to parent for efficient search */
@@ -257,10 +259,12 @@ static TransactionStateData TopTransactionStateData = {
 	false,						/* entry-time xact r/o state */
 	false,						/* startedInRecovery */
 	false,						/* didLogXid */
+	false,						/* doingPrepare */
 	0,							/* parallelMode */
 	false,						/* executorSaysXactDoesWrites */
 	false,						/* executorDidWriteXLog */
-	false,						/* */
+	false,						/* executorHavePrepared */
+	false,						/* executorHaveNoPrepared */
 	NULL						/* link to parent state block */
 };
 
@@ -467,12 +471,25 @@ ExecutorDidWriteXLog(void)
 }
 
 bool
-ExecutorDidPrepared(void)
+TransactionDoingPrepare(void)
 {
 	TransactionState s = CurrentTransactionState;
-	return s->executorDidPrepared;
+	return s->doingPrepare;
 }
 
+bool
+ExecutorHavePrepared(void)
+{
+	TransactionState s = CurrentTransactionState;
+	return s->executorHavePrepared;
+}
+
+bool
+ExecutorHaveNoPrepared(void)
+{
+	TransactionState s = CurrentTransactionState;
+	return s->executorHaveNoPrepared;
+}
 
 void
 GetAllTransactionXids(
@@ -563,10 +580,34 @@ MarkCurrentTransactionWriteXLogOnExecutor(void)
 }
 
 void
-MarkCurrentTransactionPreparedOnExecutor(void)
+MarkCurrentTransactionDoingPrepare(void)
 {
-	CurrentTransactionState->executorDidPrepared = true;
+	CurrentTransactionState->doingPrepare = true;
 }
+
+void
+UnMarkCurrentTransactionDoingPrepare(void)
+{
+	CurrentTransactionState->doingPrepare = false;
+}
+
+void
+MarkCurrentTransactionHavePreparedOnExecutor(void)
+{
+	CurrentTransactionState->executorHavePrepared = true;
+}
+
+void
+UnMarkCurrentTransactionHavePreparedOnExecutor(void)
+{
+	CurrentTransactionState->executorHavePrepared = false;
+}
+void
+MarkCurrentTransactionHaveNoPreparedOnExecutor(void)
+{
+	CurrentTransactionState->executorHaveNoPrepared = true;
+}
+
 
 /*
  *	GetStableLatestTransactionId
@@ -2331,8 +2372,10 @@ StartTransaction(void)
 	 */
 	nUnreportedXids = 0;
 	s->didLogXid = false;
+	s->doingPrepare = false;
 	s->executorDidWriteXLog = false;
-	s->executorDidPrepared = false;
+	s->executorHavePrepared = false;
+	s->executorHaveNoPrepared = false;
 
 	/*
 	 * must initialize resource-management stuff first

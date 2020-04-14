@@ -251,7 +251,8 @@ ReadyForQuery(CommandDest dest)
 					pq_endmessage(&buf);
 
 					pq_beginmessage(&buf, 'z');
-					pq_sendbyte(&buf, DistributedTransactionContext == DTX_CONTEXT_QE_PREPARED);
+					pq_sendbyte(&buf, TransactionDoingPrepare());
+					UnMarkCurrentTransactionDoingPrepare();
 					pq_endmessage(&buf);
 				}
 

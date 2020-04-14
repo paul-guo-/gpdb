@@ -109,6 +109,7 @@ typedef struct CdbDispatchResult
 
 	/* num rows completed in COPY FROM ON SEGMENT */
 	int	numrowscompleted;
+	bool eager_prepare;
 } CdbDispatchResult;
 
 /*
@@ -165,7 +166,7 @@ typedef struct CdbDispatchResults
 CdbDispatchResult *
 cdbdisp_makeResult(struct CdbDispatchResults *meleeResults,
                    struct SegmentDatabaseDescriptor *segdbDesc,
-                   int sliceIndex);
+                   int sliceIndex, bool eager_prepare);
 
 /*
  * Destroy a CdbDispatchResult object.

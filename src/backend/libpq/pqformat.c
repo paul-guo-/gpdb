@@ -102,7 +102,7 @@ pq_beginmessage(StringInfo buf, char msgtype)
  * --------------------------------
  */
 void
-pq_sendbyte(StringInfo buf, int byt)
+pq_sendbyte(StringInfo buf, char byt)
 {
 	appendStringInfoCharMacro(buf, byt);
 }

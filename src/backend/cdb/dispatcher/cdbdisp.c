@@ -301,6 +301,7 @@ cdbdisp_makeDispatcherState(bool isExtendedQuery)
 #endif
 	handle->dispatcherState->allocatedGangs = NIL;
 	handle->dispatcherState->largestGangSize = 0;
+	handle->dispatcherState->eager_prepare = false;
 
 	return handle->dispatcherState;
 }

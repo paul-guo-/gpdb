@@ -190,7 +190,7 @@ pqParseInput3(PGconn *conn)
 		}
 		else if (id == 'z')
 		{
-			if (pqGetc(&conn->query_prepared, conn))
+			if (pqGetc(&conn->query_just_prepared, conn))
 				return;
 		}
 #endif

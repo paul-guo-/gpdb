@@ -445,10 +445,9 @@ doPrepareTransaction(void)
 			(errmsg("The distributed transaction 'Prepare' broadcast succeeded to the segments"),
 			TM_ERRDETAIL));
 
-	/* processResults() set the state. */
-	Assert(MyTmGxactLocal->state == DTX_STATE_PREPARED);
-	//Assert(MyTmGxactLocal->state == DTX_STATE_PREPARING);
-	//setCurrentDtxState(DTX_STATE_PREPARED);
+	/* For eager processResults() set the state, else we need set it */
+	Assert(MyTmGxactLocal->state == DTX_STATE_PREPARED || MyTmGxactLocal->state == DTX_STATE_PREPARING);
+	setCurrentDtxState(DTX_STATE_PREPARED);
 
 	SIMPLE_FAULT_INJECTOR("dtm_broadcast_prepare");
 
@@ -848,12 +847,17 @@ prepareDtxTransaction(void)
 		   MyTmGxactLocal->state == DTX_STATE_PREPARED);
 	Assert(MyTmGxact->gxid > FirstDistributedTransactionId);
 
-	if (ExecutorDidPrepared())
+	/* All writer gang processes finish preparing. */
+	if (ExecutorHavePrepared() && !ExecutorHaveNoPrepared())
 	{
 		setCurrentDtxState(DTX_STATE_PREPARED);
 		return;
 	}
 
+	if (ExecutorHavePrepared() && ExecutorHaveNoPrepared())
+		MyTmGxactLocal->state = DTX_STATE_ACTIVE_DISTRIBUTED;
+
+	/* Some or all writer gang processes needs to do prepare. */
 	doPrepareTransaction();
 }
 
@@ -918,7 +922,7 @@ DETAIL:  gid=1586327824-0000000002, state=Notifying Abort Prepared
 ERROR:  new row for relation "insert_tbl" violates check constraint "insert_tbl_con"  (seg2 192.168.235.128:7004 pid=7659)
 DETAIL:  Failing row contains (44, Y, -44).
 			*/
-			if (ExecutorDidPrepared())
+			if (ExecutorHavePrepared())
 				setCurrentDtxState(DTX_STATE_NOTIFYING_ABORT_SOME_PREPARED);
 			else
 			setCurrentDtxState(DTX_STATE_NOTIFYING_ABORT_PREPARED);
@@ -1407,6 +1411,7 @@ resetGxact(void)
 	MyTmGxact->xminDistributedSnapshot = InvalidDistributedTransactionId;
 	MyTmGxact->includeInCkpt = false;
 	MyTmGxact->sessionId = 0;
+	pg_atomic_init_u32(&MyTmGxact->finished_reader_number, 0);
 
 	MyTmGxactLocal->explicitBeginRemembered = false;
 	MyTmGxactLocal->writerGangLost = false;
@@ -2004,6 +2009,7 @@ performDtxProtocolPrepare(const char *gid)
 	elog(DTM_DEBUG5, "Prepare of distributed transaction succeeded (id = '%s')", gid);
 
 	setDistributedTransactionContext(DTX_CONTEXT_QE_PREPARED);
+	MarkCurrentTransactionDoingPrepare();
 }
 
 static void
@@ -2187,6 +2193,12 @@ performDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 				case DTX_CONTEXT_QE_FINISH_PREPARED:
 				case DTX_CONTEXT_QE_ENTRY_DB_SINGLETON:
 				case DTX_CONTEXT_QE_READER:
+					if (dtxProtocolCommand == DTX_PROTOCOL_COMMAND_PREPARE && DistributedTransactionContext == DTX_CONTEXT_QE_PREPARED)
+					{
+						MarkCurrentTransactionDoingPrepare();
+						break;
+					}
+
 					elog(FATAL, "Unexpected segment distribute transaction context: '%s'",
 						 DtxContextToString(DistributedTransactionContext));
 					break;

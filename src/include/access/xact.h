@@ -361,8 +361,10 @@ extern bool IsAbortInProgress(void);
 extern bool IsTransactionPreparing(void);
 extern bool IsAbortedTransactionBlockState(void);
 extern bool TransactionDidWriteXLog(void);
+extern bool TransactionDoingPrepare(void);
 extern bool ExecutorDidWriteXLog(void);
-extern bool ExecutorDidPrepared(void);
+extern bool ExecutorHavePrepared(void);
+extern bool ExecutorHaveNoPrepared(void);
 extern void GetAllTransactionXids(
 	DistributedTransactionId	*distribXid,
 	TransactionId				*localXid,
@@ -375,7 +377,11 @@ extern TransactionId GetStableLatestTransactionId(void);
 extern SubTransactionId GetCurrentSubTransactionId(void);
 extern void MarkCurrentTransactionIdLoggedIfAny(void);
 extern void MarkCurrentTransactionWriteXLogOnExecutor(void);
-extern void MarkCurrentTransactionPreparedOnExecutor(void);
+extern void MarkCurrentTransactionDoingPrepare(void);
+extern void UnMarkCurrentTransactionDoingPrepare(void);
+extern void MarkCurrentTransactionHavePreparedOnExecutor(void);
+extern void UnMarkCurrentTransactionHavePreparedOnExecutor(void);
+extern void MarkCurrentTransactionHaveNoPreparedOnExecutor(void);
 extern bool SubTransactionIsActive(SubTransactionId subxid);
 extern CommandId GetCurrentCommandId(bool used);
 extern TimestampTz GetCurrentTransactionStartTimestamp(void);

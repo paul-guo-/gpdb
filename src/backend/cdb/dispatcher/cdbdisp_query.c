@@ -1083,10 +1083,9 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 				continue;
 
 			primaryGang = slice->primaryGang;
-			/* TODO: ?  
-			 * 1. begin; 2pc.
-			 * 2. one phase.
-			 * */
+			/*
+			 * TODO: temp table, even primaryGang->size > 1.
+			 */
 			if (isDtxExplicitBegin() || (planRequiresTxn && primaryGang->size == 1))
 			{
 				queryDesc->possible_eager_prepare = false;
@@ -1094,6 +1093,7 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 			}
 		}
 	}
+	ds->eager_prepare = queryDesc->possible_eager_prepare;
 
 	pQueryParms = cdbdisp_buildPlanQueryParms(queryDesc, planRequiresTxn);
 	queryText = buildGpQueryString(pQueryParms, &queryTextLength);

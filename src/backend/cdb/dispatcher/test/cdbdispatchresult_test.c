@@ -37,7 +37,7 @@ test__cdbdisp_makeResult__oom(void **state)
 	will_return_count(createPQExpBuffer, NULL, -1);
 	expect_any_count(destroyPQExpBuffer, str, -1);
 	will_be_called_count(destroyPQExpBuffer, -1);
-	result = cdbdisp_makeResult(results, segdbDesc, 0);
+	result = cdbdisp_makeResult(results, segdbDesc, 0, false);
 	assert_true(result == NULL);
 }
 

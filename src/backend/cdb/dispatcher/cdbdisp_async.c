@@ -295,7 +295,7 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
 		/*
 		 * Initialize the QE's CdbDispatchResult object.
 		 */
-		qeResult = cdbdisp_makeResult(ds->primaryResults, segdbDesc, sliceIndex);
+		qeResult = cdbdisp_makeResult(ds->primaryResults, segdbDesc, sliceIndex, ds->eager_prepare);
 		if (qeResult == NULL)
 		{
 			elog(FATAL, "could not allocate resources for segworker communication");
@@ -909,12 +909,27 @@ processResults(CdbDispatchResult *dispatchResult)
 		if (segdbDesc->conn->wrote_xlog)
 			MarkCurrentTransactionWriteXLogOnExecutor();
 
-		if (segdbDesc->conn->query_prepared)
+		if (segdbDesc->isWriter)
 		{
-			MarkCurrentTransactionPreparedOnExecutor();
-			// else if elog(ERROR) on another node would
-			// fail with "We should not be trying to execute a query in state"
-			setCurrentDtxState(DTX_STATE_PREPARED);
+			if (dispatchResult->eager_prepare)
+			{
+				if (segdbDesc->conn->query_just_prepared)
+				{
+					MarkCurrentTransactionHavePreparedOnExecutor();
+
+					// else if elog(ERROR) on another node would
+					// fail with "We should not be trying to execute a query in state"
+					setCurrentDtxState(DTX_STATE_PREPARED);
+				}
+				else
+				{
+					MarkCurrentTransactionHaveNoPreparedOnExecutor();
+				}
+			}
+			else
+			{
+				UnMarkCurrentTransactionHavePreparedOnExecutor();
+			}
 		}
 
 		/*

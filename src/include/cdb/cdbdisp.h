@@ -48,6 +48,7 @@ typedef struct CdbDispatcherState
 #ifdef USE_ASSERT_CHECKING
 	bool isGangDestroying;
 #endif
+	bool eager_prepare;
 } CdbDispatcherState;
 
 typedef struct DispatcherInternalFuncs

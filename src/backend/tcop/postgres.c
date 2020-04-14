@@ -1016,6 +1016,7 @@ exec_mpp_query(const char *query_string,
 	SliceTable *sliceTable = NULL;
 	ExecSlice  *slice = NULL;
 	ParamListInfo paramLI = NULL;
+	int reader_number = 0;
 
 	Assert(Gp_role == GP_ROLE_EXECUTE);
 	/*
@@ -1116,9 +1117,35 @@ exec_mpp_query(const char *query_string,
 			if (i == sliceTable->numSlices)
 				elog(ERROR, "could not find QE identifier in process map");
 			sliceTable->localSlice = slice->sliceIndex;
-
 			/* Set global sliceid variable for elog. */
 			currentSliceId = sliceTable->localSlice;
+
+			/* Get the reader number..., todo: entrydb, etc. */
+			if (Gp_is_writer)
+			{
+				reader_number = 0;
+				for (i = 0; i < sliceTable->numSlices; i++)
+				{
+					slice = &sliceTable->slices[i];
+
+					if (slice->gangType == GANGTYPE_PRIMARY_READER)
+					{
+						ListCell *lc;
+						int contentId;
+
+						foreach(lc, slice->segments)
+						{
+							contentId = lfirst_int(lc);
+
+							if (GpIdentity.segindex == contentId)
+							{
+								reader_number++;
+								break;
+							}
+						}
+					}
+				}
+			}
 		}
 
 		if (ddesc->oidAssignments)
@@ -1360,15 +1387,38 @@ exec_mpp_query(const char *query_string,
 							Debug_dtm_action, commandTag)));
 		}
 
-		/* Do Prepare */
-		if (Gp_is_writer && DoEagerPrepare)
+		if (DoEagerPrepare)
 		{
-			char        gid[TMGIDSIZE];
+			if (!Gp_is_writer)
+			{
+				if (lockHolderProcPtr)
+					pg_atomic_add_fetch_u32(&ProcGlobal->allTmGxact[lockHolderProcPtr->pgprocno].finished_reader_number, 1);
+				else
+					elog(ERROR, "lockHolderProcPtr is NULL");
+			}
+			else
+			{
+				int count = 0;
+				//TODO: inc it earlier.
+				//while(count < 1)
+				while(count < 5)
+				{
+					if (pg_atomic_read_u32(&MyTmGxact->finished_reader_number) == reader_number)
+					{
+						char        gid[TMGIDSIZE];
 
-			//elog(WARNING, "Doing EagerPrepare");
-			dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
-			performDtxProtocolPrepare(gid);
-			DoEagerPrepare = false;
+						//elog(WARNING, "Doing EagerPrepare, %p, %d", MyTmGxact, MyProc->pgprocno);
+						dtxFormGID(gid, MyTmGxact->distribTimeStamp, MyTmGxact->gxid);
+						performDtxProtocolPrepare(gid);
+						DoEagerPrepare = false;
+						break;
+					}
+					pg_usleep( /* microseconds */ 2000);
+					count++;
+				}
+				/* TODO: life cycle of procno. */
+				//if (DoEagerPrepare) elog(WARNING, "Not Doing EagerPrepare, %p, %d", MyTmGxact, MyProc->pgprocno);
+			}
 		}
 
 		/*

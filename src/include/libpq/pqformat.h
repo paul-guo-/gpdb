@@ -16,7 +16,7 @@
 #include "lib/stringinfo.h"
 
 extern void pq_beginmessage(StringInfo buf, char msgtype);
-extern void pq_sendbyte(StringInfo buf, int byt);
+extern void pq_sendbyte(StringInfo buf, char byt);
 extern void pq_sendbytes(StringInfo buf, const char *data, int datalen);
 extern void pq_sendcountedtext(StringInfo buf, const char *str, int slen,
 				   bool countincludesself);
