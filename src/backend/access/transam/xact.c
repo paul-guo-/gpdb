@@ -6857,7 +6857,7 @@ xact_redo_commit(xl_xact_parsed_commit *parsed,
  * because subtransaction commit is never WAL logged.
  */
 static void
-xact_redo_distributed_commit(uint8 info, xl_xact_commit *xlrec, TransactionId xid)
+xact_redo_distributed_commit(uint8 info, xl_xact_commit *xlrec, TransactionId xid, XLogRecPtr lsn)
 {
 	TMGXACT_LOG gxact_log;
 	char gid[TMGIDSIZE];
@@ -6926,8 +6926,18 @@ xact_redo_distributed_commit(uint8 info, xl_xact_commit *xlrec, TransactionId xi
 			TransactionIdAdvance(ShmemVariableCache->nextXid);
 		}
 
-		DropRelationFiles(parsed.xnodes, parsed.nrels, true);
-		DropDatabaseDirectories(parsed.deldbs, parsed.ndeldbs, true);
+		if (parsed.nrels > 0)
+		{
+			XLogFlush(lsn);
+			DropRelationFiles(parsed.xnodes, parsed.nrels, true);
+		}
+
+		if (parsed.ndeldbs > 0)
+		{
+			XLogFlush(lsn);
+			DropDatabaseDirectories(parsed.deldbs, parsed.ndeldbs, true);
+		}
+
 		DoTablespaceDeletionForRedoXlog(parsed.tablespace_oid_to_delete_on_commit);
 	}
 
@@ -7073,7 +7083,8 @@ xact_redo(XLogReaderState *record)
 	{
 		xl_xact_commit *xlrec = (xl_xact_commit *) XLogRecGetData(record);
 
-		xact_redo_distributed_commit(XLogRecGetInfo(record), xlrec, XLogRecGetXid(record));
+		xact_redo_distributed_commit(XLogRecGetInfo(record), xlrec,
+									 XLogRecGetXid(record), record->EndRecPtr);
 	}
 	else if (info == XLOG_XACT_DISTRIBUTED_FORGET)
 	{
