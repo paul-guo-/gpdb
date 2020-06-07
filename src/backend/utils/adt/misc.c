@@ -30,6 +30,7 @@
 #include "funcapi.h"
 #include "miscadmin.h"
 #include "parser/scansup.h"
+#include "postmaster/bgwriter.h"
 #include "postmaster/fts.h"
 #include "postmaster/syslogger.h"
 #include "rewrite/rewriteHandler.h"
@@ -44,6 +45,7 @@
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/timestamp.h"
+#include "cdb/cdbvars.h"
 
 #define atooid(x)  ((Oid) strtoul((x), NULL, 10))
 
@@ -366,6 +368,58 @@ pg_terminate_backend_msg(PG_FUNCTION_ARGS)
 				 (errmsg("must be a member of the role whose process is being terminated or member of pg_signal_backend"))));
 
 	PG_RETURN_BOOL(r == SIGNAL_BACKEND_SUCCESS);
+}
+
+Datum
+gp_terminate_mpp_backends(PG_FUNCTION_ARGS)
+{
+	uint32 retry_count = PG_GETARG_UINT32(0); /* pause 0.1s in each try */
+	bool force_if_needed = PG_GETARG_BOOL(1);
+	uint32 count;
+
+	if (Gp_role != GP_ROLE_EXECUTE)
+		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						(errmsg("Only terminate mpp backends on segments"))));
+
+	if (!superuser())
+		ereport(ERROR, (errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
+						(errmsg("Superuser only to execute it"))));
+
+	elog(LOG, "Terminating all mpp backends gracefully except myself");
+
+	count = 0;
+	while (count < retry_count && SignalMppBackends(SIGTERM) > 0)
+	{
+		CHECK_FOR_INTERRUPTS();
+		pg_usleep(100 * 1000L); /* wait for 0.1s */
+		count++;
+	}
+
+	if (count < retry_count)
+	{
+		elog(LOG, "All mpp backends are terminated");
+		PG_RETURN_BOOL(true);
+	}
+
+	if (force_if_needed)
+	{
+		/*
+		 * Avoid core file generation. We just want to reset the postgres node.
+		 */
+		AvoidCorefileGeneration();
+		/*
+		 * crash recovery after elog(PANIC) might be slow when fsync-ing the
+		 * whole data directory, and this could make fts mark the primary as
+		 * down sometimes. Do a checkpoint in advance so that crash recovery is
+		 * faster to avoid this case.
+		 */
+		RequestCheckpoint(CHECKPOINT_IMMEDIATE | CHECKPOINT_FORCE | CHECKPOINT_WAIT);
+		elog(PANIC,"Some mpp backends may not be terminated. PANIC to reset"
+				   " postgres to terminate them");
+	}
+
+	elog(WARNING, "Some mpp backends may still exist");
+	PG_RETURN_BOOL(false);
 }
 
 /*

@@ -24,6 +24,7 @@
 #include "storage/procarray.h"
 
 #include "access/xact.h"
+#include "cdb/cdbgang.h"
 #include "cdb/cdbutil.h"
 #include "cdb/cdbvars.h"
 #include "cdb/cdbdispatchresult.h"
@@ -58,6 +59,7 @@ typedef struct InDoubtDtx
 
 static void recoverTM(void);
 static bool recoverInDoubtTransactions(void);
+static void TerminateMppBackends(void);
 static HTAB *gatherRMInDoubtTransactions(void);
 static void abortRMInDoubtTransactions(HTAB *htab);
 static void doAbortInDoubt(char *gid);
@@ -136,6 +138,14 @@ recoverTM(void)
 	elog(DTM_DEBUG3, "Starting to Recover DTM...");
 
 	/*
+	 * We'd better terminate residual segment mpp backends to avoid potential
+	 * issues. For example, there might be orphaned prepared transactions after
+	 * master reset or master/standby failover, which can not be aborted
+	 * during this dtx recovery.
+	 */
+	TerminateMppBackends();
+
+	/*
 	 * attempt to recover all in-doubt transactions.
 	 *
 	 * first resolve all in-doubt transactions from the DTM's perspective and
@@ -191,7 +201,7 @@ recoverInDoubtTransactions(void)
 
 	/*
 	 * Any in-doubt transctions found will be for aborted
-	 * transactions. Gather in-boubt transactions and issue aborts.
+	 * transactions. Gather in-doubt transactions and issue aborts.
 	 */
 	htab = gatherRMInDoubtTransactions();
 
@@ -242,6 +252,39 @@ recoverInDoubtTransactions(void)
 	RemoveRedoUtilityModeFile();
 
 	return true;
+}
+
+/*
+ * TerminateMppBackends:
+ * Terminates all mpp backend processes.
+ * We collect prepared transactions to abort during dtx recovery in
+ * gatherRMInDoubtTransactions(). If there are preparing transactions when
+ * calling gatherRMInDoubtTransactions we may lose them to abort and thus leave
+ * orphaned prepared transactions on segments.
+ */
+static void
+TerminateMppBackends()
+{
+	CdbPgResults term_cdb_pgresults = {NULL, 0};
+	const char *term_buf = "select * from gp_terminate_mpp_backends(150, true)";
+
+	PG_TRY();
+	{
+		CdbDispatchCommand(term_buf, DF_NONE, &term_cdb_pgresults);
+	}
+	PG_CATCH();
+	{
+		/*
+		 * If QE reset happens after graceful termination timeout, the dispatch
+		 * command could error out as expected. Need to capture the error else
+		 * dtx recovery will quit and waste time on re-terminating.
+		 */
+		FlushErrorState();
+		DisconnectAndDestroyAllGangs(true);
+	}
+	PG_END_TRY();
+
+	cdbdisp_clearCdbPgResults(&term_cdb_pgresults);
 }
 
 /*

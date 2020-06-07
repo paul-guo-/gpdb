@@ -63,6 +63,7 @@ $$ LANGUAGE plpgsql;
 -- not be accepted until DTX recovery is finished.
 -1U: SELECT gp_inject_fault('finish_prepared_start_of_function', 'reset', dbid)
      from gp_segment_configuration where content=0 and role='p';
+-1Uq:
 -- Join back to know master has completed postmaster reset.
 3<:
 -- Start a session on master which would complete the DTM recovery and hence COMMIT PREPARED
@@ -149,3 +150,52 @@ $$ LANGUAGE plpgsql;
 
 14: alter system reset dtx_phase2_retry_second;
 14: select pg_reload_conf();
+
+-- Scenario 5: QD panics when a QE process is doing prepare but not yet finished.
+-- This should cause dtx recovery terminates all mpp segment processes at first,
+-- else if the QE process is slow and then it could not finish prepare before
+-- master dtx recovery collects all in-doubted prepared transactions to abort,
+-- and then an orphaned prepared transaction is generated.
+
+15: CREATE TABLE master_reset(a int);
+15: SELECT gp_inject_fault_infinite('before_xlog_xact_prepare', 'suspend', dbid)
+	from gp_segment_configuration where role = 'p' and content = 1;
+15: SELECT gp_inject_fault_infinite('after_xlog_xact_prepare_flushed', 'skip', dbid)
+	from gp_segment_configuration where role = 'p' and content = 1;
+16&: INSERT INTO master_reset SELECT a from generate_series(1, 10) a;
+15: SELECT gp_wait_until_triggered_fault('before_xlog_xact_prepare', 1, dbid)
+      from gp_segment_configuration where role = 'p' and content = 1;
+
+-- trigger master panic and wait until master down before running any new query.
+17&: SELECT wait_till_master_shutsdown();
+18: SELECT gp_inject_fault('before_read_command', 'panic', 1);
+18: SELECT 1;
+-- unblock the QE process that was blocked during preparing so that dtx recovery
+-- could terminate the backend and then finish quickly. Note since dtx recovery
+-- is ongoing we need to do that with the utility mode.
+-1U: SELECT gp_inject_fault_infinite('before_xlog_xact_prepare', 'reset', dbid)
+	from gp_segment_configuration where role = 'p' and content = 1;
+16<:
+17<:
+
+-- wait until master is up for querying.
+19: SELECT 1;
+
+-- check to see if there is orphaned prepared transaction on the segment after
+-- we ensure that prepare is valid.
+-- Note without or without the fix, after_xlog_xact_prepare_flushed should be
+-- encountered normally (unless the io is so so slow that dtx recovery force to
+-- terminates the backend without finishing prepare) - that causes test
+-- flakiness.
+-1U: SELECT gp_wait_until_triggered_fault('after_xlog_xact_prepare_flushed', 1, dbid)
+	from gp_segment_configuration where role = 'p' and content = 1;
+1U: SELECT * from pg_prepared_xacts;
+
+-- cleanup
+19: SELECT gp_inject_fault_infinite('after_xlog_xact_prepare_flushed', 'reset', dbid)
+	from gp_segment_configuration where role = 'p' and content = 1;
+-- actually if there is orphaned prepared transaction, drop could fail since
+-- the orphaned prepared transaction holds lock of the table that conflicts
+-- with required lock of the drop operation, but we do not test orphaned
+-- prepared transaction indirectly.
+19: DROP TABLE master_reset;
