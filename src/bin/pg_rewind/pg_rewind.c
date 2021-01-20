@@ -805,13 +805,14 @@ digestControlFile(ControlFileData *ControlFile, char *src, size_t size)
 }
 
 /*
- * Sync target data directory to ensure that modifications are safely on disk.
+ * Sync affected files in the target data directory to ensure that
+ * modifications are safely on disk.
  *
- * We do this once, for the whole data directory, for performance reasons.  At
- * the end of pg_rewind's run, the kernel is likely to already have flushed
- * most dirty buffers to disk.  Additionally fsync_pgdata uses a two-pass
- * approach (only initiating writeback in the first pass), which often reduces
- * the overall amount of IO noticeably.
+ * We do this once, for performance reasons.  At the end of pg_rewind's run,
+ * the kernel is likely to already have flushed most dirty buffers to disk.
+ * Additionally fsync_pgdata uses a two-pass approach (only initiating
+ * writeback in the first pass), which often reduces the overall amount of IO
+ * noticeably.
  */
 static void
 syncTargetDirectory(void)
@@ -819,7 +820,26 @@ syncTargetDirectory(void)
 	if (!do_sync || dry_run)
 		return;
 
-	fsync_pgdata(datadir_target, PG_VERSION_NUM);
+	file_entry_t *entry;
+	int         i;
+
+#ifdef PG_FLUSH_DATA_WORKS
+	for (i = 0; i < filemap->narray; i++)
+	{
+		entry = filemap->array[i];
+
+		if (entry->action != FILE_ACTION_NONE)
+			pre_sync_fname(entry->path, entry->source_type == FILE_TYPE_DIRECTORY);
+	}
+#endif
+
+	for (i = 0; i < filemap->narray; i++)
+	{
+		entry = filemap->array[i];
+
+		if (entry->action != FILE_ACTION_NONE)
+			fsync_fname(entry->path, entry->source_type == FILE_TYPE_DIRECTORY);
+	}
 }
 
 /*

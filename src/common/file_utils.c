@@ -22,22 +22,11 @@
 #include "common/file_utils.h"
 #include "common/logging.h"
 
-
-/* Define PG_FLUSH_DATA_WORKS if we have an implementation for pg_flush_data */
-#if defined(HAVE_SYNC_FILE_RANGE)
-#define PG_FLUSH_DATA_WORKS 1
-#elif defined(USE_POSIX_FADVISE) && defined(POSIX_FADV_DONTNEED)
-#define PG_FLUSH_DATA_WORKS 1
-#endif
-
 /*
  * pg_xlog has been renamed to pg_wal in version 10.
  */
 #define MINIMUM_VERSION_FOR_PG_WAL	100000
 
-#ifdef PG_FLUSH_DATA_WORKS
-static int	pre_sync_fname(const char *fname, bool isdir);
-#endif
 static void walkdir(const char *path,
 					int (*action) (const char *fname, bool isdir),
 					bool process_symlinks);
@@ -212,7 +201,7 @@ walkdir(const char *path,
  */
 #ifdef PG_FLUSH_DATA_WORKS
 
-static int
+int
 pre_sync_fname(const char *fname, bool isdir)
 {
 	int			fd;
