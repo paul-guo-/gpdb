@@ -432,7 +432,7 @@ class SegmentRewind(Command):
         # Build the pg_rewind command. Do not run pg_rewind if standby.signal
         # file exists in target data directory because the target instance can
         # be started up normally as a mirror for WAL replication catch up.
-        rewind_cmd = '[ -f %s/standby.signal ] || PGOPTIONS="-c gp_role=utility" $GPHOME/bin/pg_rewind --write-recovery-conf --slot="internal_wal_replication_slot" --source-server="%s" --target-pgdata=%s' % (target_datadir, source_server, target_datadir)
+        rewind_cmd = 'if [ ! -f %s/standby.signal ]; then PGOPTIONS="-c gp_role=utility" $GPHOME/bin/pg_rewind --write-recovery-conf --slot="internal_wal_replication_slot" --source-server="%s" --target-pgdata=%s' % (target_datadir, source_server, target_datadir)
 
         if verbose:
             rewind_cmd = rewind_cmd + ' --progress'
@@ -441,6 +441,8 @@ class SegmentRewind(Command):
         # errors relating to relevant failures(like it will not rewind due to
         # a corrupted pg_control file) to stderr.
         rewind_cmd = rewind_cmd + " > {} 2>&1".format(pipes.quote(progress_file))
+
+        rewind_cmd = rewind_cmd + ' && touch %s/gp_recovery_sync_done; fi' % (target_datadir)
 
         self.cmdStr = rewind_cmd
 

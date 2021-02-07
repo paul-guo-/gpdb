@@ -340,4 +340,10 @@ extern bool XLogArchiveIsReady(const char *xlog);
 extern bool XLogArchiveIsReadyOrDone(const char *xlog);
 extern void XLogArchiveCleanup(const char *xlog);
 
+/*
+ * GPDB specific: implies pg_basebackup or pg_rewind has done fsync on the
+ * whole pg data directory so startup could skip the unnecessary pg data fsync.
+ */
+#define RECOVERY_SYNC_DONE      "gp_recovery_sync_done"
+
 #endif							/* XLOG_INTERNAL_H */

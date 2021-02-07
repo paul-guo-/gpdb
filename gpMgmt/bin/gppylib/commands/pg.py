@@ -224,6 +224,8 @@ class PgBaseBackup(Command):
         if logfile:
             cmd_tokens.append('> %s 2>&1' % pipes.quote(logfile))
 
+        cmd_tokens.append(' && touch %s/gp_recovery_sync_done' % pgdata)
+
         cmd_str = ' '.join(cmd_tokens)
 
         self.command_tokens = cmd_tokens

@@ -6496,12 +6496,25 @@ StartupXLOG(void)
 		ControlFile->state != DB_SHUTDOWNED_IN_RECOVERY)
 	{
 		RemoveTempXlogFiles();
-		ereport(LOG,
-				(errmsg("force synchronization of the data directory since the"
-						" database system was uncleanly shut down.")));
-		SyncDataDirectory();
-		ereport(LOG,
-				(errmsg("synchronization of the data directory is finished.")));
+
+		/*
+		 * GPDB specific:
+		 * if the pg data directory has been fsync-ed via gprecoverseg,
+		 * we could skip the time-consuming fsync step here.
+		 */
+		struct stat stat_buf;
+		if (stat(RECOVERY_SYNC_DONE, &stat_buf) < 0)
+		{
+			ereport(LOG,
+					(errmsg("force synchronization of the data directory since the"
+							" database system was uncleanly shut down.")));
+			SyncDataDirectory();
+			ereport(LOG,
+					(errmsg("synchronization of the data directory is finished.")));
+		}
+		else
+			unlink(RECOVERY_SYNC_DONE);
+
 		if (Gp_role == GP_ROLE_DISPATCH)
 			*shmCleanupBackends = true;
 	}
