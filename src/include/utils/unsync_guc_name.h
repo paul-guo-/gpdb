@@ -138,6 +138,7 @@
 		"external_pid_file",
 		"extra_float_digits",
 		"from_collapse_limit",
+		"recovery_init_sync_method",
 		"fsync",
 		"full_page_writes",
 		"geqo",
