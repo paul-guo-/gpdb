@@ -382,7 +382,8 @@ HandleFtsWalRepPromote(void)
 	 * idempotent way.
 	 */
 	DBState state = GetCurrentDBState();
-	if (state == DB_IN_ARCHIVE_RECOVERY)
+	XLogRecPtr redoRecPtr = GetRedoRecPtr();
+	if (state == DB_IN_ARCHIVE_RECOVERY && redoRecPtr != InvalidXLogRecPtr)
 	{
 		/*
 		 * Reset sync_standby_names on promotion. This is to avoid commits
@@ -400,8 +401,9 @@ HandleFtsWalRepPromote(void)
 	}
 	else
 	{
-		elog(LOG, "ignoring promote request, walreceiver not running,"
-			 " DBState = %d", state);
+		elog(LOG, "ignoring promote request, database is not ready for promote,"
+			 " DBState = %d, Redo LSN = %X/%X", state,
+			 (uint32) (redoRecPtr >> 32), (uint32) redoRecPtr);
 	}
 
 	SendFtsResponse(&response, FTS_MSG_PROMOTE);
