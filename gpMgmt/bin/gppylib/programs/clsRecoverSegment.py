@@ -294,7 +294,7 @@ class GpRecoverSegmentProgram:
         self._output_segments_with_persistent_mirroring_disabled(segs_with_persistent_mirroring_disabled)
 
         return GpMirrorListToBuild(segs, self.__pool, self.__options.quiet,
-                                   self.__options.parallelDegree, forceoverwrite=True,
+                                   self.__options.parallelDegree, forceoverwrite=True, nosync=self.__options.noSync,
                                    progressMode=self.getProgressMode())
 
     def findAndValidatePeersForFailedSegments(self, gpArray, failedSegments):
@@ -413,6 +413,7 @@ class GpRecoverSegmentProgram:
                                    self.__options.parallelDegree,
                                    interfaceHostnameWarnings,
                                    forceoverwrite=True,
+                                   nosync=self.__options.noSync,
                                    progressMode=self.getProgressMode())
 
     def _output_segments_with_persistent_mirroring_disabled(self, segs_persistent_mirroring_disabled=None):
@@ -755,6 +756,8 @@ class GpRecoverSegmentProgram:
                          dest='rebalanceSegments', help='Rebalance synchronized segments.')
         addTo.add_option('', '--hba-hostnames', action='store_true', dest='hba_hostnames',
                          help='use hostnames instead of CIDR in pg_hba.conf')
+        addTo.add_option('', '--no-sync', default=False, action='store_true',
+                         dest='noSync', help='dont fsync after full recovery (used for testing only)')
 
         parser.set_defaults()
         return parser

@@ -176,7 +176,7 @@ select pg_ctl((select datadir from gp_segment_configuration c where c.role='m' a
 (1 row)
 
 -- fully recover the failed primary as new mirror
-!\retcode gprecoverseg -aF --no-progress;
+!\retcode gprecoverseg -aF --no-progress --no-sync;
 -- start_ignore
 -- end_ignore
 (exited with code 0)

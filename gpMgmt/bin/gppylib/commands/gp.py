@@ -906,7 +906,7 @@ class ConfigureNewSegment(Command):
 
     def __init__(self, name, confinfo, logdir, newSegments=False, tarFile=None,
                  batchSize=None, verbose=False,ctxt=LOCAL, remoteHost=None, validationOnly=False, writeGpIdFileOnly=False,
-                 forceoverwrite=False):
+                 forceoverwrite=False, nosync=False):
 
         cmdStr = '$GPHOME/bin/lib/gpconfigurenewsegment -c \"%s\" -l %s' % (confinfo, pipes.quote(logdir))
 
@@ -924,6 +924,8 @@ class ConfigureNewSegment(Command):
             cmdStr += " --write-gpid-file-only"
         if forceoverwrite:
             cmdStr += " --force-overwrite"
+        if nosync:
+            cmdStr += " --no-sync"
 
         Command.__init__(self, name, cmdStr, ctxt, remoteHost)
 

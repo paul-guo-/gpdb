@@ -35,7 +35,7 @@ select content, preferred_role, role, status, mode
 from gp_segment_configuration
 where content = 0 order by role;
 
-!\retcode gprecoverseg -aF --no-progress;
+!\retcode gprecoverseg -aF --no-progress --no-sync;
 
 -- loop while segments come in sync
 select wait_until_all_segments_synchronized();

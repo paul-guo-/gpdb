@@ -123,7 +123,7 @@ select pg_ctl((select datadir from gp_segment_configuration c
 where c.role='m' and c.content=0), 'stop');
 
 -- fully recover the failed primary as new mirror
-!\retcode gprecoverseg -aF --no-progress;
+!\retcode gprecoverseg -aF --no-progress --no-sync;
 
 -- loop while segments come in sync
 select wait_until_all_segments_synchronized();

@@ -75,7 +75,7 @@ SELECT role, preferred_role, mode, status FROM gp_segment_configuration WHERE co
 
 -- post test cleanup
 -- start_ignore
-\! gprecoverseg -aF --no-progress;
+\! gprecoverseg -aF --no-progress --no-sync;
 -- end_ignore
 
 -- loop while segments come in sync
