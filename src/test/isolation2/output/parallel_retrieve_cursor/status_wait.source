@@ -13,9 +13,9 @@ BEGIN
 1: DECLARE c1 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 1 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c1';
- endpoint_id1_1 | token_id | host_id | port_id | READY
- endpoint_id1_2 | token_id | host_id | port_id | READY
- endpoint_id1_3 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
 (3 rows)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 
@@ -196,9 +196,9 @@ BEGIN
 1: DECLARE c2 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 2 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c2';
- endpoint_id2_1 | token_id | host_id | port_id | READY
- endpoint_id2_2 | token_id | host_id | port_id | READY
- endpoint_id2_3 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
 (3 rows)
 -- test RETRIEVE success on seg1
 0R: @pre_run 'set_endpoint_variable @ENDPOINT2': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT2";
@@ -460,9 +460,9 @@ BEGIN
 1: DECLARE c3 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 3 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c3';
- endpoint_id3_1 | token_id | host_id | port_id | READY
- endpoint_id3_2 | token_id | host_id | port_id | READY
- endpoint_id3_3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
 (3 rows)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');  <waiting ...>
 0R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
@@ -481,7 +481,7 @@ DECLARE
 (10 rows)
 -- a new retrieve session should report error
 3R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
-ERROR:  endpoint endpoint_id3_1 was already attached by receiver(pid: PID)
+ERROR:  endpoint endpoint_id3 was already attached by receiver(pid: PID)
 DETAIL:  An endpoint can only be attached by one retrieving session.
 -- quit this new retrieve session
 3Rq: ... <quitting>
@@ -596,9 +596,9 @@ BEGIN
 1: DECLARE c4 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 4 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c4';
- endpoint_id4_1 | token_id | host_id | port_id | READY
- endpoint_id4_2 | token_id | host_id | port_id | READY
- endpoint_id4_3 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
 (3 rows)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4');  <waiting ...>
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
@@ -733,9 +733,9 @@ BEGIN
 1: DECLARE c5 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 5 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c5';
- endpoint_id5_1 | token_id | host_id | port_id | READY
- endpoint_id5_2 | token_id | host_id | port_id | READY
- endpoint_id5_3 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
 (3 rows)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5');  <waiting ...>
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
@@ -755,7 +755,7 @@ DECLARE
 (10 rows)
 -- 1R still bind to Test4 session, so can not retrieve from current endpoint.
 1R: @pre_run 'set_endpoint_variable @ENDPOINT5': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT5";
-ERROR:  failed to attach non-existing endpoint endpoint_id5_2 
+ERROR:  failed to attach non-existing endpoint endpoint_id5 
 -- Since seg1 retrieve session is bind to Test4 session. And Test4 session get killed. We need to restart it.
 1Rq: ... <quitting>
 1R: @pre_run 'set_endpoint_variable @ENDPOINT5': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT5";
@@ -868,9 +868,9 @@ BEGIN
 1: DECLARE c6 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 6 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c6';
- endpoint_id6_1 | token_id | host_id | port_id | READY
- endpoint_id6_2 | token_id | host_id | port_id | READY
- endpoint_id6_3 | token_id | host_id | port_id | READY
+ endpoint_id6 | token_id | host_id | port_id | READY
+ endpoint_id6 | token_id | host_id | port_id | READY
+ endpoint_id6 | token_id | host_id | port_id | READY
 (3 rows)
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID61 1 1 ; create_sub "${PID61}[ \t]*" QDPid61': select pg_backend_pid();
@@ -998,9 +998,9 @@ BEGIN
 1: DECLARE c61 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 61 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c61';
- endpoint_id61_1 | token_id | host_id | port_id | READY
- endpoint_id61_2 | token_id | host_id | port_id | READY
- endpoint_id61_3 | token_id | host_id | port_id | READY
+ endpoint_id61 | token_id | host_id | port_id | READY
+ endpoint_id61 | token_id | host_id | port_id | READY
+ endpoint_id61 | token_id | host_id | port_id | READY
 (3 rows)
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID611 1 1 ; create_sub "${PID611}[ \t]*" QDPid611': select pg_backend_pid();
@@ -1127,9 +1127,9 @@ BEGIN
 1: DECLARE c7 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 7 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c7';
- endpoint_id7_1 | token_id | host_id | port_id | READY
- endpoint_id7_2 | token_id | host_id | port_id | READY
- endpoint_id7_3 | token_id | host_id | port_id | READY
+ endpoint_id7 | token_id | host_id | port_id | READY
+ endpoint_id7 | token_id | host_id | port_id | READY
+ endpoint_id7 | token_id | host_id | port_id | READY
 (3 rows)
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID71 1 1 ; create_sub "${PID71}[ \t]*" QDPid71': select pg_backend_pid();

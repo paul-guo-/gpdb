@@ -147,8 +147,7 @@ static void abort_endpoint(EndpointExecState *state);
 static void wait_parallel_retrieve_close(void);
 
 /* utility */
-static void generate_endpoint_name(char *name, const char *cursorName,
-					   int32 sessionID);
+static void generate_endpoint_name(char *name, const char *cursorName);
 
 /*
  * Calculate the shared memory size for PARALLEL RETRIEVE CURSOR execute.
@@ -461,7 +460,7 @@ alloc_endpoint(const char *cursorName, dsm_handle dsmHandle)
 		ereport(ERROR, (errcode(ERRCODE_PROGRAM_LIMIT_EXCEEDED),
 						errmsg("failed to allocate endpoint")));
 
-	generate_endpoint_name(sharedEndpoints[i].name, cursorName, gp_session_id);
+	generate_endpoint_name(sharedEndpoints[i].name, cursorName);
 	StrNCpy(sharedEndpoints[i].cursorName, cursorName, NAMEDATALEN);
 	sharedEndpoints[i].databaseID = MyDatabaseId;
 	sharedEndpoints[i].sessionID = gp_session_id;
@@ -837,6 +836,7 @@ free_endpoint(Endpoint endpoint)
 	endpoint->sessionDsmHandle = DSM_HANDLE_INVALID;
 	endpoint->empty = true;
 	memset((char *) endpoint->name, '\0', NAMEDATALEN);
+	memset((char *) endpoint->cursorName, '\0', NAMEDATALEN);
 	ResetLatch(&endpoint->ackDone);
 	DisownLatch(&endpoint->ackDone);
 
@@ -951,7 +951,7 @@ get_session_id_from_token(Oid userID, const int8 *token)
  * Generate the endpoint name.
  */
 static void
-generate_endpoint_name(char *name, const char *cursorName, int32 sessionID)
+generate_endpoint_name(char *name, const char *cursorName)
 {
 	int			len, cursorLen;
 
@@ -964,20 +964,13 @@ generate_endpoint_name(char *name, const char *cursorName, int32 sessionID)
 	memcpy(name, cursorName, cursorLen);
 	len += cursorLen;
 
-	/* part2: sessionID */
-	snprintf(name + len, ENDPOINT_NAME_SESSIONID_LEN + 1, "%08x", sessionID);
+	/* part2: gp_session_id */
+	snprintf(name + len, ENDPOINT_NAME_SESSIONID_LEN + 1, "%08x", gp_session_id);
 	len += ENDPOINT_NAME_SESSIONID_LEN;
 
-	/* part3:random */
-	char       *random = palloc(ENDPOINT_NAME_RANDOM_LEN / 2);
-
-	if (!pg_strong_random(random, ENDPOINT_NAME_RANDOM_LEN / 2))
-		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-						errmsg("failed to generate a new random.")));
-	hex_encode((const char *) random, ENDPOINT_NAME_RANDOM_LEN / 2,
-			   name + len);
-	pfree(random);
-	len += ENDPOINT_NAME_RANDOM_LEN;
+	/* part3: gp_command_count */
+	snprintf(name + len, ENDPOINT_NAME_COMMANDID_LEN + 1, "%08x", gp_command_count);
+	len += ENDPOINT_NAME_COMMANDID_LEN;
 
 	name[len] = '\0';
 }

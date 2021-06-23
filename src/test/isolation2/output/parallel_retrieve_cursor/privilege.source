@@ -64,9 +64,9 @@ BEGIN
 1: DECLARE c1 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 1 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c1';
- endpoint_id1_1 | token_id | host_id | port_id | READY
- endpoint_id1_2 | token_id | host_id | port_id | READY
- endpoint_id1_3 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
 (3 rows)
 1: SET SESSION AUTHORIZATION u1;
 SET
@@ -98,12 +98,12 @@ SET
  adminuser    | adminuser    
 (1 row)
 2: @post_run 'parse_endpoint_info 2 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c2';
- endpoint_id2_1 | token_id | host_id | port_id | READY
- endpoint_id2_2 | token_id | host_id | port_id | READY
- endpoint_id2_3 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
 (3 rows)
 2: @post_run 'parse_endpoint_info 12 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c12';
- endpoint_id12_1 | token_id | host_id | port_id | READY
+ endpoint_id12 | token_id | host_id | port_id | READY
 (1 row)
 2: SELECT DISTINCT(cursorname), userid FROM gp_endpoints();
  cursorname | userid 
@@ -174,9 +174,9 @@ SET
 1: DECLARE c3 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 2: @post_run 'parse_endpoint_info 3 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c3';
- endpoint_id3_1 | token_id | host_id | port_id | READY
- endpoint_id3_2 | token_id | host_id | port_id | READY
- endpoint_id3_3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
 (3 rows)
 --- uu1 can not see u1's endpoints.
 1: SELECT DISTINCT(cursorname), userid FROM gp_endpoints();
@@ -245,15 +245,15 @@ DECLARE
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 
 2: @post_run 'parse_endpoint_info 40 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c0';
- endpoint_id40_1 | token_id | host_id | port_id | READY
- endpoint_id40_2 | token_id | host_id | port_id | READY
- endpoint_id40_3 | token_id | host_id | port_id | READY
+ endpoint_id40 | token_id | host_id | port_id | READY
+ endpoint_id40 | token_id | host_id | port_id | READY
+ endpoint_id40 | token_id | host_id | port_id | READY
 (3 rows)
 
 2: @post_run 'parse_endpoint_info 4 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c1';
- endpoint_id4_1 | token_id | host_id | port_id | READY
- endpoint_id4_2 | token_id | host_id | port_id | READY
- endpoint_id4_3 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
 (3 rows)
 
 --- adminuser should NOT be able to retrieve from other's PARALLEL RETRIEVE CURSOR
@@ -347,9 +347,9 @@ BEGIN
 1: DECLARE c0 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 50 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c0';
- endpoint_id50_1 | token_id | host_id | port_id | READY
- endpoint_id50_2 | token_id | host_id | port_id | READY
- endpoint_id50_3 | token_id | host_id | port_id | READY
+ endpoint_id50 | token_id | host_id | port_id | READY
+ endpoint_id50 | token_id | host_id | port_id | READY
+ endpoint_id50 | token_id | host_id | port_id | READY
 (3 rows)
 1: SET SESSION AUTHORIZATION u1;
 SET
@@ -357,9 +357,9 @@ SET
 1: DECLARE c4 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 DECLARE
 1: @post_run 'parse_endpoint_info 5 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c4';
- endpoint_id5_1 | token_id | host_id | port_id | READY
- endpoint_id5_2 | token_id | host_id | port_id | READY
- endpoint_id5_3 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
+ endpoint_id5 | token_id | host_id | port_id | READY
 (3 rows)
 
 --- u2 is not able to see u1's endpoints on master

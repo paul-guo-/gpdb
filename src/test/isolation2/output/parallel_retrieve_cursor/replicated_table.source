@@ -26,7 +26,7 @@ DECLARE
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 1 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
- endpoint_id1_1 | token_id | host_id | port_id | READY
+ endpoint_id1 | token_id | host_id | port_id | READY
 (1 row)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
@@ -120,7 +120,7 @@ DECLARE
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 2 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
- endpoint_id2_1 | token_id | host_id | port_id | READY
+ endpoint_id2 | token_id | host_id | port_id | READY
 (1 row)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
@@ -214,7 +214,7 @@ DECLARE
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 3 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
- endpoint_id3_1 | token_id | host_id | port_id | READY
+ endpoint_id3 | token_id | host_id | port_id | READY
 (1 row)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
@@ -308,7 +308,7 @@ DECLARE
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 4 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
- endpoint_id4_1 | token_id | host_id | port_id | READY
+ endpoint_id4 | token_id | host_id | port_id | READY
 (1 row)
 1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
 2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>

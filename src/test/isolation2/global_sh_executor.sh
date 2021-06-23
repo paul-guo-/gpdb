@@ -149,7 +149,6 @@ parse_endpoint_info() {
     local token_col=$3
     local host_col=$4
     local port_col=$5
-    local index=1
     export CURRENT_ENDPOINT_POSTFIX="${postfix}"
 
     eval "ENDPOINT_NAME${postfix}=()"
@@ -173,12 +172,11 @@ parse_endpoint_info() {
         eval "TOKEN${postfix}=${token}"
         export RETRIEVE_TOKEN=${token}
 
-        create_match_sub_with_spaces  "${name}" "endpoint_id${postfix}_${index}" \
+        create_match_sub_with_spaces  "${name}" "endpoint_id${postfix}" \
             "${port}" port_id \
             "${token}" token_id \
             "${host}" host_id > /dev/null
 
-        index=$((index+1))
     # Filter out the first two lines and the last line.
     done <<<"$(echo "$RAW_STR" | sed '1,2d;$d')"
     # Ignore first 2 lines(table header) since hostname length may affect the diff result.
