@@ -10813,6 +10813,16 @@ SELECT * FROM func_array_nonarray_enum(ARRAY['blue'::rainbow, 'red'::rainbow], '
 (1 row)
 
 DROP FUNCTION IF EXISTS func_array_nonarray_enum(ANYARRAY, ANYNONARRAY, ANYENUM);
+--TVF accepts ANYENUM, ANYELEMENT, ANYELEMENT return ANYENUM, ANYARRAY
+CREATE FUNCTION return_enum_as_array(ANYENUM, ANYELEMENT, ANYELEMENT) RETURNS TABLE (ae ANYENUM, aa ANYARRAY)
+AS $$ SELECT $1, array[$2, $3] $$ LANGUAGE SQL STABLE;
+SELECT * FROM return_enum_as_array('red'::rainbow, 'yellow'::rainbow, 'blue'::rainbow);
+ ae  |      aa       
+-----+---------------
+ red | {yellow,blue}
+(1 row)
+
+DROP FUNCTION IF EXISTS return_enum_as_array(ANYENUM, ANYELEMENT, ANYELEMENT);
 -- start_ignore
 drop table foo;
 -- end_ignore
@@ -11588,6 +11598,26 @@ select * from tc, tt where c = v;
  1 | b | 1 | b
 (4 rows)
 
+-- bitmap scan on bitmap index
+create index tc_idx on tc using bitmap(c);
+select * from tc where c='a';
+ a | c 
+---+---
+ 1 | a
+ 1 | A
+(2 rows)
+
+explain select * from tc where c='a';
+                                  QUERY PLAN                                   
+-------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)  (cost=4.38..34.30 rows=50 width=36)
+   ->  Bitmap Heap Scan on tc  (cost=4.38..33.63 rows=17 width=36)
+         Recheck Cond: (c = 'a'::citext)
+         ->  Bitmap Index Scan on tc_idx  (cost=0.00..4.38 rows=17 width=0)
+               Index Cond: (c = 'a'::citext)
+ Optimizer: Postgres query optimizer
+(6 rows)
+
 -- test gpexpand phase 1
 -- right now, these will fall back to planner
 drop table if exists noexp_hash, gpexp_hash, gpexp_rand, gpexp_repl;
@@ -12297,6 +12327,19 @@ select * from sales where sales_ts::date != '2010-01-05' order by sales_ts;
  20 |      20 |      20 | Thu Jan 21 00:00:00 2010
 (19 rows)
 
+-- validate lossy cast logic can handle BCCs
+drop table if exists part_tbl_varchar;
+NOTICE:  table "part_tbl_varchar" does not exist, skipping
+CREATE TABLE part_tbl_varchar(a varchar(15) NOT NULL, b varchar(8) NOT NULL)
+DISTRIBUTED BY (a)
+PARTITION BY RANGE(b) (start('v1') end('v5'), start('v5') end('v9'), default partition def);
+insert into part_tbl_varchar values ('v3','v3'), ('v5','v5');
+select * from part_tbl_varchar where b between 'v3' and 'v4';
+ a  | b  
+----+----
+ v3 | v3
+(1 row)
+
 -- test n-ary inner and left joins with outer references
 drop table if exists tcorr1, tcorr2;
 NOTICE:  table "tcorr1" does not exist, skipping
@@ -12319,7 +12362,7 @@ where out.b in (select coalesce(tcorr2.a, 99)
                 from tcorr1 left outer join tcorr2 on tcorr1.a=tcorr2.a+out.a);
                                                    QUERY PLAN                                                   
 ----------------------------------------------------------------------------------------------------------------
- Nested Loop Semi Join  (cost=10000000001.05..10000000003.21 rows=3 width=8)
+ Nested Loop Semi Join  (cost=10000000001.05..10000000003.20 rows=3 width=8)
    ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..1.03 rows=1 width=8)
          ->  Seq Scan on tcorr1 "out"  (cost=0.00..1.01 rows=1 width=8)
    ->  Materialize  (cost=1.05..2.17 rows=1 width=4)
@@ -12415,7 +12458,7 @@ where out.b in (select coalesce(tcorr2.a, 99)
                 from tcorr1 left outer join tcorr2 on tcorr1.a=tcorr2.a+out.a);
                                                    QUERY PLAN                                                   
 ----------------------------------------------------------------------------------------------------------------
- Nested Loop Semi Join  (cost=10000000001.05..10000000003.21 rows=3 width=8)
+ Nested Loop Semi Join  (cost=10000000001.05..10000000003.20 rows=3 width=8)
    ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..1.03 rows=1 width=8)
          ->  Seq Scan on tcorr1 "out"  (cost=0.00..1.01 rows=1 width=8)
    ->  Materialize  (cost=1.05..2.17 rows=1 width=4)
@@ -13198,6 +13241,7 @@ select enable_xform('CXformInnerJoin2NLJoin');
 -----------------------------------
  CXformInnerJoin2NLJoin is enabled
 (1 row)
+
 -- end_ignore
 reset optimizer_enable_hashjoin;
 reset optimizer_trace_fallback;
@@ -13559,4 +13603,66 @@ ORDER BY to_char(order_datetime,'YYYY-Q')
  Optimizer: Postgres query optimizer
 (16 rows)
 
+-- test partioned table with no partitions
+create table no_part (a int, b int) partition by list (a) distributed by (b);
+select * from no_part;
+ a | b 
+---+---
+(0 rows)
+
+-- test casting with setops
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  except
+    select 2019::int)
+select * from v where year > 1;
+ year 
+------
+ 2018
+ 2020
+(2 rows)
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  except all
+    select 2019::int)
+select * from v where year > 1;
+ year 
+------
+ 2019
+ 2018
+ 2020
+ 2020
+(4 rows)
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  intersect
+    select 2019::int)
+select * from v where year > 1;
+ year 
+------
+ 2019
+(1 row)
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  intersect all
+    select 2019::int)
+select * from v where year > 1;
+ year 
+------
+ 2019
+(1 row)
+
 reset optimizer_trace_fallback;
+create table sqall_t1(a int) distributed by (a);
+insert into sqall_t1 values (1), (2), (3);
+set optimizer_join_order='query';
+select * from sqall_t1 where a not in (
+	    select b.a from sqall_t1 a left join sqall_t1 b on false);
+ a 
+---
+(0 rows)
+
+reset optimizer_join_order;

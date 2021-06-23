@@ -3030,6 +3030,7 @@ ReadCommonJoin(Join *local_node)
 
 	READ_BOOL_FIELD(prefetch_inner);
 	READ_BOOL_FIELD(prefetch_joinqual);
+	READ_BOOL_FIELD(prefetch_qual);
 
 	READ_ENUM_FIELD(jointype, JoinType);
 	READ_BOOL_FIELD(inner_unique);
@@ -3718,6 +3719,7 @@ _readCreateDomainStmt(void)
 
 	READ_NODE_FIELD(domainname);
 	READ_NODE_FIELD(typeName);
+	READ_NODE_FIELD(collClause);
 	READ_NODE_FIELD(constraints);
 
 	READ_DONE();

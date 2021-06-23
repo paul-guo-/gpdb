@@ -7,6 +7,9 @@ logger = gplog.get_default_logger()
 
 
 def get_unreachable_segment_hosts(hosts, num_workers):
+    if not hosts:
+        return []
+
     pool = base.WorkerPool(numWorkers=num_workers)
     try:
         for host in hosts:
@@ -29,7 +32,7 @@ def get_unreachable_segment_hosts(hosts, num_workers):
     unreachable_hosts = list(set(hosts).difference(reachable_hosts))
     unreachable_hosts.sort()
     if len(unreachable_hosts) > 0:
-        logger.warning("One or more hosts are not reachable via SSH.  Any segments on those hosts will be marked down")
+        logger.warning("One or more hosts are not reachable via SSH.")
         for host in sorted(unreachable_hosts):
             logger.warning("Host %s is unreachable" % host)
 

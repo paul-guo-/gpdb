@@ -142,8 +142,8 @@ CTranslatorExprToDXLUtils::PdxlnListFilterPartKey(CMemoryPool *mp,
 	else if (CScalarIdent::FCastedScId(pexprPartKey) ||
 			 CScalarIdent::FAllowedFuncScId(pexprPartKey))
 	{
-		IMDId *pmdidDestElem;
-		IMDId *pmdidArrayCastFunc;
+		IMDId *pmdidDestElem = nullptr;
+		IMDId *pmdidArrayCastFunc = nullptr;
 		ExtractCastFuncMdids(pexprPartKey->Pop(), &pmdidDestElem,
 							 &pmdidArrayCastFunc);
 		IMDId *pmdidDestArray =
@@ -285,8 +285,9 @@ CTranslatorExprToDXLUtils::PdxlnRangeFilterScCmp(
 		mp, md_accessor, ulPartLevel, fLowerBound, pdxlnScalar, cmp_type,
 		pmdidTypePartKey, pmdidTypeOther, pmdidTypeCastExpr, mdid_cast_func);
 
-	if (nullptr != mdid_cast_func && md_accessor->RetrieveFunc(mdid_cast_func)
-										 ->IsAllowedForPS())  // is a lossy cast
+	if (nullptr != mdid_cast_func && mdid_cast_func->IsValid() &&
+		md_accessor->RetrieveFunc(mdid_cast_func)
+			->IsAllowedForPS())	 // is a lossy cast
 	{
 		// In case of lossy casts, we don't want to eliminate partitions with
 		// exclusive ends when the predicate is on that end
@@ -373,8 +374,9 @@ CTranslatorExprToDXLUtils::PdxlnRangeFilterPartBound(
 		mp, md_accessor, ulPartLevel, fLowerBound, pdxlnScalar, ecmptInc,
 		pmdidTypePartKey, pmdidTypeOther, pmdidTypeCastExpr, mdid_cast_func);
 
-	if (nullptr != mdid_cast_func && md_accessor->RetrieveFunc(mdid_cast_func)
-										 ->IsAllowedForPS())  // is a lossy cast
+	if (nullptr != mdid_cast_func && mdid_cast_func->IsValid() &&
+		md_accessor->RetrieveFunc(mdid_cast_func)
+			->IsAllowedForPS())	 // is a lossy cast
 	{
 		// In case of lossy casts, we don't want to eliminate partitions with
 		// exclusive ends when the predicate is on that end
@@ -1139,41 +1141,6 @@ CTranslatorExprToDXLUtils::PdxlnValuesScan(
 #endif
 
 	return pdxlnValuesScan;
-}
-
-//---------------------------------------------------------------------------
-//	@function:
-//		CTranslatorExprToDXLUtils::PdxlnPartitionSelector
-//
-//	@doc:
-//		Construct a partition selector node
-//
-//---------------------------------------------------------------------------
-CDXLNode *
-CTranslatorExprToDXLUtils::PdxlnPartitionSelector(
-	CMemoryPool *mp, IMDId *mdid, ULONG ulPartLevels, ULONG scan_id,
-	CDXLPhysicalProperties *dxl_properties, CDXLNode *pdxlnPrL,
-	CDXLNode *pdxlnEqFilters, CDXLNode *pdxlnFilters, CDXLNode *pdxlnResidual,
-	CDXLNode *pdxlnPropagation, CDXLNode *pdxlnPrintable,
-	CDXLNode *child_dxlnode)
-{
-	CDXLNode *pdxlnSelector =
-		GPOS_NEW(mp) CDXLNode(mp, GPOS_NEW(mp) CDXLPhysicalPartitionSelector(
-									  mp, mdid, ulPartLevels, scan_id));
-
-	pdxlnSelector->SetProperties(dxl_properties);
-	pdxlnSelector->AddChild(pdxlnPrL);
-	pdxlnSelector->AddChild(pdxlnEqFilters);
-	pdxlnSelector->AddChild(pdxlnFilters);
-	pdxlnSelector->AddChild(pdxlnResidual);
-	pdxlnSelector->AddChild(pdxlnPropagation);
-	pdxlnSelector->AddChild(pdxlnPrintable);
-	if (nullptr != child_dxlnode)
-	{
-		pdxlnSelector->AddChild(child_dxlnode);
-	}
-
-	return pdxlnSelector;
 }
 
 //---------------------------------------------------------------------------

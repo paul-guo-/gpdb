@@ -396,7 +396,21 @@ CDXLOperatorFactory::MakeDXLAppend(CDXLMemoryManager *dxl_memory_manager,
 												   EdxltokenAppendIsZapped,
 												   EdxltokenPhysicalAppend);
 
-	return GPOS_NEW(mp) CDXLPhysicalAppend(mp, is_target, is_zapped);
+	ULONG scan_id = ExtractConvertAttrValueToUlong(
+		dxl_memory_manager, attrs, EdxltokenPartIndexId,
+		EdxltokenPhysicalAppend, true /* is_optional */,
+		gpos::ulong_max /* default_value */);
+
+	ULongPtrArray *selector_ids = nullptr;
+	if (scan_id != gpos::ulong_max)
+	{
+		selector_ids = ExtractConvertValuesToArray(dxl_memory_manager, attrs,
+												   EdxltokenSelectorIds,
+												   EdxltokenPhysicalAppend);
+	}
+
+	return GPOS_NEW(mp) CDXLPhysicalAppend(mp, is_target, is_zapped, scan_id,
+										   nullptr, selector_ids);
 }
 
 //---------------------------------------------------------------------------
@@ -3492,22 +3506,16 @@ CDXLOperatorFactory::ParseRelationStorageType(const XMLCh *xml_val)
 	}
 
 	if (0 == XMLString::compareString(
-				 xml_val,
-				 CDXLTokens::XmlstrToken(EdxltokenRelStorageAppendOnlyParquet)))
-	{
-		return IMDRelation::ErelstorageAppendOnlyParquet;
-	}
-
-	if (0 == XMLString::compareString(
 				 xml_val, CDXLTokens::XmlstrToken(EdxltokenRelStorageExternal)))
 	{
 		return IMDRelation::ErelstorageExternal;
 	}
 
 	if (0 == XMLString::compareString(
-				 xml_val, CDXLTokens::XmlstrToken(EdxltokenRelStorageVirtual)))
+				 xml_val,
+				 CDXLTokens::XmlstrToken(EdxltokenRelStorageMixedPartitioned)))
 	{
-		return IMDRelation::ErelstorageVirtual;
+		return IMDRelation::ErelstorageMixedPartitioned;
 	}
 
 	GPOS_ASSERT(!"Unrecognized storage type");

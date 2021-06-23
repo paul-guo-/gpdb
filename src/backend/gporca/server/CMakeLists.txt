@@ -37,9 +37,6 @@ function(add_orca_test TEST_NAME)
            WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR})
 endfunction()
 
-# GPDB_12_MERGE_FIXME: re-add the following tests once DPE is supported
-# CPartTblDPETest
-
 # GPDB_12_MERGE_FIXME: casts on part column no longer supported!
 # CPartTableLossyCastTest
 
@@ -111,7 +108,7 @@ CBitmapScanTest:
 IndexedNLJBitmap BitmapIndex-ChooseHashJoin BitmapTableScan-AO-Btree-PickOnlyHighNDV
 BitmapIndex-Against-InList BitmapTableScan-AO-Btree-PickIndexWithNoGap
 BitmapTableScan-ComplexConjDisj BitmapTableScan-ConjDisjWithOuterRefs
-BRINScan-Or;
+BRINScan-Or BitmapScan-Hetrogeneous-Partitioned;
 
 CIndexApplyTest:
 IndexNLJ-IndexGet-OuterRef IndexApply_NestLoopWithNestParamTrue IndexApply1
@@ -139,7 +136,7 @@ DynamicIndexScan-DefaultPartition DynamicIndexScan-DefaultPartition-2
 DynamicIndexScan-Homogenous-UnsupportedConstraint DynamicIndexScan-Heterogenous-UnsupportedConstraint
 DynamicIndexScan-Heterogenous-PartSelectEquality
 DynamicIndexScan-Heterogenous-PartSelectRange DynamicIndexScan-OpenEndedPartitions
-DynamicIndexScan-Relabel DynamicIndexScan-DroppedCols DynamicIndexGet-OuterRefs;
+DynamicIndexScan-Relabel DynamicIndexScan-DroppedCols;
 
 CIndexScanOnLeafTest:
 IndexOnLeaf-AddNewPartitionToRootTableContainingHeterogenousIndex
@@ -206,12 +203,20 @@ PartTbl-ComplexPredicate4 PartTbl-ComplexPredicate5 LargeMultiColumnInList;
 CPartTbl5Test:
 PartTbl-IsNullPredicate PartTbl-IsNotNullPredicate PartTbl-IndexOnDefPartOnly
 PartTbl-SubqueryOuterRef PartTbl-CSQ-PartKey PartTbl-CSQ-NonPartKey
-PartTbl-AggWithExistentialSubquery PartPredsWithRandom;
+PartTbl-AggWithExistentialSubquery PartPredsWithRandom DTS-Hetrogeneous-Partitioned;
 
 CPartTbl6Test:
 PartTbl-PredicateWithCast PartTbl-IDFList PartTbl-IDFNull
 PartTbl-PredicateWithCast PartTbl-EqPredicateWithCastRange
 PartTbl-PredicateWithCastList PartTbl-IDFWithCast;
+
+CPartTblDPETest:
+PartTbl-AvoidRangePred-DPE PartTbl-DPE-Correlated-NLOuter
+PartTbl-DPE PartTbl-DPE-GroupBy PartTbl-DPE-Limit
+DPE-with-unsupported-pred DPE-SemiJoin DPE-IN DPE-NOT-IN HJN-DPE-Bitmap-Outer-Child
+NLJ-Broadcast-DPE-Outer-Child PartTbl-MultiWayJoinWithDPE PartTbl-MultiWayJoinWithDPE-2
+PartTbl-LeftOuterHashJoin-DPE-IsNull PartTbl-LeftOuterNLJoin-DPE-IsNull
+PartTbl-List-DPE-Int-Predicates;
 
 CSetop1Test:
 ValueScanWithDuplicateAndSelfComparison PushGbBelowNaryUnionAll
@@ -221,7 +226,7 @@ MS-UnionAll-5 MS-UnionAll-6 MS-UnionAll-7 ManyTextUnionsInSubquery;
 CSetop2Test:
 Cascaded-UnionAll-Same-Cols-Order Cascaded-UnionAll-Differing-Cols
 Cascaded-UnionAll-Differing-Cols-Order Union-Over-UnionAll Nested-Setops
-Nested-Setops-2 Except IsNullUnionAllIsNotNull UnionAllWithTruncatedOutput
+Nested-Setops-2 Except InnerJoinOverJoinExcept InnerJoinOverJoinExceptAll IsNullUnionAllIsNotNull UnionAllWithTruncatedOutput
 Union-OuterRefs-Output Union-OuterRefs-Casting-Output
 Union-OuterRefs-InnerChild MS-UnionAll-2;
 
@@ -244,7 +249,7 @@ COuterJoin1Test:
 ExpandNAryJoinGreedyWithLOJOnly NaryWithLojAndNonLojChilds LOJ_bb_mpph LOJ-Condition-False
 LeftJoin-With-Pred-On-Inner LeftJoin-With-Pred-On-Inner2
 LeftJoin-With-Col-Const-Pred LeftJoin-With-Coalesce LOJWithFalsePred LeftJoin-DPv2-With-Select
-DPv2GreedyOnly DPv2MinCardOnly DPv2QueryOnly;
+DPv2GreedyOnly DPv2MinCardOnly DPv2QueryOnly LOJ-PushDown;
 
 COuterJoin2Test:
 LOJ-IsNullPred Select-Proj-OuterJoin OuterJoin-With-OuterRefs Join-Disj-Subqs
@@ -333,7 +338,10 @@ CIndexOnlyScanTest:
 IndexOnlyScan-NoDistKeyInIndex;
 
 CRightJoinTest:
-RightJoinHashed RightJoinRedistribute RightJoinReplicated RightJoinBothReplicated RightJoinNoDPSNonDistKey RightJoinTVF
+RightJoinHashed RightJoinRedistribute RightJoinReplicated RightJoinBothReplicated RightJoinNoDPSNonDistKey RightJoinTVF;
+
+CSqlFunctionTest:
+SqlFuncNullReject SqlFuncPredFactorize SqlFuncDmlScalar SqlFuncDmlTvf
 ")
 
 set(mdp_dir "../data/dxl/minidump/")

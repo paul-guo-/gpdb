@@ -150,6 +150,7 @@ def impl(context, num_primaries):
 
 
 @given('the user runs psql with "{psql_cmd}" against database "{dbname}"')
+@when('the user runs psql with "{psql_cmd}" against database "{dbname}"')
 @then('the user runs psql with "{psql_cmd}" against database "{dbname}"')
 def impl(context, dbname, psql_cmd):
     cmd = "psql -d %s %s" % (dbname, psql_cmd)
@@ -503,6 +504,34 @@ def impl(context, command, out_msg, num):
         raise Exception("Expected %s to occur %s times. Found %d" % (out_msg, num, count))
 
 
+def lines_matching_both(in_str, str_1, str_2):
+    lines = [x.strip() for x in in_str.split('\n')]
+    return [x for x in lines if x.count(str_1) and x.count(str_2)]
+
+
+@then('check if {command} ran "{called_command}" {num} times with args "{args}"')
+def impl(context, command, called_command, num, args):
+    run_cmd_out = "Running Command: %s" % called_command
+    matches = lines_matching_both(context.stdout_message, run_cmd_out, args)
+
+    if len(matches) != int(num):
+        raise Exception("Expected %s to occur with %s args %s times. Found %d. \n %s"
+                        % (called_command, args, num, len(matches), context.stdout_message))
+
+
+@then('{command} should only spawn up to {num} workers in WorkerPool')
+def impl(context, command, num):
+    workerPool_out = "WorkerPool() initialized with"
+    matches = lines_matching_both(context.stdout_message, workerPool_out, command)
+
+    for matched_line in matches:
+        iw_re = re.search('initialized with (\d+) workers', matched_line)
+        init_workers = int(iw_re.group(1))
+        if init_workers > int(num):
+            raise Exception("Expected Workerpool for %s to be initialized with %d workers. Found %d. \n %s"
+                            % (command, num, init_workers, context.stdout_message))
+
+
 @given('{command} should return a return code of {ret_code}')
 @when('{command} should return a return code of {ret_code}')
 @then('{command} should return a return code of {ret_code}')
@@ -717,14 +746,7 @@ def impl(context):
     run_gpcommand(context, cmd)
 
 def init_standby(context, coordinator_hostname, options, segment_hostname):
-    if coordinator_hostname != segment_hostname:
-        context.standby_hostname = segment_hostname
-        context.standby_port = os.environ.get("PGPORT")
-        remote = True
-    else:
-        context.standby_hostname = coordinator_hostname
-        context.standby_port = get_open_port()
-        remote = False
+    remote = (coordinator_hostname != segment_hostname)
     # -n option assumes gpinitstandby already ran and put standby in catalog
     if "-n" not in options:
         if remote:
@@ -763,10 +785,7 @@ def impl(context, coordinator, standby):
     context.coordinator_port = os.environ.get("PGPORT")
     context.standby_was_initialized = True
 
-@when('the user runs gpinitstandby with options "{options}"')
-@then('the user runs gpinitstandby with options "{options}"')
-@given('the user runs gpinitstandby with options "{options}"')
-def impl(context, options):
+def get_standby_variables_and_set_on_context(context):
     dbname = 'postgres'
     with closing(dbconn.connect(dbconn.DbURL(port=os.environ.get("PGPORT"), dbname=dbname), unsetSearchPath=False)) as conn:
         query = """select distinct content, hostname from gp_segment_configuration order by content limit 2;"""
@@ -778,8 +797,59 @@ def impl(context, options):
         except:
             raise Exception("Did not get two rows from query: %s" % query)
 
-    # if we have two hosts, assume we're testing on a multinode cluster
-    init_standby(context, coordinator_hostname, options, segment_hostname)
+    if coordinator_hostname != segment_hostname:
+        context.standby_hostname = segment_hostname
+        context.standby_port = os.environ.get("PGPORT")
+    else:
+        context.standby_hostname = coordinator_hostname
+        context.standby_port = get_open_port()
+
+    return coordinator_hostname, segment_hostname
+
+@when('the user runs gpinitstandby with options "{options}"')
+@then('the user runs gpinitstandby with options "{options}"')
+@given('the user runs gpinitstandby with options "{options}"')
+def impl(context, options):
+    coordinator_hostname, standby_hostname = get_standby_variables_and_set_on_context(context)
+    init_standby(context, coordinator_hostname, options, standby_hostname)
+
+def _handle_sigpipe():
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
+
+@when('the user runs gpinitstandby and {action} the unreachable host prompt')
+def impl(context, action):
+    coordinator_hostname, standby_hostname = get_standby_variables_and_set_on_context(context)
+    remote = (coordinator_hostname != standby_hostname)
+    context.coordinator_hostname = coordinator_hostname
+    context.coordinator_port = os.environ.get("PGPORT")
+    context.standby_was_initialized = True
+
+    if action == "accepts":
+        answers = "y\ny\n"
+    elif action == "rejects":
+        answers = "y\nn\n"
+    else:
+        raise Exception('Invalid action for the unreachable host prompt (valid options are "accepts" and "rejects"')
+
+    if remote:
+        context.standby_data_dir = coordinator_data_dir
+        cmd = ["ssh", standby_hostname]
+    else:
+        context.standby_data_dir = tempfile.mkdtemp() + "/standby_datadir"
+        cmd = ["bash", "-c"]
+
+    cmd.append("printf '%s' | gpinitstandby -s %s -S %s -P %s" % (answers, standby_hostname, context.standby_data_dir, context.standby_port))
+
+    p = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        preexec_fn=_handle_sigpipe,
+    )
+    context.stdout_message, context.stderr_message = p.communicate()
+    context.ret_code = p.returncode
+    if context.ret_code != 0:
+        context.error_message = context.stderr_message
 
 @when('the user runs gpactivatestandby with options "{options}"')
 @then('the user runs gpactivatestandby with options "{options}"')
@@ -1040,6 +1110,40 @@ def impl(context, seg):
         context.mseg_hostname = context.mseg.getSegmentHostName()
         context.mseg_dbid = context.mseg.getSegmentDbId()
         context.mseg_data_dir = context.mseg.getSegmentDataDirectory()
+
+
+@given('the cluster configuration has no segments where "{filter}"')
+def impl(context, filter):
+    SLEEP_PERIOD = 5
+    MAX_DURATION = 300
+    MAX_TRIES = MAX_DURATION // SLEEP_PERIOD
+
+    num_tries = 0
+    num_matching = 10
+    while num_matching and num_tries < MAX_TRIES:
+        num_tries += 1
+        time.sleep(SLEEP_PERIOD)
+        context.execute_steps(u'''
+        Given the user runs psql with "-c 'SELECT gp_request_fts_probe_scan()'" against database "postgres"
+    ''')
+        with closing(dbconn.connect(dbconn.DbURL(), unsetSearchPath=False)) as conn:
+            sql = "SELECT count(*) FROM gp_segment_configuration WHERE %s" % filter
+            num_matching = dbconn.querySingleton(conn, sql)
+
+    if num_matching:
+        raise Exception("could not achieve desired state")
+
+    context.execute_steps(u'''
+    Given the user runs psql with "-c 'BEGIN; CREATE TEMP TABLE tempt(a int); COMMIT'" against database "postgres"
+    ''')
+
+
+@given('the cluster configuration is saved for "{when}"')
+@then('the cluster configuration is saved for "{when}"')
+def impl(context, when):
+    if not hasattr(context, 'saved_array'):
+        context.saved_array = {}
+    context.saved_array[when] = GpArray.initFromCatalog(dbconn.DbURL())
 
 
 @when('we run a sample background script to generate a pid on "{seg}" segment')
@@ -1390,17 +1494,18 @@ def impl(context, filename, output):
     print(contents)
     check_stdout_msg(context, output)
 
-@then('verify that the last line of the file "{filename}" in the coordinator data directory contains the string "{output}" escaped')
-def impl(context, filename, output):
-    find_string_in_coordinator_data_directory(context, filename, output, True)
+@then('verify that the last line of the file "{filename}" in the coordinator data directory {contain} the string "{output}"{escape}')
+def impl(context, filename, contain, output, escape):
+    if contain == 'should contain':
+        valuesShouldExist = True
+    elif contain == 'should not contain':
+        valuesShouldExist = False
+    else:
+        raise Exception("only 'contains' and 'does not contain' are valid inputs")
 
+    find_string_in_coordinator_data_directory(context, filename, output, valuesShouldExist, (escape == ' escaped'))
 
-@then('verify that the last line of the file "{filename}" in the coordinator data directory contains the string "{output}"')
-def impl(context, filename, output):
-    find_string_in_coordinator_data_directory(context, filename, output)
-
-
-def find_string_in_coordinator_data_directory(context, filename, output, escapeStr=False):
+def find_string_in_coordinator_data_directory(context, filename, output, valuesShouldExist, escapeStr=False):
     contents = ''
     file_path = os.path.join(coordinator_data_dir, filename)
 
@@ -1411,8 +1516,11 @@ def find_string_in_coordinator_data_directory(context, filename, output, escapeS
     if escapeStr:
         output = re.escape(output)
     pat = re.compile(output)
-    if not pat.search(contents):
+    if valuesShouldExist and (not pat.search(contents)):
         err_str = "Expected stdout string '%s' and found: '%s'" % (output, contents)
+        raise Exception(err_str)
+    if (not valuesShouldExist) and pat.search(contents):
+        err_str = "Did not expect stdout string '%s' but found: '%s'" % (output, contents)
         raise Exception(err_str)
 
 
@@ -1484,8 +1592,14 @@ def impl(context, filename, some, output):
 
 
 
-@then('verify that the last line of the file "{filename}" in each segment data directory contains the string "{output}"')
-def impl(context, filename, output):
+@then('verify that the last line of the file "{filename}" in each segment data directory {contain} the string "{output}"')
+def impl(context, filename, contain, output):
+    if contain == 'should contain':
+        valuesShouldExist = True
+    elif contain == 'should not contain':
+        valuesShouldExist = False
+    else:
+        raise Exception("only 'should contain' and 'should not contain' are valid inputs")
     segment_info = []
     conn = dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False)
     try:
@@ -1505,8 +1619,11 @@ def impl(context, filename, output):
         cmd.run(validateAfter=True)
 
         actual = cmd.get_stdout()
-        if output not in actual:
-            raise Exception('File %s on host %s does not contain "%s"' % (filepath, host, output))
+        if valuesShouldExist and (output not in actual):
+                raise Exception('File %s on host %s does not contain "%s"' % (filepath, host, output))
+        if (not valuesShouldExist) and (output in actual):
+            raise Exception('File %s on host %s contains "%s"' % (filepath, host, output))
+
 
 @given('the gpfdists occupying port {port} on host "{hostfile}"')
 def impl(context, port, hostfile):
@@ -2484,6 +2601,7 @@ def impl(context):
 
 @given('an FTS probe is triggered')
 @when('an FTS probe is triggered')
+@then('an FTS probe is triggered')
 def impl(context):
     with closing(dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False)) as conn:
         dbconn.querySingleton(conn, "SELECT gp_request_fts_probe_scan()")

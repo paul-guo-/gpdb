@@ -241,7 +241,7 @@ class SQLIsolationExecutor(object):
         # The re.S flag makes the "." in the regex match newlines.
         # When matched against a command in process_command(), all
         # lines in the command are matched and sent as SQL query.
-        self.command_pattern = re.compile(r"^(-?\d+|[*])([&\\<\\>USRq]*?)\:(.*)", re.S)
+        self.command_pattern = re.compile(r"^(-?\d+|[*])([&\\<\\>URSMq]*?)\:(.*)", re.S)
         if dbname:
             self.dbname = dbname
         else:
@@ -378,6 +378,16 @@ class SQLIsolationExecutor(object):
                                           given_opt="-c gp_retrieve_conn=true",
                                           given_user=user,
                                           given_passwd=passwd)
+            elif self.mode == "mirror":
+                # Connect to mirror even when it's role is recorded
+                # as mirror.  This is useful for scenarios where a
+                # primary is marked down but could actually accept
+                # connection. This implies utility connection.
+                (hostname, port) = self.get_hostname_port(name, 'm')
+                self.con = self.connectdb(given_dbname=self.dbname,
+                                          given_host=hostname,
+                                          given_port=port,
+                                          given_opt="-c gp_role=utility")
             else:
                 self.con = self.connectdb(self.dbname)
 
@@ -645,6 +655,8 @@ class SQLIsolationExecutor(object):
                 con_mode = "standby"
             elif flag and flag[0] == "R":
                 con_mode = "retrieve"
+            elif flag and flag[0] == "M":
+                con_mode = "mirror"
             sql = m.groups()[2]
             sql = sql.lstrip()
             # If db_name is specifed , it should be of the following syntax:
@@ -761,6 +773,8 @@ class SQLIsolationExecutor(object):
             if len(sql) > 0:
                 raise Exception("No query should be given on quit")
             self.quit_process(output_file, process_name, con_mode, dbname=dbname)
+        elif flag == "M":
+            self.get_process(output_file, process_name, con_mode, dbname=dbname).query(sql.strip())
         else:
             raise Exception("Invalid isolation flag")
 

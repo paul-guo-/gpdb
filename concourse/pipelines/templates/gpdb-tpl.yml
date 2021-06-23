@@ -25,6 +25,11 @@
                       {'name': 'gprecoverseg',
                        'use_concourse_cluster': true,
                        'additional_ccp_vars': 'number_of_nodes: 3'},
+                      {'name': 'gprecoverseg_newhost',
+                       'use_concourse_cluster': true,
+                       'additional_ccp_vars': 'number_of_nodes: 7',
+                       'reserve_spare_hosts': true,
+                       'sudo_access_on_hosts': true},
                       {'name': 'gpaddmirrors',
                        'use_concourse_cluster': true,
                        'additional_ccp_vars': 'number_of_nodes: 4'},
@@ -57,6 +62,7 @@ anchors:
   action: create
   delete_on_failure: true
   generate_random_name: true
+  plugin_dir: ../../terraform.d/plugin-cache/linux_amd64
   terraform_source: ccp_src/google/
 
 - &ccp_default_vars
@@ -65,6 +71,7 @@ anchors:
 
 - &destroy_common
   action: destroy
+  plugin_dir: ../../terraform.d/plugin-cache/linux_amd64
   terraform_source: ccp_src/google/
   vars:
     aws_instance-node-instance_type: t2.micro #t2.micro is ignored in destroy, but aws_instance-node-instance_type is required.
@@ -110,8 +117,8 @@ anchors:
         image_resource:
           type: registry-image
           source:
-            repository: pivotaldata/ccp
-            tag: "7"
+            repository: gcr.io/data-gpdb-public-images/ccp
+            tag: latest
         inputs:
           - name: ccp_src
           - name: terraform
@@ -133,8 +140,8 @@ anchors:
   image_resource:
     type: registry-image
     source:
-      repository: pivotaldata/ccp
-      tag: "7"
+      repository: gcr.io/data-gpdb-public-images/ccp
+      tag: latest
   run:
     path: 'ccp_src/google/ccp_failed_test.sh'
   params:
@@ -437,22 +444,26 @@ resources:
 - name: terraform_2
   <<: *terraform_cluster
 
+- name: terraform.d
+  source:
+    access_key_id: ((bucket-access-key-id))
+    bucket: ccp-terraform-provider-plugins
+    region_name: ((aws-region))
+    secret_access_key: ((bucket-secret-access-key))
+    versioned_file: plugin-cache.tgz
+  type: s3
+
 - name: alpine-docker
   type: registry-image
   source:
     repository: alpine
     tag: latest
 
-- name: clang_toolchain
-  type: registry-image
-  source:
-    repository: gcr.io/data-orca/clang-toolchain
-
 - name: ccp-image
   type: registry-image
   source:
-    repository: pivotaldata/ccp
-    tag: '7'
+    repository: gcr.io/data-gpdb-public-images/ccp
+    tag: latest
 
 {% endif %}
 {% endif %}
@@ -475,35 +486,10 @@ resources:
     - README*
 
 {% if "centos7" in os_types %}
-- name: libquicklz-centos7
-  type: gcs
-  source:
-    bucket: ((gcs-bucket))
-    json_key: ((concourse-gcs-resources-service-account-key))
-    regexp: gp-internal-artifacts/centos7/libquicklz-(1\.5\.0-.*)-1.el7.x86_64.rpm
-
-- name: libquicklz-devel-centos7
-  type: gcs
-  source:
-    bucket: ((gcs-bucket))
-    json_key: ((concourse-gcs-resources-service-account-key))
-    regexp: gp-internal-artifacts/centos7/libquicklz-devel-(1\.5\.0-.*)-1.el7.x86_64.rpm
-
-{% endif %}
-{% if "ubuntu18.04" in os_types %}
-- name: libquicklz-ubuntu18.04
-  type: gcs
-  source:
-    bucket: ((gcs-bucket))
-    json_key: ((concourse-gcs-resources-service-account-key))
-    regexp: gp-internal-artifacts/ubuntu18.04/libquicklz-dev_(1\.5\.0-.*)-1_amd64.deb
-
-{% endif %}
-{% if "centos7" in os_types %}
 - name: gpdb7-centos7-build
   type: registry-image
   source:
-    repository: pivotaldata/gpdb7-centos7-build
+    repository: gcr.io/data-gpdb-public-images/gpdb7-centos7-build
     tag: latest
 
 {% endif %}
@@ -511,7 +497,7 @@ resources:
 - name: gpdb7-centos7-test
   type: registry-image
   source:
-    repository: pivotaldata/gpdb7-centos7-test
+    repository: gcr.io/data-gpdb-public-images/gpdb7-centos7-test
     tag: latest
 
 {% endif %}
@@ -520,13 +506,13 @@ resources:
 - name: gpdb7-ubuntu18.04-build
   type: registry-image
   source:
-    repository: pivotaldata/gpdb7-ubuntu18.04-build
+    repository: gcr.io/data-gpdb-public-images/gpdb7-ubuntu18.04-build
     tag: latest
 
 - name: gpdb7-ubuntu18.04-test
   type: registry-image
   source:
-    repository: pivotaldata/gpdb7-ubuntu18.04-test
+    repository: gcr.io/data-gpdb-public-images/gpdb7-ubuntu18.04-test
     tag: latest
 
 {% endif %}
@@ -576,6 +562,13 @@ resources:
     bucket: ((gcs-bucket))
     json_key: ((concourse-gcs-resources-service-account-key))
     regexp: clients/published/master/clients-rc-(.*)-ubuntu18.04_x86_64((rc-build-type-gcs)).tar.gz
+
+- name: server_src_rc
+  type: gcs
+  source:
+    bucket: ((gcs-bucket))
+    json_key: ((concourse-gcs-resources-service-account-key))
+    regexp: server-src/published/master/server-src-rc-*.tar.gz
 
 - name: greenplum-database-release
   type: git
@@ -734,13 +727,16 @@ jobs:
 
 - name: check_format
   plan:
-    - in_parallel:
-      - get: gpdb_src
-        trigger: true
-      - get: clang_toolchain
+    - get: gpdb_src
+      trigger: true
     - task: check_format
-      image: clang_toolchain
       file: gpdb_src/concourse/tasks/check_format.yml
+    - task: clang_tidy
+      file: gpdb_src/concourse/tasks/clang_tidy.yml
+      {% if use_ICW_workers %}
+      tags: [icw-ubuntu18.04]
+      {% endif %}
+
 
 ## ======================================================================
 ##   ____                      _ _
@@ -763,17 +759,11 @@ jobs:
           - check_format
         trigger: ((gpdb_src-trigger-flag))
       - get: gpdb7-centos7-build
-      - get: libquicklz-installer
-        resource: libquicklz-centos7
-      - get: libquicklz-devel-installer
-        resource: libquicklz-devel-centos7
   - task: compile_gpdb
     image: gpdb7-centos7-build
     file: gpdb_src/concourse/tasks/compile_gpdb.yml
     params:
       CONFIGURE_FLAGS: ((configure_flags_with_extensions))
-      TARGET_OS: centos
-      TARGET_OS_VERSION: 7
       BLD_TARGETS: "clients"
       RC_BUILD_TYPE_GCS: ((rc-build-type-gcs))
       USE_CCACHE: ((use_ccache))
@@ -784,7 +774,7 @@ jobs:
           file: gpdb_artifacts/bin_gpdb.tar.gz
       - put: bin_gpdb_clients_centos7
         params:
-          file: gpdb_artifacts/gpdb-clients-centos7.tar.gz
+          file: gpdb_artifacts/bin_gpdb_clients.tar.gz
 
 {% endif %}
 {% if "ubuntu18.04" in os_types %}
@@ -799,15 +789,11 @@ jobs:
             - check_format
           trigger: ((gpdb_src-trigger-flag))
         - get: gpdb7-ubuntu18.04-build
-        - get: libquicklz-installer
-          resource: libquicklz-ubuntu18.04
     - task: compile_gpdb
       image: gpdb7-ubuntu18.04-build
       file: gpdb_src/concourse/tasks/compile_gpdb.yml
       params:
         CONFIGURE_FLAGS: ((configure_flags_with_extensions))
-        TARGET_OS: ubuntu
-        TARGET_OS_VERSION: "18.04"
         BLD_TARGETS: "clients"
         RC_BUILD_TYPE_GCS: ((rc-build-type-gcs))
     - in_parallel:
@@ -817,7 +803,7 @@ jobs:
             file: gpdb_artifacts/bin_gpdb.tar.gz
         - put: bin_gpdb_clients_ubuntu18.04
           params:
-            file: gpdb_artifacts/gpdb-clients-ubuntu18.04.tar.gz
+            file: gpdb_artifacts/bin_gpdb_clients.tar.gz
 
 {% endif %}
 {% if "win" in os_types %}
@@ -1175,6 +1161,9 @@ jobs:
         trigger: [[ test_trigger ]]
       - get: ccp_src
       - get: ccp-image
+      - get: terraform.d
+        params:
+          unpack: true
   - put: terraform
     params:
       <<: *ccp_default_params
@@ -1277,6 +1266,9 @@ jobs:
             trigger: [[ test_trigger ]]
           - get: ccp_src
           - get: ccp-image
+          - get: terraform.d
+            params:
+              unpack: true
           - put: terraform
             params:
               <<: *ccp_default_params
@@ -1289,12 +1281,34 @@ jobs:
             file: ccp_src/ci/tasks/gen_cluster.yml
             params:
               <<: *ccp_gen_cluster_default_params
+          {% if test.reserve_spare_hosts %}
+          - get: alpine-docker
+          - task: reserve_spare_hosts
+            image: alpine-docker
+            config:
+              platform: linux
+              inputs:
+                - name: cluster_env_files
+              outputs:
+                - name: cluster_env_files
+              run:
+                path: sh
+                args:
+                  - -exc
+                  - |
+                    # modify the hostfile_init used by gpinitsystem to exclude the last two hosts, so they are spares
+                    cp cluster_env_files/hostfile_init cluster_env_files/hostfile_init_orig
+                    head -n -2 cluster_env_files/hostfile_init_orig > cluster_env_files/hostfile_init
+          {% endif %}
           - task: gpinitsystem
             file: ccp_src/ci/tasks/gpinitsystem.yml
           - task: [[ test.name ]]_concourse_cluster_tests
             file: gpdb_src/concourse/tasks/run_behave_on_ccp_cluster.yml
             image: ccp-image
             params:
+              {% if test.sudo_access_on_hosts %}
+              SUDO_ACCESS_ON_HOSTS: 1
+              {% endif %}
               BEHAVE_FLAGS: --tags=[[ test.name ]] --tags=concourse_cluster
               TEST_NAME: [[ test.name ]]
               [[ test.env ]]
@@ -1368,6 +1382,9 @@ jobs:
             passed: [compile_gpdb_ubuntu18.04]
             trigger: [[ test_trigger ]]
           - get: ccp_src
+          - get: terraform.d
+            params:
+              unpack: true
           - put: terraform
             params:
               <<: *ccp_default_params
@@ -1381,12 +1398,35 @@ jobs:
             params:
               <<: *ccp_gen_cluster_default_params
               PLATFORM: ubuntu18.04-gpdb7
+          {% if test.reserve_spare_hosts %}
+          - get: alpine-docker
+          - task: reserve_spare_hosts
+            image: alpine-docker
+            config:
+              platform: linux
+              inputs:
+                - name: cluster_env_files
+              outputs:
+                - name: cluster_env_files
+              run:
+                path: sh
+                args:
+                  - -exc
+                  - |
+                    # modify the hostfile_init used by gpinitsystem to exclude the last two hosts, so they are spares
+                    cp cluster_env_files/hostfile_init cluster_env_files/hostfile_init_orig
+                    head -n -2 cluster_env_files/hostfile_init_orig > cluster_env_files/hostfile_init
+          {% endif %}
           - task: gpinitsystem
             file: ccp_src/ci/tasks/gpinitsystem.yml
           - task: [[ test.name ]]_concourse_cluster_tests
             file: gpdb_src/concourse/tasks/run_behave_on_ccp_cluster.yml
             image: gpdb7-ubuntu18.04-test
             params:
+              {% if test.sudo_access_on_hosts %}
+              SUDO_ACCESS_ON_HOSTS: 1
+              SUDO_MDW_USERNAME: ubuntu
+              {% endif %}
               BEHAVE_FLAGS: --tags=[[ test.name ]] --tags=concourse_cluster
               [[ test.env ]]
             on_success:
@@ -1427,6 +1467,9 @@ jobs:
       - get: ccp_src
       - get: ccp-image
       - get: alpine-docker
+      - get: terraform.d
+        params:
+          unpack: true
     - task: generate-ssh-keys
       image: alpine-docker
       config:
@@ -1597,6 +1640,9 @@ jobs:
       - get: icw_planner_centos7_dump
         passed: [icw_planner_centos7]
       - get: ccp_src
+      - get: terraform.d
+        params:
+          unpack: true
   - put: terraform
     params:
       <<: *ccp_default_params
@@ -1642,6 +1688,9 @@ jobs:
       - get: ccp-image
       - get: icw_planner_centos7_dump
         passed: [icw_planner_centos7]
+      - get: terraform.d
+        params:
+          unpack: true
   - put: terraform
     params:
       <<: *ccp_default_params
@@ -1909,6 +1958,10 @@ jobs:
           RC_BUILD_TYPE_GCS: ((rc-build-type-gcs))
       - task: verify_gpdb_versions
         file: gpdb_src/concourse/tasks/verify_gpdb_versions.yml
+      - task: tar_git_repo
+        file: gpdb_src/concourse/tasks/tar_git_repo.yml
+        params:
+          RC_BUILD_TYPE_GCS: ((rc-build-type-gcs))
   - in_parallel:
       steps:
       - put: bin_gpdb_centos7_rc
@@ -1923,6 +1976,9 @@ jobs:
       - put: bin_gpdb_clients_ubuntu18.04_rc
         params:
           file: "release_candidates/clients-rc-*ubuntu18.04*.tar.gz"
+      - put: server_src_rc
+        params:
+          file: "server_tar/server-src-rc-*.tar.gz"
 
 - name: Build_Release_Candidate_RPMs
   plan:

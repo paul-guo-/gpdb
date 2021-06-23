@@ -3,6 +3,7 @@ test: check_gxid
 
 test: autovacuum-analyze
 test: lockmodes
+test: pg_rewind_fail_missing_xlog
 test: prepared_xact_deadlock_pg_rewind
 test: ao_partition_lock
 
@@ -129,6 +130,7 @@ test: uao/vacuum_self_function_row
 test: uao/vacuum_while_insert_row
 test: uao/vacuum_while_vacuum_row
 test: uao/vacuum_cleanup_row
+test: uao/bitmapindex_rescan_row
 test: reorganize_after_ao_vacuum_skip_drop truncate_after_ao_vacuum_skip_drop mark_all_aoseg_await_drop
 # below test(s) inject faults so each of them need to be in a separate group
 test: segwalrep/master_wal_switch
@@ -178,6 +180,7 @@ test: uao/vacuum_self_function_column
 test: uao/vacuum_while_insert_column
 test: uao/vacuum_while_vacuum_column
 test: uao/vacuum_cleanup_column
+test: uao/bitmapindex_rescan_column
 
 # Disable auto-ANALYZE for below tests
 test: disable_autovacuum
@@ -208,6 +211,7 @@ test: segwalrep/dtm_recovery_on_standby
 test: segwalrep/commit_blocking_on_standby
 test: segwalrep/dtx_recovery_wait_lsn
 test: fts_manual_probe
+test: fts_session_reset
 
 # Reindex tests
 test: reindex/abort_reindex

@@ -2053,6 +2053,12 @@ AS $$ SELECT $1[1]; $$ LANGUAGE SQL STABLE;
 SELECT * FROM func_array_nonarray_enum(ARRAY['blue'::rainbow, 'red'::rainbow], 'red'::rainbow, 'yellow'::rainbow);
 DROP FUNCTION IF EXISTS func_array_nonarray_enum(ANYARRAY, ANYNONARRAY, ANYENUM);
 
+--TVF accepts ANYENUM, ANYELEMENT, ANYELEMENT return ANYENUM, ANYARRAY
+CREATE FUNCTION return_enum_as_array(ANYENUM, ANYELEMENT, ANYELEMENT) RETURNS TABLE (ae ANYENUM, aa ANYARRAY)
+AS $$ SELECT $1, array[$2, $3] $$ LANGUAGE SQL STABLE;
+SELECT * FROM return_enum_as_array('red'::rainbow, 'yellow'::rainbow, 'blue'::rainbow);
+DROP FUNCTION IF EXISTS return_enum_as_array(ANYENUM, ANYELEMENT, ANYELEMENT);
+
 -- start_ignore
 drop table foo;
 -- end_ignore
@@ -2400,6 +2406,11 @@ insert into tt values (1, 'b'), (1, 'B');
 
 select * from tc, tt where c = v;
 
+-- bitmap scan on bitmap index
+create index tc_idx on tc using bitmap(c);
+select * from tc where c='a';
+explain select * from tc where c='a';
+
 -- test gpexpand phase 1
 -- right now, these will fall back to planner
 
@@ -2639,6 +2650,16 @@ partition by range(sales_ts) (start (timestamp '2010-01-01 00:00:00') end(timest
 every (interval '1 day'));
 insert into sales select i, i%100, i%1000, timestamp '2010-01-01 00:00:00' + i * interval '1 day' from generate_series(1,20) i;
 select * from sales where sales_ts::date != '2010-01-05' order by sales_ts;
+
+-- validate lossy cast logic can handle BCCs
+drop table if exists part_tbl_varchar;
+CREATE TABLE part_tbl_varchar(a varchar(15) NOT NULL, b varchar(8) NOT NULL)
+DISTRIBUTED BY (a)
+PARTITION BY RANGE(b) (start('v1') end('v5'), start('v5') end('v9'), default partition def);
+
+insert into part_tbl_varchar values ('v3','v3'), ('v5','v5');
+
+select * from part_tbl_varchar where b between 'v3' and 'v4';
 
 -- test n-ary inner and left joins with outer references
 drop table if exists tcorr1, tcorr2;
@@ -2964,6 +2985,7 @@ select enable_xform('CXformSelect2DynamicBitmapBoolOp');
 select enable_xform('CXformJoin2BitmapIndexGetApply');
 select enable_xform('CXformInnerJoin2NLJoin');
 -- end_ignore
+
 reset optimizer_enable_hashjoin;
 reset optimizer_trace_fallback;
 
@@ -3186,7 +3208,43 @@ ORDER BY to_char(order_datetime,'YYYY-Q')
 ,      item_shipment_status_code
 ;
 
+-- test partioned table with no partitions
+create table no_part (a int, b int) partition by list (a) distributed by (b);
+select * from no_part;
+
+-- test casting with setops
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  except
+    select 2019::int)
+select * from v where year > 1;
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  except all
+    select 2019::int)
+select * from v where year > 1;
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  intersect
+    select 2019::int)
+select * from v where year > 1;
+
+with v(year) as (
+    select 2019::float8 + dx from (VALUES (-1), (0), (0), (1), (1)) t(dx)
+  intersect all
+    select 2019::int)
+select * from v where year > 1;
+
 reset optimizer_trace_fallback;
+
+create table sqall_t1(a int) distributed by (a);
+insert into sqall_t1 values (1), (2), (3);
+set optimizer_join_order='query';
+select * from sqall_t1 where a not in (
+	    select b.a from sqall_t1 a left join sqall_t1 b on false);
+reset optimizer_join_order;
 
 -- start_ignore
 DROP SCHEMA orca CASCADE;
