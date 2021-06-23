@@ -371,7 +371,7 @@ DestroyTQDestReceiverForEndpoint(EndpointExecState *state)
 	 * If all data get sent, hang the process and wait for QD to close it. The
 	 * purpose is to not clean up Endpoint entry until CLOSE/COMMIT/ABORT
 	 * (i.e. PortalCleanup get executed). So user can still see the finished
-	 * endpoint status through gp_endpoints_info UDF. This is needed because
+	 * endpoint status through the gp_endpoints() UDF. This is needed because
 	 * pg_cursor view can still see the PARALLEL RETRIEVE CURSOR
 	 */
 	wait_parallel_retrieve_close();
@@ -639,12 +639,10 @@ wait_receiver(EndpointExecState *state)
 
 		elog(DEBUG5, "CDB_ENDPOINT: sender wait latch in wait_receiver()");
 		wr = WaitLatchOrSocket(&state->endpoint->ackDone,
-		WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT | WL_SOCKET_READABLE,
+							   WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT | WL_SOCKET_READABLE,
 							   MyProcPort->sock,
 							   WAIT_NORMAL_TIMEOUT,
-							   PG_WAIT_WAIT_RECEIVE);
-		if (wr & WL_TIMEOUT)
-			continue;
+							   PG_WAIT_PARALLEL_RETRIEVE_CURSOR);
 
 		if (wr & WL_SOCKET_READABLE)
 		{
@@ -655,7 +653,6 @@ wait_receiver(EndpointExecState *state)
 				abort_endpoint(state);
 				proc_exit(0);
 			}
-			continue;
 		}
 
 		if (wr & WL_POSTMASTER_DEATH)
@@ -666,10 +663,12 @@ wait_receiver(EndpointExecState *state)
 			proc_exit(0);
 		}
 
-		Assert(wr & WL_LATCH_SET);
-		elog(DEBUG3, "CDB_ENDPOINT:sender reset latch in wait_receiver()");
-		ResetLatch(&state->endpoint->ackDone);
-		break;
+		if(wr & WL_LATCH_SET)
+		{
+			elog(DEBUG3, "CDB_ENDPOINT:sender reset latch in wait_receiver()");
+			ResetLatch(&state->endpoint->ackDone);
+			break;
+		}
 	}
 }
 
@@ -782,9 +781,7 @@ wait_parallel_retrieve_close(void)
 							   WL_LATCH_SET | WL_POSTMASTER_DEATH | WL_TIMEOUT | WL_SOCKET_READABLE,
 							   MyProcPort->sock,
 							   WAIT_NORMAL_TIMEOUT,
-							   PG_WAIT_PARALLEL_RETRIEVE_CLOSE);
-		if (wr & WL_TIMEOUT)
-			continue;
+							   PG_WAIT_PARALLEL_RETRIEVE_CURSOR);
 
 		if (wr & WL_POSTMASTER_DEATH)
 		{
@@ -801,15 +798,16 @@ wait_parallel_retrieve_close(void)
 						(errmsg("CDB_ENDPOINT: sender found that the connection to QD is broken.")));
 				proc_exit(0);
 			}
-			continue;
 		}
+
+		if (wr & WL_LATCH_SET)
+			ResetLatch(&MyProc->procLatch);
 
 		/*
 		 * procLatch may be set by a timeout, e.g. AuthenticationTimeout, to
 		 * handle this case, we check QueryFinishPending and
 		 * QueryCancelPending to make sure we can continue waiting.
 		 */
-		ResetLatch(&MyProc->procLatch);
 		if (QueryFinishPending || QueryCancelPending)
 		{
 			elog(DEBUG3, "CDB_ENDPOINT: reset procLatch and quit waiting");

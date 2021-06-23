@@ -58,12 +58,12 @@ create_match_sub() {
 # Sometimes we have variable length cells, like userid:
 # | username | userid | gender |
 # |----------+--------+--------|
-# | jonh     | 12     | male   |
+# | john     | 12     | male   |
 # we need to match the 12 with a var $USERID which has been set by get_call().
 # The output source will be something like:
 # | username | userid | gender |
 # |----------+--------+--------|
-# | jonh     | userid1     | male   |
+# | john     | userid1     | male   |
 # to match it: match_sub userid1 $USERID
 # but the problem here is the userid may change for different test executions. If we
 # get a 3 digits userid like '123', the diff will fail since we have one more space than
@@ -72,7 +72,7 @@ create_match_sub() {
 # And make the output source like (note: append one space to the replaced string):
 # | username | userid  | gender |
 # |----------+---------+--------|
-# | jonh     | userid1 | male   |
+# | john     | userid1 | male   |
 # Notice here that there is no space following userid1 since we replace the whole userid with
 # its tailing spaces with 'userid1'. Like '123   ' -> 'userid'.
 create_match_sub_with_spaces() {

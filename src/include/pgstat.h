@@ -827,8 +827,7 @@ typedef enum BackendState
 #define PG_WAIT_RESOURCE_GROUP		0xA0000000U
 #define PG_WAIT_RESOURCE_QUEUE		0xA1000000U
 #define PG_WAIT_REPLICATION			0xA2000000U
-#define PG_WAIT_PARALLEL_RETRIEVE_CLOSE 0xA3000000U
-#define PG_WAIT_WAIT_RECEIVE		0xA4000000U /* TODO: not a good name (besides func name). */
+#define PG_WAIT_PARALLEL_RETRIEVE_CURSOR 0xA3000000U
 
 /* ----------
  * Wait Events - Activity

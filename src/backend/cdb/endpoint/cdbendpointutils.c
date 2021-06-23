@@ -27,7 +27,7 @@
 #include "cdb/cdbutil.h"
 #include "cdb/cdbvars.h"
 
-/* The two struct are Used by SRF gp_endpoints_info(). */
+/* The two struct are used by gp_endpoints(). */
 
 typedef struct
 {
@@ -211,7 +211,7 @@ gp_endpoints(PG_FUNCTION_ARGS)
 {
 	if (Gp_role != GP_ROLE_DISPATCH)
 		ereport(ERROR, (errcode(ERRCODE_GP_COMMAND_ERROR),
-						errmsg("gp_endpoints_info() only can be called on query dispatcher")));
+						errmsg("gp_endpoints() can be called on query dispatcher only")));
 
 	FuncCallContext *funcctx;
 	AllEndpointsInfo *all_info;
