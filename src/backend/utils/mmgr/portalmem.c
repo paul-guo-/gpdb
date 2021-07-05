@@ -29,7 +29,6 @@
 #include "utils/resource_manager.h"
 #include "utils/resscheduler.h"
 
-#include "cdb/cdbendpoint.h"
 #include "cdb/ml_ipc.h"
 #include "utils/timestamp.h"
 
@@ -1202,7 +1201,7 @@ pg_cursor(PG_FUNCTION_ARGS)
 	 * build tupdesc for result tuples. This must match the definition of the
 	 * pg_cursors view in system_views.sql
 	 */
-	tupdesc = CreateTemplateTupleDesc(7, false);
+	tupdesc = CreateTemplateTupleDesc(6, false);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 1, "name",
 					   TEXTOID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 2, "statement",
@@ -1213,9 +1212,7 @@ pg_cursor(PG_FUNCTION_ARGS)
 					   BOOLOID, -1, 0);
 	TupleDescInitEntry(tupdesc, (AttrNumber) 5, "is_scrollable",
 					   BOOLOID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "is_parallel",
-					   BOOLOID, -1, 0);
-	TupleDescInitEntry(tupdesc, (AttrNumber) 7, "creation_time",
+	TupleDescInitEntry(tupdesc, (AttrNumber) 6, "creation_time",
 					   TIMESTAMPTZOID, -1, 0);
 
 	/*
@@ -1233,8 +1230,8 @@ pg_cursor(PG_FUNCTION_ARGS)
 	while ((hentry = hash_seq_search(&hash_seq)) != NULL)
 	{
 		Portal		portal = hentry->portal;
-		Datum		values[7];
-		bool		nulls[7];
+		Datum		values[6];
+		bool		nulls[6];
 
 		/* report only "visible" entries */
 		if (!portal->visible)
@@ -1247,9 +1244,7 @@ pg_cursor(PG_FUNCTION_ARGS)
 		values[2] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_HOLD);
 		values[3] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_BINARY);
 		values[4] = BoolGetDatum(portal->cursorOptions & CURSOR_OPT_SCROLL);
-		/* Note: CURSOR_OPT_PARALLEL_RETRIEVE is 0x0100, out of range of the bool (char) */
-		values[5] = BoolGetDatum((portal->cursorOptions & CURSOR_OPT_PARALLEL_RETRIEVE) != 0);
-		values[6] = TimestampTzGetDatum(portal->creation_time);
+		values[5] = TimestampTzGetDatum(portal->creation_time);
 
 		tuplestore_putvalues(tupstore, tupdesc, values, nulls);
 	}

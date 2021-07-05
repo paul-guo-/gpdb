@@ -74,7 +74,6 @@
 
 #include "catalog/oid_dispatch.h"
 #include "cdb/cdbdisp_query.h"
-#include "cdb/cdbendpoint.h"
 #include "cdb/cdbpartition.h"
 #include "cdb/cdbvars.h"
 
@@ -1063,10 +1062,6 @@ standard_ProcessUtility(Node *parsetree,
 				else
 					ExecAlterOwnerStmt(stmt);
 			}
-			break;
-
-		case T_RetrieveStmt:
-			ExecRetrieveStmt((RetrieveStmt *) parsetree, dest);
 			break;
 
 		case T_CommentStmt:
@@ -2064,9 +2059,6 @@ UtilityReturnsTuples(Node *parsetree)
 		case T_VariableShowStmt:
 			return true;
 
-		case T_RetrieveStmt:
-			return true;
-
 		default:
 			return false;
 	}
@@ -2117,18 +2109,6 @@ UtilityTupleDescriptor(Node *parsetree)
 				VariableShowStmt *n = (VariableShowStmt *) parsetree;
 
 				return GetPGVariableResultDesc(n->name);
-			}
-
-		case T_RetrieveStmt:
-			{
-				RetrieveStmt *n = (RetrieveStmt *) parsetree;
-
-				if (Gp_role != GP_ROLE_RETRIEVE)
-					elog(ERROR, "RETRIEVE command can only run in retrieve mode");
-
-                SetParallelRtrvCursorExecRole(PARALLEL_RETRIEVE_RECEIVER);
-
-				return CreateTupleDescCopy(GetRetrieveStmtTupleDesc(n));
 			}
 
 		default:
@@ -2435,18 +2415,7 @@ CreateCommandTag(Node *parsetree)
 			break;
 
 		case T_DeclareCursorStmt:
-			{
-				DeclareCursorStmt *stmt = (DeclareCursorStmt *) parsetree;
-
-				if ((stmt->options & CURSOR_OPT_PARALLEL_RETRIEVE) != 0)
-				{
-					tag = "DECLARE PARALLEL RETRIEVE CURSOR";
-				}
-				else
-				{
-					tag = "DECLARE CURSOR";
-				}
-			}
+			tag = "DECLARE CURSOR";
 			break;
 
 		case T_ClosePortalStmt:
@@ -3176,10 +3145,6 @@ CreateCommandTag(Node *parsetree)
 
 		case T_AlterTypeStmt:
 			tag = "ALTER TYPE";
-			break;
-
-		case T_RetrieveStmt:
-			tag = "RETRIEVE";
 			break;
 
 		default:

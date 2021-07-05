@@ -372,10 +372,6 @@ string_to_role(const char *string)
 	{
 		role = GP_ROLE_UTILITY;
 	}
-	else if (pg_strcasecmp(string, "retrieve") == 0)
-	{
-		role = GP_ROLE_RETRIEVE;
-	}
 
 	return role;
 }
@@ -396,8 +392,6 @@ role_to_string(GpRoleValue role)
 			return "execute";
 		case GP_ROLE_UTILITY:
 			return "utility";
-		case GP_ROLE_RETRIEVE:
-			return "retrieve";
 		case GP_ROLE_UNDEFINED:
 		default:
 			return "*undefined*";
@@ -489,12 +483,6 @@ assign_gp_role(const char *newval, void *extra)
 
 	Assert(newrole != GP_ROLE_UNDEFINED);
 
-	/* Retrieve role can not be reset to other mode */
-	if (oldrole == GP_ROLE_RETRIEVE && newrole != GP_ROLE_RETRIEVE)
-		ereport(ERROR,
-				(errcode(ERRCODE_CANT_CHANGE_RUNTIME_PARAM),
-					errmsg("\"gp_role\" could not be changed from retrieve role")));
-
 	/*
 	 * When changing between roles, we must call cdb_cleanup and then
 	 * cdb_setup to get setup and connections appropriate to the new role.
@@ -504,10 +492,10 @@ assign_gp_role(const char *newval, void *extra)
 
 	if (Gp_role != newrole && IsUnderPostmaster && !IsInitProcessingMode())
 	{
-		if (Gp_role != GP_ROLE_UTILITY && Gp_role != GP_ROLE_RETRIEVE)
+		if (Gp_role != GP_ROLE_UTILITY)
 			do_disconnect = true;
 
-		if (newrole != GP_ROLE_UTILITY && newrole != GP_ROLE_RETRIEVE)
+		if (newrole != GP_ROLE_UTILITY)
 			do_connect = true;
 	}
 
@@ -536,7 +524,7 @@ assign_gp_role(const char *newval, void *extra)
 		{
 			cdb_cleanup(0, 0);
 			Gp_role = oldrole;
-			if (Gp_role != GP_ROLE_UTILITY && Gp_role != GP_ROLE_RETRIEVE)
+			if (Gp_role != GP_ROLE_UTILITY)
 				cdb_setup();
 			PG_RE_THROW();
 		}

@@ -1405,13 +1405,4 @@ extern Datum gp_opt_version(PG_FUNCTION_ARGS);
 /* query_metrics.c */
 extern Datum gp_instrument_shmem_summary(PG_FUNCTION_ARGS);
 
-/* cdbendpoint.c */
-extern Datum gp_endpoints_info(PG_FUNCTION_ARGS);
-extern Datum gp_endpoints_status_info(PG_FUNCTION_ARGS);
-extern Datum gp_operate_endpoints(PG_FUNCTION_ARGS);
-extern Datum gp_check_parallel_retrieve_cursor(PG_FUNCTION_ARGS);
-extern Datum gp_wait_parallel_retrieve_cursor(PG_FUNCTION_ARGS);
-
-
-
 #endif   /* BUILTINS_H */

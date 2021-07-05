@@ -114,7 +114,6 @@
 #include "cdb/memquota.h"
 #include "cdb/cdbtargeteddispatch.h"
 #include "cdb/cdbutil.h"
-#include "cdb/cdbendpoint.h"
 
 
 /* Hooks for plugins to get control in ExecutorStart/Run/Finish/End */
@@ -150,7 +149,7 @@ static void EvalPlanQualStart(EPQState *epqstate, EState *parentestate,
 				  Plan *planTree);
 
 static void FillSliceGangInfo(Slice *slice, int numsegments);
-static void FillSliceTable(EState *estate, PlannedStmt *stmt, bool parallel_cursor);
+static void FillSliceTable(EState *estate, PlannedStmt *stmt);
 static PartitionNode *BuildPartitionNodeFromRoot(Oid relid);
 static void InitializeQueryPartsMetadata(PlannedStmt *plannedstmt, EState *estate);
 static void AdjustReplicatedTableCounts(EState *estate);
@@ -865,7 +864,6 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 	DestReceiver *dest;
 	bool		sendTuples;
 	MemoryContext oldcontext;
-	DestReceiver *endpointDest		= NULL;
 	/*
 	 * NOTE: Any local vars that are set in the PG_TRY block and examined in the
 	 * PG_CATCH block should be declared 'volatile'. (setjmp shenanigans)
@@ -946,8 +944,6 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 		 */
 		exec_identity = getGpExecIdentity(queryDesc, direction, estate);
 
-
-
 		if (exec_identity == GP_IGNORE)
 		{
 			/* do nothing */
@@ -983,23 +979,6 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 		}
 		else if (exec_identity == GP_ROOT_SLICE)
 		{
-
-			/*
-			 * When run a root slice, and it is a PARALLEL RETRIEVE CURSOR, it means
-			 * QD become the end point for connection. It is true, for
-			 * instance, SELECT * FROM foo LIMIT 10, and the result should
-			 * go out from QD.
-			 *
-			 * For the scenario: endpoint on QE, the query plan is changed,
-			 * the root slice also exists on QE.
-			 */
-			if (GetParallelRtrvCursorExecRole() == PARALLEL_RETRIEVE_SENDER)
-			{
-				endpointDest = CreateTQDestReceiverForEndpoint(
-					queryDesc->tupDesc, queryDesc->ddesc->parallelCursorName);
-				(*endpointDest->rStartup) (dest, operation, queryDesc->tupDesc);
-			}
-
 			/*
 			 * Run a root slice
 			 * It corresponds to the "normal" path through the executor
@@ -1010,10 +989,10 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 			ExecutePlan(estate,
 						queryDesc->planstate,
 						operation,
-						(GetParallelRtrvCursorExecRole() == PARALLEL_RETRIEVE_SENDER ? true : sendTuples),
+						sendTuples,
 						count,
 						direction,
-						(GetParallelRtrvCursorExecRole() == PARALLEL_RETRIEVE_SENDER? endpointDest : dest));
+						dest);
 		}
 		else
 		{
@@ -1023,7 +1002,7 @@ standard_ExecutorRun(QueryDesc *queryDesc,
     }
 	PG_CATCH();
 	{
-		/* If EXPLAIN ANALYZE, let qExec try to return stats to qDisp. */
+        /* If EXPLAIN ANALYZE, let qExec try to return stats to qDisp. */
         if (estate->es_sliceTable &&
             estate->es_sliceTable->instrument_options &&
             (estate->es_sliceTable->instrument_options & INSTRUMENT_CDB) &&
@@ -1078,12 +1057,6 @@ standard_ExecutorRun(QueryDesc *queryDesc,
 	/*
 	 * shutdown tuple receiver, if we started it
 	 */
-	if (GetParallelRtrvCursorExecRole() == PARALLEL_RETRIEVE_SENDER
-			&& endpointDest != NULL)
-	{
-		DestroyTQDestReceiverForEndpoint(endpointDest);
-	}
-
 	if (sendTuples)
 		(*dest->rShutdown) (dest);
 
@@ -2109,7 +2082,7 @@ InitPlan(QueryDesc *queryDesc, int eflags)
 	 * Initialize the slice table.
 	 */
 	if (Gp_role == GP_ROLE_DISPATCH)
-		FillSliceTable(estate, plannedstmt, queryDesc->parallel_retrieve_cursor);
+		FillSliceTable(estate, plannedstmt);
 
 	/*
 	 * Initialize private state information for each SubPlan.  We must do this
@@ -4976,7 +4949,7 @@ FillSliceGangInfo(Slice *slice, int numsegments)
 				slice->gangSize = numsegments;
 				slice->segments = NIL;
 				for (i = 0; i < numsegments; i++)
-					slice->segments = lappend_int(slice->segments, i % getgpsegmentCount());
+					slice->segments = lappend_int(slice->segments, i);
 			}
 			break;
 		case GANGTYPE_ENTRYDB_READER:
@@ -5192,7 +5165,7 @@ FillSliceTable_walker(Node *node, void *context)
  * into SubPlan nodes, to do the same.
  */
 static void
-FillSliceTable(EState *estate, PlannedStmt *stmt, bool parallel_cursor)
+FillSliceTable(EState *estate, PlannedStmt *stmt)
 {
 	FillSliceTable_cxt cxt;
 	SliceTable *sliceTable = estate->es_sliceTable;
@@ -5204,10 +5177,6 @@ FillSliceTable(EState *estate, PlannedStmt *stmt, bool parallel_cursor)
 	cxt.estate = estate;
 	cxt.currentSliceId = 0;
 
-	/*
-	 * INTO and PARALLEL RETRIEVE CURSOR are handled here because they dispatch but have
-	 * no motion between QD and QEs.
-	 */
 	if (stmt->intoClause != NULL || stmt->copyIntoClause != NULL || stmt->refreshClause)
 	{
 		Slice	   *currentSlice = (Slice *) linitial(sliceTable->slices);
@@ -5223,20 +5192,6 @@ FillSliceTable(EState *estate, PlannedStmt *stmt, bool parallel_cursor)
 			/* FIXME: ->lefttree or planTree? */
 			numsegments = stmt->planTree->flow->numsegments;
 		currentSlice->gangType = GANGTYPE_PRIMARY_WRITER;
-		FillSliceGangInfo(currentSlice, numsegments);
-	}
-	else if (parallel_cursor)
-	{
-		Slice	   *currentSlice = (Slice *) linitial(sliceTable->slices);
-		int			numsegments = stmt->planTree->flow->numsegments;
-		enum EndPointExecPosition endPointExecPosition = GetParallelCursorEndpointPosition(stmt->planTree);
-
-		if (endPointExecPosition == ENDPOINT_ON_Entry_DB)
-			currentSlice->gangType = GANGTYPE_ENTRYDB_READER;
-		else if (endPointExecPosition == ENDPOINT_ON_SINGLE_QE)
-			currentSlice->gangType = GANGTYPE_SINGLETON_READER;
-		else
-			currentSlice->gangType = GANGTYPE_PRIMARY_READER;
 		FillSliceGangInfo(currentSlice, numsegments);
 	}
 

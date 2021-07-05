@@ -11,10 +11,10 @@ LDFLAGS += -lws2_32
 endif
 
 override CPPFLAGS := -I$(libpq_srcdir) $(CPPFLAGS)
-LDFLAGS_INTERNAL += $(libpq_pgport) -lpthread
+LDFLAGS_INTERNAL += $(libpq_pgport)
 
 
-PROGS = test_parallel_retrieve_cursor_wait test_parallel_retrieve_cursor_nowait testlibpq testlibpq2 testlibpq3 testlibpq4 testlo testlo64
+PROGS = testlibpq testlibpq2 testlibpq3 testlibpq4 testlo testlo64
 
 all: $(PROGS)
 

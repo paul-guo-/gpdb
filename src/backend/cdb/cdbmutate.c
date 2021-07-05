@@ -358,7 +358,7 @@ get_partitioned_policy_from_flow(Plan *plan)
  * -------------------------------------------------------------------------
  */
 Plan *
-apply_motion(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchContentIds, int cursorOptions)
+apply_motion(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchContentIds)
 {
 	Query	   *query = root->parse;
 	Plan	   *result;
@@ -585,8 +585,7 @@ apply_motion(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchCont
 			{
 				if (plan->flow->flotype == FLOW_PARTITIONED ||
 					(plan->flow->flotype == FLOW_SINGLETON &&
-					 plan->flow->locustype == CdbLocusType_SegmentGeneral &&
-					 !(cursorOptions & CURSOR_OPT_PARALLEL_RETRIEVE)))
+					 plan->flow->locustype == CdbLocusType_SegmentGeneral))
 					bringResultToDispatcher = true;
 
 				*needToAssignDirectDispatchContentIds = root->config->gp_enable_direct_dispatch;
@@ -645,8 +644,7 @@ apply_motion(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchCont
 		}
 
 		/* Use UNION RECEIVE.  Does not preserve ordering. */
-		/* PARALLEL RETRIEVE CURSOR without sort clause has no motion between QD and QEs */
-		else if (!(cursorOptions & CURSOR_OPT_PARALLEL_RETRIEVE))
+		else
 			plan = focusPlan(plan, false);
 	}
 

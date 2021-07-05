@@ -20,9 +20,7 @@
 #include "nodes/relation.h"
 #include "optimizer/walkers.h"
 
-extern Plan *apply_motion(struct PlannerInfo *root, Plan *plan,
-						  bool *needToAssignDirectDispatchContentIds,
-						  int   cursorOptions);
+extern Plan *apply_motion(struct PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchContentIds);
 
 extern Motion *make_union_motion(Plan *lefttree, int numsegments);
 extern Motion *make_sorted_union_motion(PlannerInfo *root, Plan *lefttree, int numSortCols, AttrNumber *sortColIdx, Oid *sortOperators,

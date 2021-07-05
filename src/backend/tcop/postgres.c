@@ -89,7 +89,6 @@
 #include "cdb/cdbdtxcontextinfo.h"
 #include "cdb/cdbdisp_query.h"
 #include "cdb/cdbdispatchresult.h"
-#include "cdb/cdbendpoint.h"
 #include "cdb/cdbgang.h"
 #include "cdb/ml_ipc.h"
 #include "utils/guc.h"
@@ -1026,7 +1025,6 @@ exec_mpp_query(const char *query_string,
 	SliceTable *sliceTable = NULL;
 	Slice      *slice = NULL;
 	ParamListInfo paramLI = NULL;
-	bool forParallelCursor = false;
 
 	Assert(Gp_role == GP_ROLE_EXECUTE);
 	/*
@@ -1134,11 +1132,6 @@ exec_mpp_query(const char *query_string,
 
 		if (ddesc->oidAssignments)
 			AddPreassignedOids(ddesc->oidAssignments);
-
-		if (ddesc->parallelCursorName && ddesc->parallelCursorName[0])
-		{
-			forParallelCursor = true;
-		}
     }
 
 	/*
@@ -1316,9 +1309,6 @@ exec_mpp_query(const char *query_string,
 						  commandTag,
 						  list_make1(plan ? (Node*)plan : (Node*)utilityStmt),
 						  NULL);
-
-		if ((commandType == CMD_SELECT) && (currentSliceId == 0) && forParallelCursor)
-			SetParallelRtrvCursorExecRole(PARALLEL_RETRIEVE_SENDER);
 
 		/*
 		 * Start the portal.
@@ -1674,13 +1664,6 @@ exec_simple_query(const char *query_string)
 							Debug_dtm_action, commandTag)));
 		}
 
-		if ((Gp_role == GP_ROLE_RETRIEVE) &&
-			(nodeTag(parsetree) != T_RetrieveStmt))
-		{
-			ereport(ERROR,
-			        (errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-				        errmsg("Only allow RETRIEVE statement for retrieve role")));
-		}
 		/*
 		 * If are connected in utility mode, disallow PREPARE TRANSACTION
 		 * statements.
@@ -3845,28 +3828,26 @@ ProcessInterrupts(const char* filename, int lineno)
 		 */
 		if (!DoingCommandRead)
 		{
-			StringInfoData cancel_msg_str;
-
 			LockErrorCleanup();
-			initStringInfo(&cancel_msg_str);
-
-			if (HasCancelMessage())
-			{
-				char *buffer			 = palloc0(MAX_CANCEL_MSG);
-
-				GetCancelMessage(&buffer, MAX_CANCEL_MSG);
-				appendStringInfo(&cancel_msg_str, ": \"%s\"", buffer);
-				pfree(buffer);
-			}
 
 			if (Gp_role == GP_ROLE_EXECUTE)
 				ereport(ERROR,
 						(errcode(ERRCODE_GP_OPERATION_CANCELED),
-						 errmsg("canceling MPP operation%s", cancel_msg_str.data)));
+						 errmsg("canceling MPP operation")));
+			else if (HasCancelMessage())
+			{
+				char   *buffer = palloc0(MAX_CANCEL_MSG);
+
+				GetCancelMessage(&buffer, MAX_CANCEL_MSG);
+				ereport(ERROR,
+						(errcode(ERRCODE_QUERY_CANCELED),
+						 errmsg("canceling statement due to user request: \"%s\"",
+								buffer)));
+			}
 			else
 				ereport(ERROR,
 						(errcode(ERRCODE_QUERY_CANCELED),
-						 errmsg("canceling statement due to user request%s", cancel_msg_str.data)));
+						 errmsg("canceling statement due to user request")));
 		}
 	}
 

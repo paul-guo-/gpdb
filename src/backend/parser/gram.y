@@ -274,7 +274,6 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 		DropOwnedStmt ReassignOwnedStmt
 		AlterTSConfigurationStmt AlterTSDictionaryStmt
 		CreateMatViewStmt RefreshMatViewStmt
-		RetrieveStmt
 
 /* GPDB-specific commands */
 %type <node>	AlterTypeStmt AlterQueueStmt AlterResourceGroupStmt
@@ -669,7 +668,7 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 	DEFERRABLE DEFERRED DEFINER DELETE_P DELIMITER DELIMITERS DESC
 	DICTIONARY DISABLE_P DISCARD DISTINCT DO DOCUMENT_P DOMAIN_P DOUBLE_P DROP
 
-	EACH ELSE ENABLE_P ENCODING ENCRYPTED END_P ENDPOINT ENUM_P ESCAPE EVENT EXCEPT
+	EACH ELSE ENABLE_P ENCODING ENCRYPTED END_P ENUM_P ESCAPE EVENT EXCEPT
 	EXCLUDE EXCLUDING EXCLUSIVE EXECUTE EXISTS EXPLAIN
 	EXTENSION EXTERNAL EXTRACT
 
@@ -703,7 +702,7 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 	OBJECT_P OF OFF OFFSET OIDS ON ONLY OPERATOR OPTION OPTIONS OR
 	ORDER ORDINALITY OUT_P OUTER_P OVER OVERLAPS OVERLAY OWNED OWNER
 
-	PARALLEL PARSER PARTIAL PARTITION PASSING PASSWORD PLACING PLANS POLICY POSITION
+	PARSER PARTIAL PARTITION PASSING PASSWORD PLACING PLANS POLICY POSITION
 	PRECEDING PRECISION PRESERVE PREPARE PREPARED PRIMARY
 	PRIOR PRIVILEGES PROCEDURAL PROCEDURE PROGRAM
 
@@ -711,7 +710,7 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 
 	RANGE READ REAL REASSIGN RECHECK RECURSIVE REF REFERENCES REFRESH REINDEX
 	RELATIVE_P RELEASE RENAME REPEATABLE REPLACE REPLICA
-	RESET RESTART RESTRICT RETRIEVE RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
+	RESET RESTART RESTRICT RETURNING RETURNS REVOKE RIGHT ROLE ROLLBACK ROLLUP
 	ROW ROWS RULE
 
 	SAVEPOINT SCHEMA SCROLL SEARCH SECOND_P SECURITY SELECT SEQUENCE SEQUENCES
@@ -911,7 +910,6 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 			%nonassoc ENCODING
 			%nonassoc ENCRYPTED
 			%nonassoc END_P
-			%nonassoc ENDPOINT
 			%nonassoc ENUM_P
 			%nonassoc ERRORS
 			%nonassoc EVERY
@@ -999,7 +997,6 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 			%nonassoc OVERCOMMIT
 			%nonassoc OWNED
 			%nonassoc OWNER
-			%nonassoc PARALLEL
 			%nonassoc PARTIAL
 			%nonassoc PARTITIONS
 			%nonassoc PASSWORD
@@ -1031,7 +1028,6 @@ static Node *makeIsNotDistinctFromNode(Node *expr, int position);
 			%nonassoc RESOURCE
 			%nonassoc RESTART
 			%nonassoc RESTRICT
-			%nonassoc RETRIEVE
 			%nonassoc RETURNS
 			%nonassoc REVOKE
 			%nonassoc ROLE
@@ -1326,7 +1322,6 @@ stmt :
 			| VariableSetStmt
 			| VariableShowStmt
 			| ViewStmt
-			| RetrieveStmt
 			| /*EMPTY*/
 				{ $$ = NULL; }
 		;
@@ -12342,12 +12337,11 @@ DeclareCursorStmt: DECLARE cursor_name cursor_options CURSOR opt_hold FOR Select
 cursor_name:	name						{ $$ = $1; }
 		;
 
-cursor_options: /*EMPTY*/							{ $$ = 0; }
-			| cursor_options NO SCROLL				{ $$ = $1 | CURSOR_OPT_NO_SCROLL; }
-			| cursor_options SCROLL					{ $$ = $1 | CURSOR_OPT_SCROLL; }
-			| cursor_options BINARY					{ $$ = $1 | CURSOR_OPT_BINARY; }
-			| cursor_options INSENSITIVE			{ $$ = $1 | CURSOR_OPT_INSENSITIVE; }
-			| cursor_options PARALLEL RETRIEVE		{ $$ = $1 | CURSOR_OPT_PARALLEL_RETRIEVE; }
+cursor_options: /*EMPTY*/					{ $$ = 0; }
+			| cursor_options NO SCROLL		{ $$ = $1 | CURSOR_OPT_NO_SCROLL; }
+			| cursor_options SCROLL			{ $$ = $1 | CURSOR_OPT_SCROLL; }
+			| cursor_options BINARY			{ $$ = $1 | CURSOR_OPT_BINARY; }
+			| cursor_options INSENSITIVE	{ $$ = $1 | CURSOR_OPT_INSENSITIVE; }
 		;
 
 opt_hold: /* EMPTY */						{ $$ = 0; }
@@ -12402,24 +12396,6 @@ opt_hold: /* EMPTY */						{ $$ = 0; }
 
 SelectStmt: select_no_parens			%prec UMINUS
 			| select_with_parens		%prec UMINUS
-		;
-
-RetrieveStmt:
-			RETRIEVE SignedIconst FROM ENDPOINT name
-				{
-					RetrieveStmt *n = makeNode(RetrieveStmt);
-					n->endpoint_name = $5;
-					n->count = $2;
-					$$ = (Node *)n;
-				}
-			| RETRIEVE ALL FROM ENDPOINT name
-				{
-					RetrieveStmt *n = makeNode(RetrieveStmt);
-					n->endpoint_name = $5;
-					n->count = -1;
-					n->is_all = true;
-					$$ = (Node *)n;
-				}
 		;
 
 select_with_parens:
@@ -16395,7 +16371,6 @@ unreserved_keyword:
 			| ENABLE_P
 			| ENCODING
 			| ENCRYPTED
-			| ENDPOINT
 			| ENUM_P
 			| ERRORS
 			| ESCAPE
@@ -16504,7 +16479,6 @@ unreserved_keyword:
 			| OVERCOMMIT
 			| OWNED
 			| OWNER
-			| PARALLEL
 			| PARSER
 			| PARTIAL
 			| PARTITIONS
@@ -16547,7 +16521,6 @@ unreserved_keyword:
 			| RESOURCE
 			| RESTART
 			| RESTRICT
-			| RETRIEVE
 			| RETURNS
 			| REVOKE
 			| ROLE
@@ -16723,7 +16696,6 @@ PartitionIdentKeyword: ABORT_P
 			| ENABLE_P
 			| ENCODING
 			| ENCRYPTED
-			| ENDPOINT
 			| ERRORS
 			| ENUM_P
 			| ESCAPE
@@ -16807,7 +16779,6 @@ PartitionIdentKeyword: ABORT_P
 			| OVERCOMMIT
 			| OWNED
 			| OWNER
-			| PARALLEL
 			| PARTIAL
 			| PARTITIONS
 			| PASSWORD

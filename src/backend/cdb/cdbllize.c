@@ -151,7 +151,7 @@ static void motion_sanity_check(PlannerInfo *root, Plan *plan);
  * ------------------------------------------------------------------------- *
  */
 Plan *
-cdbparallelize(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchContentIds, int cursorOptions)
+cdbparallelize(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchContentIds)
 {
 	PlanProfile profile;
 	PlanProfile *context = &profile;
@@ -267,7 +267,7 @@ cdbparallelize(PlannerInfo *root, Plan *plan, bool *needToAssignDirectDispatchCo
 	 * processes.
 	 */
 	if (context->dispatchParallel || context->anyInitPlanParallel)
-		plan = apply_motion(root, plan, needToAssignDirectDispatchContentIds, cursorOptions);
+		plan = apply_motion(root, plan, needToAssignDirectDispatchContentIds);
 
 	/*
 	 * Mark the root plan to DISPATCH_PARALLEL if prescan() says it is

@@ -453,8 +453,6 @@ FaultInjector_InjectFaultIfSet(
 		}
 
 		case FaultInjectorTypeSkip:
-		case FaultInjectorTypeFullMemorySlot:
-		case FaultInjectorTypeRevertMemorySlot:
 			ereport(LOG, 
 					(errcode(ERRCODE_FAULT_INJECT),
 					 errmsg("fault triggered, fault name:'%s' fault type:'%s' ",

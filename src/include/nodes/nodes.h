@@ -586,7 +586,6 @@ typedef enum NodeTag
     /* CDB: tags for random other stuff */
     T_CdbExplain_StatHdr = 1000,             /* in cdb/cdbexplain.c */
 	T_GpPolicy,	/* in catalog/gp_policy.h */
-	T_RetrieveStmt,
 
 } NodeTag;
 

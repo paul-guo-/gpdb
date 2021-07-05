@@ -767,15 +767,6 @@ shm_mq_detach(shm_mq *mq)
 }
 
 /*
- * Get the shm_mq from handle.
- */
-shm_mq *
-shm_mq_get_queue(shm_mq_handle *mqh)
-{
-	return mqh->mqh_queue;
-}
-
-/*
  * Write bytes into a shared message queue.
  */
 static shm_mq_result
@@ -843,9 +834,6 @@ shm_mq_send_bytes(shm_mq_handle *mqh, Size nbytes, const void *data,
 		else if (available == 0)
 		{
 			shm_mq_result res;
-
-			if(QueryFinishPending)
-				return SHM_MQ_QUERY_FINISH;
 
 			/* Let the receiver know that we need them to read some data. */
 			res = shm_mq_notify_receiver(mq);
@@ -1034,15 +1022,8 @@ shm_mq_wait_internal(volatile shm_mq *mq, PGPROC *volatile * ptr,
 	bool		result = false;
 
 	save_set_latch_on_sigusr1 = set_latch_on_sigusr1;
-
-	/* Since set_latch_on_sigusr1 is removed in pg 9.6 (sha: db0f6cad4884bd4c835156d3a720d9a79dbd63a9).
-	 * So it's ok to let procsignal_sigusr1_handler always execute SetLatch(MyLatch).
-	 *
-	 * if (handle != NULL)
-	 *     set_latch_on_sigusr1 = true;
-	 * For above code, when not set set_latch_on_sigusr1 = true, SIGUSR1 signal
-	 * will never wake up the latch here if BackgroundWorkerHandle is not used. */
-	set_latch_on_sigusr1 = true;
+	if (handle != NULL)
+		set_latch_on_sigusr1 = true;
 
 	PG_TRY();
 	{
@@ -1051,9 +1032,6 @@ shm_mq_wait_internal(volatile shm_mq *mq, PGPROC *volatile * ptr,
 			BgwHandleStatus status;
 			pid_t		pid;
 			bool		detached;
-
-			if (QueryFinishPending)
-				break;
 
 			/* Acquire the lock just long enough to check the pointer. */
 			SpinLockAcquire(&mq->mq_mutex);
