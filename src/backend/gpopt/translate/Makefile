@@ -9,11 +9,13 @@ subdir = src/backend/gpopt/translate
 top_builddir = ../../../..
 include $(top_builddir)/src/Makefile.global
 
+include $(top_srcdir)/src/backend/gpopt/gpopt.mk
+
 OBJS =  CMappingColIdVar.o \
 		CMappingVarColId.o \
+		CPartPruneStepsBuilder.o \
 		CMappingElementColIdParamId.o \
 		CMappingColIdVarPlStmt.o \
-		CMappingElementColIdTE.o \
 		CDXLTranslateContextBaseTable.o \
 		CCTEListEntry.o \
 		CContextDXLToPlStmt.o \

@@ -4,7 +4,7 @@
  *	  routines to manage scans on GiST index relations
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -17,6 +17,7 @@
 #include "access/gist_private.h"
 #include "access/gistscan.h"
 #include "access/relscan.h"
+#include "utils/float.h"
 #include "utils/lsyscache.h"
 #include "utils/memutils.h"
 #include "utils/rel.h"
@@ -32,12 +33,30 @@ pairingheap_GISTSearchItem_cmp(const pairingheap_node *a, const pairingheap_node
 	const GISTSearchItem *sb = (const GISTSearchItem *) b;
 	IndexScanDesc scan = (IndexScanDesc) arg;
 	int			i;
+	double	   *da = GISTSearchItemDistanceValues(sa, scan->numberOfOrderBys),
+			   *db = GISTSearchItemDistanceValues(sb, scan->numberOfOrderBys);
+	bool	   *na = GISTSearchItemDistanceNulls(sa, scan->numberOfOrderBys),
+			   *nb = GISTSearchItemDistanceNulls(sb, scan->numberOfOrderBys);
 
 	/* Order according to distance comparison */
 	for (i = 0; i < scan->numberOfOrderBys; i++)
 	{
-		if (sa->distances[i] != sb->distances[i])
-			return (sa->distances[i] < sb->distances[i]) ? 1 : -1;
+		if (na[i])
+		{
+			if (!nb[i])
+				return -1;
+		}
+		else if (nb[i])
+		{
+			return 1;
+		}
+		else
+		{
+			int			cmp = -float8_cmp_internal(da[i], db[i]);
+
+			if (cmp != 0)
+				return cmp;
+		}
 	}
 
 	/* Heap items go before inner pages, to ensure a depth-first search */
@@ -54,12 +73,9 @@ pairingheap_GISTSearchItem_cmp(const pairingheap_node *a, const pairingheap_node
  * Index AM API functions for scanning GiST indexes
  */
 
-Datum
-gistbeginscan(PG_FUNCTION_ARGS)
+IndexScanDesc
+gistbeginscan(Relation r, int nkeys, int norderbys)
 {
-	Relation	r = (Relation) PG_GETARG_POINTER(0);
-	int			nkeys = PG_GETARG_INT32(1);
-	int			norderbys = PG_GETARG_INT32(2);
 	IndexScanDesc scan;
 	GISTSTATE  *giststate;
 	GISTScanOpaque so;
@@ -84,7 +100,8 @@ gistbeginscan(PG_FUNCTION_ARGS)
 	so->queueCxt = giststate->scanCxt;	/* see gistrescan */
 
 	/* workspaces with size dependent on numberOfOrderBys: */
-	so->distances = palloc(sizeof(double) * scan->numberOfOrderBys);
+	so->distanceValues = palloc(sizeof(double) * scan->numberOfOrderBys);
+	so->distanceNulls = palloc(sizeof(bool) * scan->numberOfOrderBys);
 	so->qual_ok = true;			/* in case there are zero keys */
 	if (scan->numberOfOrderBys > 0)
 	{
@@ -92,6 +109,11 @@ gistbeginscan(PG_FUNCTION_ARGS)
 		scan->xs_orderbynulls = palloc(sizeof(bool) * scan->numberOfOrderBys);
 		memset(scan->xs_orderbynulls, true, sizeof(bool) * scan->numberOfOrderBys);
 	}
+
+	so->killedItems = NULL;		/* until needed */
+	so->numKilled = 0;
+	so->curBlkno = InvalidBlockNumber;
+	so->curPageLSN = InvalidXLogRecPtr;
 
 	scan->opaque = so;
 
@@ -102,16 +124,13 @@ gistbeginscan(PG_FUNCTION_ARGS)
 
 	MemoryContextSwitchTo(oldCxt);
 
-	PG_RETURN_POINTER(scan);
+	return scan;
 }
 
-Datum
-gistrescan(PG_FUNCTION_ARGS)
+void
+gistrescan(IndexScanDesc scan, ScanKey key, int nkeys,
+		   ScanKey orderbys, int norderbys)
 {
-	IndexScanDesc scan = (IndexScanDesc) PG_GETARG_POINTER(0);
-	ScanKey		key = (ScanKey) PG_GETARG_POINTER(1);
-	ScanKey		orderbys = (ScanKey) PG_GETARG_POINTER(3);
-
 	/* nkeys and norderbys arguments are ignored */
 	GISTScanOpaque so = (GISTScanOpaque) scan->opaque;
 	bool		first_time;
@@ -126,7 +145,7 @@ gistrescan(PG_FUNCTION_ARGS)
 	 * which is created on the second call and reset on later calls.  Thus, in
 	 * the common case where a scan is only rescan'd once, we just put the
 	 * queue in scanCxt and don't pay the overhead of making a second memory
-	 * context.  If we do rescan more than once, the first RBTree is just left
+	 * context.  If we do rescan more than once, the first queue is just left
 	 * for dead until end of scan; this small wastage seems worth the savings
 	 * in the common case.
 	 */
@@ -141,9 +160,7 @@ gistrescan(PG_FUNCTION_ARGS)
 		/* second time through */
 		so->queueCxt = AllocSetContextCreate(so->giststate->scanCxt,
 											 "GiST queue context",
-											 ALLOCSET_DEFAULT_MINSIZE,
-											 ALLOCSET_DEFAULT_INITSIZE,
-											 ALLOCSET_DEFAULT_MAXSIZE);
+											 ALLOCSET_DEFAULT_SIZES);
 		first_time = false;
 	}
 	else
@@ -158,9 +175,10 @@ gistrescan(PG_FUNCTION_ARGS)
 	 * tuple descriptor to represent the returned index tuples and create a
 	 * memory context to hold them during the scan.
 	 */
-	if (scan->xs_want_itup && !scan->xs_itupdesc)
+	if (scan->xs_want_itup && !scan->xs_hitupdesc)
 	{
 		int			natts;
+		int			nkeyatts;
 		int			attno;
 
 		/*
@@ -170,23 +188,32 @@ gistrescan(PG_FUNCTION_ARGS)
 		 * types.
 		 */
 		natts = RelationGetNumberOfAttributes(scan->indexRelation);
-		so->giststate->fetchTupdesc = CreateTemplateTupleDesc(natts, false);
-		for (attno = 1; attno <= natts; attno++)
+		nkeyatts = IndexRelationGetNumberOfKeyAttributes(scan->indexRelation);
+		so->giststate->fetchTupdesc = CreateTemplateTupleDesc(natts);
+		for (attno = 1; attno <= nkeyatts; attno++)
 		{
 			TupleDescInitEntry(so->giststate->fetchTupdesc, attno, NULL,
 							   scan->indexRelation->rd_opcintype[attno - 1],
 							   -1, 0);
 		}
-		scan->xs_itupdesc = so->giststate->fetchTupdesc;
 
+		for (; attno <= natts; attno++)
+		{
+			/* taking opcintype from giststate->tupdesc */
+			TupleDescInitEntry(so->giststate->fetchTupdesc, attno, NULL,
+							   TupleDescAttr(so->giststate->leafTupdesc,
+											 attno - 1)->atttypid,
+							   -1, 0);
+		}
+		scan->xs_hitupdesc = so->giststate->fetchTupdesc;
+
+		/* Also create a memory context that will hold the returned tuples */
 		so->pageDataCxt = AllocSetContextCreate(so->giststate->scanCxt,
 												"GiST page data context",
-												ALLOCSET_DEFAULT_MINSIZE,
-												ALLOCSET_DEFAULT_INITSIZE,
-												ALLOCSET_DEFAULT_MAXSIZE);
+												ALLOCSET_DEFAULT_SIZES);
 	}
 
-	/* create new, empty RBTree for search queue */
+	/* create new, empty pairing heap for search queue */
 	oldCxt = MemoryContextSwitchTo(so->queueCxt);
 	so->queue = pairingheap_allocate(pairingheap_GISTSearchItem_cmp, scan);
 	MemoryContextSwitchTo(oldCxt);
@@ -230,6 +257,10 @@ gistrescan(PG_FUNCTION_ARGS)
 		{
 			ScanKey		skey = scan->keyData + i;
 
+			/*
+			 * Copy consistent support function to ScanKey structure instead
+			 * of function implementing filtering operator.
+			 */
 			fmgr_info_copy(&(skey->sk_func),
 						   &(so->giststate->consistentFn[skey->sk_attno - 1]),
 						   so->giststate->scanCxt);
@@ -285,8 +316,6 @@ gistrescan(PG_FUNCTION_ARGS)
 					 GIST_DISTANCE_PROC, skey->sk_attno,
 					 RelationGetRelationName(scan->indexRelation));
 
-			fmgr_info_copy(&(skey->sk_func), finfo, so->giststate->scanCxt);
-
 			/*
 			 * Look up the datatype returned by the original ordering
 			 * operator. GiST always uses a float8 for the distance function,
@@ -301,6 +330,12 @@ gistrescan(PG_FUNCTION_ARGS)
 			 */
 			so->orderByTypes[i] = get_func_rettype(skey->sk_func.fn_oid);
 
+			/*
+			 * Copy distance support function to ScanKey structure instead of
+			 * function implementing ordering operator.
+			 */
+			fmgr_info_copy(&(skey->sk_func), finfo, so->giststate->scanCxt);
+
 			/* Restore prior fn_extra pointers, if not first time */
 			if (!first_time)
 				skey->sk_func.fn_extra = fn_extras[i];
@@ -310,27 +345,13 @@ gistrescan(PG_FUNCTION_ARGS)
 			pfree(fn_extras);
 	}
 
-	PG_RETURN_VOID();
+	/* any previous xs_hitup will have been pfree'd in context resets above */
+	scan->xs_hitup = NULL;
 }
 
-Datum
-gistmarkpos(PG_FUNCTION_ARGS)
+void
+gistendscan(IndexScanDesc scan)
 {
-	elog(ERROR, "GiST does not support mark/restore");
-	PG_RETURN_VOID();
-}
-
-Datum
-gistrestrpos(PG_FUNCTION_ARGS)
-{
-	elog(ERROR, "GiST does not support mark/restore");
-	PG_RETURN_VOID();
-}
-
-Datum
-gistendscan(PG_FUNCTION_ARGS)
-{
-	IndexScanDesc scan = (IndexScanDesc) PG_GETARG_POINTER(0);
 	GISTScanOpaque so = (GISTScanOpaque) scan->opaque;
 
 	/*
@@ -338,6 +359,4 @@ gistendscan(PG_FUNCTION_ARGS)
 	 * as well as the queueCxt if there is a separate context for it.
 	 */
 	freeGISTstate(so->giststate);
-
-	PG_RETURN_VOID();
 }

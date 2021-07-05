@@ -3,7 +3,7 @@
  * parallel.h
  *	  Infrastructure for launching parallel workers
  *
- * Portions Copyright (c) 1996-2014, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/parallel.h
@@ -19,7 +19,6 @@
 #include "postmaster/bgworker.h"
 #include "storage/shm_mq.h"
 #include "storage/shm_toc.h"
-#include "utils/elog.h"
 
 typedef void (*parallel_worker_main_type) (dsm_segment *seg, shm_toc *toc);
 
@@ -35,7 +34,7 @@ typedef struct ParallelContext
 	dlist_node	node;
 	SubTransactionId subid;
 	int			nworkers;
-	parallel_worker_main_type entrypoint;
+	int			nworkers_launched;
 	char	   *library_name;
 	char	   *function_name;
 	ErrorContextCallback *error_context_stack;
@@ -44,25 +43,38 @@ typedef struct ParallelContext
 	void	   *private_memory;
 	shm_toc    *toc;
 	ParallelWorkerInfo *worker;
+	int			nknown_attached_workers;
+	bool	   *known_attached_workers;
 } ParallelContext;
 
-extern bool ParallelMessagePending;
-extern int	ParallelWorkerNumber;
+typedef struct ParallelWorkerContext
+{
+	dsm_segment *seg;
+	shm_toc    *toc;
+} ParallelWorkerContext;
+
+extern volatile bool ParallelMessagePending;
+extern PGDLLIMPORT int ParallelWorkerNumber;
+extern PGDLLIMPORT bool InitializingParallelWorker;
 
 #define		IsParallelWorker()		(ParallelWorkerNumber >= 0)
 
-extern ParallelContext *CreateParallelContext(parallel_worker_main_type entrypoint, int nworkers);
-extern ParallelContext *CreateParallelContextForExternalFunction(char *library_name, char *function_name, int nworkers);
-extern void InitializeParallelDSM(ParallelContext *);
-extern void LaunchParallelWorkers(ParallelContext *);
-extern void WaitForParallelWorkersToFinish(ParallelContext *);
-extern void DestroyParallelContext(ParallelContext *);
+extern ParallelContext *CreateParallelContext(const char *library_name,
+											  const char *function_name, int nworkers);
+extern void InitializeParallelDSM(ParallelContext *pcxt);
+extern void ReinitializeParallelDSM(ParallelContext *pcxt);
+extern void LaunchParallelWorkers(ParallelContext *pcxt);
+extern void WaitForParallelWorkersToAttach(ParallelContext *pcxt);
+extern void WaitForParallelWorkersToFinish(ParallelContext *pcxt);
+extern void DestroyParallelContext(ParallelContext *pcxt);
 extern bool ParallelContextActive(void);
 
 extern void HandleParallelMessageInterrupt(void);
 extern void HandleParallelMessages(void);
 extern void AtEOXact_Parallel(bool isCommit);
 extern void AtEOSubXact_Parallel(bool isCommit, SubTransactionId mySubId);
-extern void ParallelWorkerReportLastRecEnd(XLogRecPtr);
+extern void ParallelWorkerReportLastRecEnd(XLogRecPtr last_xlog_end);
 
-#endif   /* PARALLEL_H */
+extern void ParallelWorkerMain(Datum main_arg);
+
+#endif							/* PARALLEL_H */

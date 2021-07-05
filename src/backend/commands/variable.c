@@ -4,7 +4,7 @@
  *		Routines for handling specialized SET variables.
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -19,6 +19,7 @@
 #include <ctype.h>
 
 #include "access/htup_details.h"
+#include "access/parallel.h"
 #include "access/xact.h"
 #include "access/xlog.h"
 #include "catalog/pg_authid.h"
@@ -30,6 +31,7 @@
 #include "utils/syscache.h"
 #include "utils/snapmgr.h"
 #include "utils/timestamp.h"
+#include "utils/varlena.h"
 #include "mb/pg_wchar.h"
 
 /*
@@ -289,7 +291,7 @@ check_timezone(char **newval, void **extra, GucSource source)
 		 */
 		interval = DatumGetIntervalP(DirectFunctionCall3(interval_in,
 														 CStringGetDatum(val),
-												ObjectIdGetDatum(InvalidOid),
+														 ObjectIdGetDatum(InvalidOid),
 														 Int32GetDatum(-1)));
 
 		pfree(val);
@@ -307,11 +309,7 @@ check_timezone(char **newval, void **extra, GucSource source)
 		}
 
 		/* Here we change from SQL to Unix sign convention */
-#ifdef HAVE_INT64_TIMESTAMP
 		gmtoffset = -(interval->time / USECS_PER_SEC);
-#else
-		gmtoffset = -interval->time;
-#endif
 		new_tz = pg_tzset_offset(gmtoffset);
 
 		pfree(interval);
@@ -475,18 +473,20 @@ show_log_timezone(void)
  * We allow idempotent changes (r/w -> r/w and r/o -> r/o) at any time, and
  * we also always allow changes from read-write to read-only.  However,
  * read-only may be changed to read-write only when in a top-level transaction
- * that has not yet taken an initial snapshot.  Can't do it in a hot standby
- * slave, either.
+ * that has not yet taken an initial snapshot.  Can't do it in a hot standby,
+ * either.
  *
  * If we are not in a transaction at all, just allow the change; it means
  * nothing since XactReadOnly will be reset by the next StartTransaction().
  * The IsTransactionState() test protects us against trying to check
  * RecoveryInProgress() in contexts where shared memory is not accessible.
+ * (Similarly, if we're restoring state in a parallel worker, just allow
+ * the change.)
  */
 bool
 check_transaction_read_only(bool *newval, void **extra, GucSource source)
 {
-	if (*newval == false && XactReadOnly && IsTransactionState())
+	if (*newval == false && XactReadOnly && IsTransactionState() && !InitializingParallelWorker)
 	{
 		/* Can't go to r/w mode inside a r/o transaction */
 		if (IsSubTransaction())
@@ -523,32 +523,9 @@ check_transaction_read_only(bool *newval, void **extra, GucSource source)
  * As in check_transaction_read_only, allow it if not inside a transaction.
  */
 bool
-check_XactIsoLevel(char **newval, void **extra, GucSource source)
+check_XactIsoLevel(int *newval, void **extra, GucSource source)
 {
-	int			newXactIsoLevel;
-
-	if (strcmp(*newval, "serializable") == 0)
-	{
-		newXactIsoLevel = XACT_SERIALIZABLE;
-	}
-	else if (strcmp(*newval, "repeatable read") == 0)
-	{
-		newXactIsoLevel = XACT_REPEATABLE_READ;
-	}
-	else if (strcmp(*newval, "read committed") == 0)
-	{
-		newXactIsoLevel = XACT_READ_COMMITTED;
-	}
-	else if (strcmp(*newval, "read uncommitted") == 0)
-	{
-		newXactIsoLevel = XACT_READ_UNCOMMITTED;
-	}
-	else if (strcmp(*newval, "default") == 0)
-	{
-		newXactIsoLevel = DefaultXactIsoLevel;
-	}
-	else
-		return false;
+	int			newXactIsoLevel = *newval;
 
 	if (newXactIsoLevel != XactIsoLevel && IsTransactionState())
 	{
@@ -575,18 +552,6 @@ check_XactIsoLevel(char **newval, void **extra, GucSource source)
 		}
 	}
 
-	*extra = malloc(sizeof(int));
-	if (!*extra)
-		return false;
-	*((int *) *extra) = newXactIsoLevel;
-
-	return true;
-}
-
-void
-assign_XactIsoLevel(const char *newval, void *extra)
-{
-	XactIsoLevel = *((int *) extra);
 	/*
 	 * GPDB_91_MERGE_FIXME: Prior to PostgreSQL 9.1, serializable isolation was
 	 * implemented as read committed.  True serializable isolation level is
@@ -599,31 +564,14 @@ assign_XactIsoLevel(const char *newval, void *extra)
 	 * transaction_deferrable guc via DtxContextInfo similar to
 	 * transaction_isolation.
 	 */
-	if (XactIsoLevel == XACT_SERIALIZABLE)
+	if (newXactIsoLevel == XACT_SERIALIZABLE)
 	{
 		elog(LOG, "serializable isolation requested, falling back to "
 			 "repeatable read until serializable is supported in Greenplum");
-		XactIsoLevel = XACT_REPEATABLE_READ;
+		*newval = XACT_REPEATABLE_READ;
 	}
-}
 
-const char *
-show_XactIsoLevel(void)
-{
-	/* We need this because we don't want to show "default". */
-	switch (XactIsoLevel)
-	{
-		case XACT_READ_UNCOMMITTED:
-			return "read uncommitted";
-		case XACT_READ_COMMITTED:
-			return "read committed";
-		case XACT_REPEATABLE_READ:
-			return "repeatable read";
-		case XACT_SERIALIZABLE:
-			return "serializable";
-		default:
-			return "bogus";
-	}
+	return true;
 }
 
 bool
@@ -642,6 +590,7 @@ check_DefaultXactIsoLevel(int *newval, void **extra, GucSource source)
 
 	return true;
 }
+
 /*
  * SET TRANSACTION [NOT] DEFERRABLE
  */
@@ -787,6 +736,30 @@ assign_client_encoding(const char *newval, void *extra)
 {
 	int			encoding = *((int *) extra);
 
+	/*
+	 * Parallel workers send data to the leader, not the client.  They always
+	 * send data using the database encoding.
+	 */
+	if (IsParallelWorker())
+	{
+		/*
+		 * During parallel worker startup, we want to accept the leader's
+		 * client_encoding setting so that anyone who looks at the value in
+		 * the worker sees the same value that they would see in the leader.
+		 */
+		if (InitializingParallelWorker)
+			return;
+
+		/*
+		 * A change other than during startup, for example due to a SET clause
+		 * attached to a function definition, should be rejected, as there is
+		 * nothing we can do inside the worker to make it take effect.
+		 */
+		ereport(ERROR,
+				(errcode(ERRCODE_INVALID_TRANSACTION_STATE),
+				 errmsg("cannot change client_encoding during a parallel operation")));
+	}
+
 	/* We do not expect an error if PrepareClientEncoding succeeded */
 	if (SetClientEncoding(encoding) < 0)
 		elog(LOG, "SetClientEncoding(%d) failed", encoding);
@@ -808,6 +781,7 @@ bool
 check_session_authorization(char **newval, void **extra, GucSource source)
 {
 	HeapTuple	roleTup;
+	Form_pg_authid roleform;
 	Oid			roleid;
 	bool		is_superuser;
 	role_auth_extra *myextra;
@@ -834,8 +808,9 @@ check_session_authorization(char **newval, void **extra, GucSource source)
 		return false;
 	}
 
-	roleid = HeapTupleGetOid(roleTup);
-	is_superuser = ((Form_pg_authid) GETSTRUCT(roleTup))->rolsuper;
+	roleform = (Form_pg_authid) GETSTRUCT(roleTup);
+	roleid = roleform->oid;
+	is_superuser = roleform->rolsuper;
 
 	ReleaseSysCache(roleTup);
 
@@ -879,6 +854,7 @@ check_role(char **newval, void **extra, GucSource source)
 	Oid			roleid;
 	bool		is_superuser;
 	role_auth_extra *myextra;
+	Form_pg_authid roleform;
 
 	if (strcmp(*newval, "none") == 0)
 	{
@@ -906,15 +882,19 @@ check_role(char **newval, void **extra, GucSource source)
 			return false;
 		}
 
-		roleid = HeapTupleGetOid(roleTup);
-		is_superuser = ((Form_pg_authid) GETSTRUCT(roleTup))->rolsuper;
+		roleform = (Form_pg_authid) GETSTRUCT(roleTup);
+		roleid = roleform->oid;
+		is_superuser = roleform->rolsuper;
 
 		ReleaseSysCache(roleTup);
 
 		/*
-		 * Verify that session user is allowed to become this role
+		 * Verify that session user is allowed to become this role, but skip
+		 * this in parallel mode, where we must blindly recreate the parallel
+		 * leader's state.
 		 */
-		if (!is_member_of_role(GetSessionUserId(), roleid))
+		if (!InitializingParallelWorker &&
+			!is_member_of_role(GetSessionUserId(), roleid))
 		{
 			GUC_check_errcode(ERRCODE_INSUFFICIENT_PRIVILEGE);
 			GUC_check_errmsg("permission denied to set role \"%s\"",

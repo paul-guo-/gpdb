@@ -2,11 +2,13 @@
  * Greenplum system views and functions.
  *
  * Portions Copyright (c) 2009-2010, Greenplum inc.
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  */
 
 BEGIN;
+
+CREATE SCHEMA gp_toolkit;
 
 GRANT USAGE ON SCHEMA gp_toolkit TO public;
 
@@ -103,7 +105,7 @@ AS
         relacl as autrelacl,
         pgc.oid as autoid,
         pgc.reltoastrelid as auttoastoid,
-        pgc.relstorage as autrelstorage
+        pgc.relam as autrelam
     FROM
         pg_catalog.pg_class pgc,
         gp_toolkit.__gp_fullname fn
@@ -112,31 +114,11 @@ AS
         SELECT aunoid
         FROM gp_toolkit.__gp_user_namespaces
     )
-    AND pgc.relkind = 'r'
+    AND pgc.relkind IN ('r', 'p', 'm')
+    AND pgc.relispopulated = 't'
     AND pgc.oid = fn.fnoid;
 
 GRANT SELECT ON TABLE gp_toolkit.__gp_user_tables TO public;
-
-
---------------------------------------------------------------------------------
--- @view:
---        gp_toolkit.__gp_user_data_tables
---
--- @doc:
---        Shorthand for tables in user namespaces that may hold data
---
---------------------------------------------------------------------------------
-CREATE VIEW gp_toolkit.__gp_user_data_tables
-AS
-    SELECT aut.*
-    FROM
-        gp_toolkit.__gp_user_tables aut
-    LEFT OUTER JOIN
-        pg_catalog.pg_partition pgp
-    ON aut.autoid = pgp.parrelid
-    WHERE pgp.parrelid IS NULL;
-
-GRANT SELECT ON TABLE gp_toolkit.__gp_user_data_tables TO public;
 
 
 --------------------------------------------------------------------------------
@@ -176,6 +158,8 @@ AS
 
 GRANT SELECT ON TABLE gp_toolkit.__gp_number_of_segments TO public;
 
+
+CREATE EXTENSION gp_exttable_fdw;
 
 --------------------------------------------------------------------------------
 -- log-reading external tables and views
@@ -222,7 +206,7 @@ CREATE EXTERNAL WEB TABLE gp_toolkit.__gp_log_segment_ext
     logline int,
     logstack text
 )
-EXECUTE E'cat $GP_SEG_DATADIR/pg_log/*.csv'
+EXECUTE E'cat $GP_SEG_DATADIR/log/*.csv'
 FORMAT 'CSV' (DELIMITER AS ',' NULL AS '' QUOTE AS '"');
 
 REVOKE ALL ON TABLE gp_toolkit.__gp_log_segment_ext FROM public;
@@ -269,7 +253,7 @@ CREATE EXTERNAL WEB TABLE gp_toolkit.__gp_log_master_ext
     logline int,
     logstack text
 )
-EXECUTE E'cat $GP_SEG_DATADIR/pg_log/*.csv' ON MASTER
+EXECUTE E'cat $GP_SEG_DATADIR/log/*.csv' ON COORDINATOR
 FORMAT 'CSV' (DELIMITER AS ',' NULL AS '' QUOTE AS '"');
 
 REVOKE ALL ON TABLE gp_toolkit.__gp_log_master_ext FROM public;
@@ -441,7 +425,7 @@ $$
     SELECT gp_execution_segment(), $1, current_setting($1);
 $$
 LANGUAGE SQL
-VOLATILE CONTAINS SQL EXECUTE ON MASTER;
+VOLATILE CONTAINS SQL EXECUTE ON COORDINATOR;
 
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_param_setting_on_master(varchar) TO public;
 
@@ -453,7 +437,7 @@ $$
   UNION ALL
   SELECT * FROM gp_toolkit.__gp_param_setting_on_segments($1);
 $$
-LANGUAGE SQL READS SQL DATA EXECUTE ON MASTER;
+LANGUAGE SQL READS SQL DATA EXECUTE ON COORDINATOR;
 
 GRANT EXECUTE ON FUNCTION gp_toolkit.gp_param_setting(varchar) TO public;
 
@@ -578,16 +562,12 @@ DECLARE
     skewsegid int;
     skewtablename record;
     skewreplicated record;
-
 BEGIN
-
     SELECT INTO skewrec *
     FROM pg_catalog.pg_appendonly pga, pg_catalog.pg_roles pgr
     WHERE pga.relid = $1::regclass and pgr.rolname = current_user and pgr.rolsuper = 't';
-
     IF FOUND THEN
         -- append only table
-
         FOR skewrec IN
             SELECT $1, segid, COALESCE(tupcount, 0)::bigint AS cnt
             FROM (SELECT generate_series(0, numsegments - 1) FROM gp_toolkit.__gp_number_of_segments) segs(segid)
@@ -596,15 +576,11 @@ BEGIN
         LOOP
             RETURN NEXT skewrec;
         END LOOP;
-
     ELSE
         -- heap table
-
         SELECT * INTO skewtablename FROM gp_toolkit.__gp_fullname
         WHERE fnoid = $1;
-
         SELECT * INTO skewreplicated FROM gp_distribution_policy WHERE policytype = 'r' AND localoid = $1;
-
         IF FOUND THEN
             -- replicated table, gp_segment_id is user-invisible and all replicas have same count of tuples.
             OPEN skewcrs
@@ -632,7 +608,6 @@ BEGIN
                         ' GROUP BY 1) details ' ||
                     'ON segid = gp_segment_id';
         END IF;
-
         FOR skewsegid IN
             SELECT generate_series(1, numsegments)
             FROM gp_toolkit.__gp_number_of_segments
@@ -646,11 +621,10 @@ BEGIN
         END LOOP;
         CLOSE skewcrs;
     END IF;
-
     RETURN;
-END
+END;
 $$
-LANGUAGE plpgSQL READS SQL DATA;
+LANGUAGE plpgsql READS SQL DATA;
 
 GRANT EXECUTE ON FUNCTION gp_toolkit.gp_skew_details(oid) TO public;
 
@@ -682,7 +656,6 @@ AS
 --
 -- @doc:
 --        Compute coefficient of variance given an array of rowcounts;
---        Multiply by 100 to be in sync with gpperfmon's measure
 --
 --------------------------------------------------------------------------------
 CREATE FUNCTION gp_toolkit.gp_skew_coefficient(targetoid oid, OUT skcoid oid, OUT skccoeff numeric)
@@ -727,16 +700,15 @@ $$
 DECLARE
     skcoid oid;
     skcrec record;
-
 BEGIN
-    FOR skcoid IN SELECT autoid from gp_toolkit.__gp_user_data_tables_readable WHERE autrelstorage != 'x'
+    FOR skcoid IN SELECT autoid from gp_toolkit.__gp_user_data_tables_readable
     LOOP
         SELECT * INTO skcrec
         FROM
             gp_toolkit.gp_skew_coefficient(skcoid);
         RETURN NEXT skcrec;
     END LOOP;
-END
+END;
 $$
 LANGUAGE plpgsql READS SQL DATA;
 
@@ -826,16 +798,15 @@ $$
 DECLARE
     skcoid oid;
     skcrec record;
-
 BEGIN
-    FOR skcoid IN SELECT autoid from gp_toolkit.__gp_user_data_tables_readable WHERE autrelstorage != 'x'
+    FOR skcoid IN SELECT autoid from gp_toolkit.__gp_user_data_tables_readable
     LOOP
         SELECT * INTO skcrec
         FROM
             gp_toolkit.gp_skew_idle_fraction(skcoid);
         RETURN NEXT skcrec;
     END LOOP;
-END
+END;
 $$
 LANGUAGE plpgsql READS SQL DATA;
 
@@ -934,7 +905,7 @@ CREATE EXTERNAL WEB TABLE gp_toolkit.gp_disk_free
     dfdevice text,
     dfspace bigint
 )
-EXECUTE E'python -c "from gppylib.commands import unix; df=unix.DiskFree.get_disk_free_info_local(''token'',''$GP_SEG_DATADIR''); print ''%s, %s, %s, %s'' % (''$GP_SEGMENT_ID'', unix.getLocalHostname(), df[0], df[3])"' FORMAT 'CSV';
+EXECUTE E'python3 -c "from gppylib.commands import unix; df=unix.DiskFree.get_disk_free_info_local(''token'',''$GP_SEG_DATADIR''); print(''%s, %s, %s, %s'' % (''$GP_SEGMENT_ID'', unix.getLocalHostname(), df[0], df[3]))"' FORMAT 'CSV';
 
 
 --------------------------------------------------------------------------------
@@ -978,12 +949,7 @@ AS
                     FROM gp_toolkit.__gp_is_append_only
                     WHERE iaooid = pgc.oid AND iaotype = 't'
                 )
-                AND NOT EXISTS
-                (
-                    SELECT parrelid
-                    FROM pg_partition
-                    WHERE parrelid = pgc.oid
-                )
+                AND pgc.relkind not in ('p') -- partitioned tables have no data
             )
             AS pgc
         LEFT OUTER JOIN
@@ -1247,7 +1213,8 @@ AS
         pgl.pid           AS lorpid,
         pgl.mode          AS lormode,
         pgl.granted       AS lorgranted,
-        pgsa.waiting      AS lorwaiting
+        pgsa.wait_event   AS lorwaitevent,
+        pgsa.wait_event_type AS lorwaiteventtype
     FROM pg_catalog.pg_stat_activity pgsa
 
     JOIN pg_catalog.pg_locks pgl
@@ -1410,7 +1377,6 @@ AS
         FROM
             (SELECT *
              FROM gp_toolkit.__gp_user_data_tables_readable
-             WHERE autrelstorage != 'x'
             ) AS udtr
 
         LEFT JOIN pg_catalog.pg_appendonly ao
@@ -1628,54 +1594,6 @@ REVOKE ALL ON TABLE gp_toolkit.gp_size_of_table_and_indexes_licensing FROM publi
 
 --------------------------------------------------------------------------------
 -- @view:
---              gp_toolkit.gp_size_of_partition_and_indexes_disk
---
--- @doc:
---              Calculates partition table disk size and partition indexes disk size
---
---------------------------------------------------------------------------------
-CREATE VIEW gp_toolkit.gp_size_of_partition_and_indexes_disk
-AS
-    SELECT
-        sopaid.sopaidparentoid                AS sopaidparentoid,
-        sopaid.sopaidpartitionoid            AS sopaidpartitionoid,
-        sopaid.sopaidpartitiontablesize        AS sopaidpartitiontablesize,
-        sopaid.sopaidpartitionindexessize    AS sopaidpartitionindexessize,
-        fnparent.fnnspname                     AS sopaidparentschemaname,
-        fnparent.fnrelname                     AS sopaidparenttablename,
-        fnpart.fnnspname                     AS sopaidpartitionschemaname,
-        fnpart.fnrelname                     AS sopaidpartitiontablename
-    FROM
-        (SELECT
-            pgp.parrelid                 AS sopaidparentoid,
-            pgpr.parchildrelid           AS sopaidpartitionoid,
-            sotd.sotdsize +
-            sotd.sotdtoastsize +
-            sotd.sotdadditionalsize      AS sopaidpartitiontablesize,
-            COALESCE(soati.soatisize, 0) AS sopaidpartitionindexessize
-        FROM pg_catalog.pg_partition pgp
-
-        JOIN pg_partition_rule pgpr ON (pgp.oid = pgpr.paroid)
-
-        JOIN gp_toolkit.gp_size_of_table_disk sotd
-        ON (sotd.sotdoid = pgpr.parchildrelid)
-
-        LEFT JOIN gp_toolkit.gp_size_of_all_table_indexes soati
-        ON (soati.soatioid = pgpr.parchildrelid)
-        ) AS sopaid
-
-    JOIN gp_toolkit.__gp_fullname fnparent
-    ON (sopaid.sopaidparentoid = fnparent.fnoid)
-
-    JOIN gp_toolkit.__gp_fullname fnpart
-    ON (sopaid.sopaidpartitionoid = fnpart.fnoid)
-    ;
-
-GRANT SELECT ON TABLE gp_toolkit.gp_size_of_partition_and_indexes_disk TO public;
-
-
---------------------------------------------------------------------------------
--- @view:
 --              gp_toolkit.gp_size_of_schema_disk
 --
 -- @doc:
@@ -1852,7 +1770,7 @@ CREATE VIEW gp_toolkit.gp_resgroup_status_per_host AS
         s.rsgname
       , s.groupid
       , c.hostname
-      , sum((s.cpu                       )::text::numeric) AS cpu
+      , round(avg((s.cpu)::text::numeric), 2) AS cpu
       , sum((s.memory->'used'            )::text::integer) AS memory_used
       , sum((s.memory->'available'       )::text::integer) AS memory_available
       , sum((s.memory->'quota_used'      )::text::integer) AS memory_quota_used
@@ -1920,17 +1838,7 @@ GRANT SELECT ON gp_toolkit.gp_resgroup_status_per_segment TO public;
 --------------------------------------------------------------------------------
 
 CREATE FUNCTION gp_toolkit.__gp_aoseg_history(regclass)
-RETURNS TABLE(gp_tid tid,
-    gp_xmin integer,
-    gp_xmin_status text,
-    gp_xmin_commit_distrib_id text,
-    gp_xmax integer,
-    gp_xmax_status text,
-    gp_xmax_commit_distrib_id text,
-    gp_command_id integer,
-    gp_infomask text,
-    gp_update_tid tid,
-    gp_visibility text,
+RETURNS TABLE(segment_id integer,
     segno integer,
     tupcount bigint,
     eof bigint,
@@ -1939,11 +1847,11 @@ RETURNS TABLE(gp_tid tid,
     formatversion smallint,
     state smallint)
 AS '$libdir/gp_ao_co_diagnostics', 'gp_aoseg_history_wrapper'
-LANGUAGE C STRICT;
+LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aoseg_history(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aocsseg(regclass)
-RETURNS TABLE(gp_tid tid,
+RETURNS TABLE(segment_id integer,
     segno integer,
     column_num smallint,
     physical_segno integer,
@@ -1954,21 +1862,11 @@ RETURNS TABLE(gp_tid tid,
     formatversion smallint,
     state smallint)
 AS '$libdir/gp_ao_co_diagnostics', 'gp_aocsseg_wrapper'
-LANGUAGE C STRICT;
+LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aocsseg(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aocsseg_history(regclass)
-RETURNS TABLE(gp_tid tid,
-    gp_xmin integer,
-    gp_xmin_status text,
-    gp_xmin_distrib_id text,
-    gp_xmax integer,
-    gp_xmax_status text,
-    gp_xmax_distrib_id text,
-    gp_command_id integer,
-    gp_infomask text,
-    gp_update_tid tid,
-    gp_visibility text,
+RETURNS TABLE(segment_id integer,
     segno integer,
     column_num smallint,
     physical_segno integer,
@@ -1979,7 +1877,7 @@ RETURNS TABLE(gp_tid tid,
     formatversion smallint,
     state smallint)
 AS '$libdir/gp_ao_co_diagnostics' , 'gp_aocsseg_history_wrapper'
-LANGUAGE C STRICT;
+LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aocsseg_history(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aovisimap(regclass)
@@ -1987,7 +1885,7 @@ RETURNS TABLE (tid tid,
     segno int,
     row_num bigint)
 AS '$libdir/gp_ao_co_diagnostics', 'gp_aovisimap_wrapper'
-LANGUAGE C IMMUTABLE;
+LANGUAGE C STRICT;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aovisimap(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aovisimap_hidden_info(regclass)
@@ -1995,7 +1893,7 @@ RETURNS TABLE (segno integer,
     hidden_tupcount bigint,
     total_tupcount bigint)
 AS '$libdir/gp_ao_co_diagnostics', 'gp_aovisimap_hidden_info_wrapper'
-LANGUAGE C STRICT;
+LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aovisimap_hidden_info(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aovisimap_entry(regclass)
@@ -2008,7 +1906,8 @@ LANGUAGE C STRICT;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aovisimap_entry(regclass) TO public;
 
 CREATE FUNCTION gp_toolkit.__gp_aoseg(regclass)
-RETURNS TABLE (segno integer, eof bigint,
+RETURNS TABLE (segment_id integer,
+    segno integer, eof bigint,
     tupcount bigint,
     varblockcount bigint,
     eof_uncompressed bigint,
@@ -2016,7 +1915,7 @@ RETURNS TABLE (segno integer, eof bigint,
     formatversion smallint,
     state smallint)
 AS '$libdir/gp_ao_co_diagnostics', 'gp_aoseg_wrapper'
-LANGUAGE C STRICT;
+LANGUAGE C STRICT EXECUTE ON ALL SEGMENTS;
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_aoseg(regclass) TO public;
 
 CREATE TYPE gp_toolkit.__gp_aovisimap_hidden_t AS (seg int, hidden bigint, total bigint);
@@ -2055,25 +1954,8 @@ BEGIN
     RAISE NOTICE 'gp_appendonly_compaction_threshold = %', threshold;
     RETURN;
 END;
-$$ LANGUAGE plpgsql;
-
--- gp_toolkit.__gp_remove_ao_entry_from_cache
---   Helper function to evict an entry from AppendOnlyHash cache that is
---   suspected of not being correct (e.g. segment files having wrong states).
---   This should only be used for troubleshooting purposes.
-CREATE OR REPLACE FUNCTION gp_toolkit.__gp_remove_ao_entry_from_cache(oid)
-RETURNS VOID
-AS '$libdir/gp_ao_co_diagnostics', 'gp_remove_ao_entry_from_cache'
-LANGUAGE C IMMUTABLE STRICT NO SQL;
-
-CREATE OR REPLACE FUNCTION gp_toolkit.__gp_get_ao_entry_from_cache(ao_oid oid,
-       OUT segno smallint, OUT total_tupcount bigint, OUT tuples_added bigint,
-       OUT inserting_transaction xid, OUT latest_committed_inserting_dxid xid,
-       OUT state smallint, OUT format_version smallint, OUT is_full boolean,
-       OUT aborted boolean)
-RETURNS SETOF RECORD
-AS '$libdir/gp_ao_co_diagnostics', 'gp_get_ao_entry_from_cache'
-LANGUAGE C IMMUTABLE STRICT NO SQL;
+$$
+LANGUAGE plpgsql;
 
 -- Workfile views
 --------------------------------------------------------------------------------
@@ -2102,7 +1984,7 @@ LANGUAGE C IMMUTABLE STRICT NO SQL;
 CREATE FUNCTION gp_toolkit.__gp_workfile_entries_f_on_master()
 RETURNS SETOF record
 AS '$libdir/gp_workfile_mgr', 'gp_workfile_mgr_cache_entries'
-LANGUAGE C VOLATILE EXECUTE ON MASTER;
+LANGUAGE C VOLATILE EXECUTE ON COORDINATOR;
 
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_workfile_entries_f_on_master() TO public;
 
@@ -2223,7 +2105,7 @@ GRANT SELECT ON gp_toolkit.gp_workfile_usage_per_query TO public;
 CREATE FUNCTION gp_toolkit.__gp_workfile_mgr_used_diskspace_f_on_master()
 RETURNS SETOF record
 AS '$libdir/gp_workfile_mgr', 'gp_workfile_mgr_used_diskspace'
-LANGUAGE C VOLATILE EXECUTE ON MASTER;
+LANGUAGE C VOLATILE EXECUTE ON COORDINATOR;
 
 GRANT EXECUTE ON FUNCTION gp_toolkit.__gp_workfile_mgr_used_diskspace_f_on_master() TO public;
 

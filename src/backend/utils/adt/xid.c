@@ -3,7 +3,7 @@
  * xid.c
  *	  POSTGRES transaction identifier and command identifier datatypes.
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -68,7 +68,7 @@ xidsend(PG_FUNCTION_ARGS)
 	StringInfoData buf;
 
 	pq_begintypsend(&buf);
-	pq_sendint(&buf, arg1, sizeof(arg1));
+	pq_sendint32(&buf, arg1);
 	PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 
@@ -84,79 +84,26 @@ xideq(PG_FUNCTION_ARGS)
 	PG_RETURN_BOOL(TransactionIdEquals(xid1, xid2));
 }
 
+/*
+ *		xidneq			- are two xids different?
+ */
 Datum
-xidne(PG_FUNCTION_ARGS)
+xidneq(PG_FUNCTION_ARGS)
 {
 	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
 	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
 
-	PG_RETURN_BOOL(xid1 != xid2);
+	PG_RETURN_BOOL(!TransactionIdEquals(xid1, xid2));
 }
-
-Datum
-xidlt(PG_FUNCTION_ARGS)
-{
-	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
-	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
-
-	PG_RETURN_BOOL(xid1 < xid2);
-}
-
-Datum
-xidgt(PG_FUNCTION_ARGS)
-{
-	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
-	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
-
-	PG_RETURN_BOOL(xid1 > xid2);
-}
-
-Datum
-xidle(PG_FUNCTION_ARGS)
-{
-	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
-	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
-
-	PG_RETURN_BOOL(xid1 <= xid2);
-}
-
-Datum
-xidge(PG_FUNCTION_ARGS)
-{
-	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
-	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
-
-	PG_RETURN_BOOL(xid1 >= xid2);
-}
-
-Datum
-btxidcmp(PG_FUNCTION_ARGS)
-{
-	TransactionId xid1 = PG_GETARG_TRANSACTIONID(0);
-	TransactionId xid2 = PG_GETARG_TRANSACTIONID(1);
-
-	if (xid1 == xid2)
-		PG_RETURN_INT32(0);
-	else if (xid1 > xid2)
-		PG_RETURN_INT32(1);
-	else
-		PG_RETURN_INT32(-1);
-}
-
 
 /*
- * xid_age - compute age of an XID (relative to latest transaction id
- * allocated in system)
- *
- * ReadNewTransactionId() is used here instead of GetTopTransactionId(), as
- * this function may be called on QE Reader and with laxy XID try to allocate
- * XID as QE Reader which is not allowed.
+ *		xid_age			- compute age of an XID (relative to latest stable xid)
  */
 Datum
 xid_age(PG_FUNCTION_ARGS)
 {
 	TransactionId xid = PG_GETARG_TRANSACTIONID(0);
-	TransactionId now = ReadNewTransactionId();
+	TransactionId now = GetStableLatestTransactionId();
 
 	/* Permanent XIDs are always infinitely old */
 	if (!TransactionIdIsNormal(xid))
@@ -249,7 +196,7 @@ cidsend(PG_FUNCTION_ARGS)
 	StringInfoData buf;
 
 	pq_begintypsend(&buf);
-	pq_sendint(&buf, arg1, sizeof(arg1));
+	pq_sendint32(&buf, arg1);
 	PG_RETURN_BYTEA_P(pq_endtypsend(&buf));
 }
 

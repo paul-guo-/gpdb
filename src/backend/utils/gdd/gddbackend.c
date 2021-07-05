@@ -4,7 +4,7 @@
  *	  Global DeadLock Detector - Backend
  *
  *
- * Copyright (c) 2018-Present Pivotal Software, Inc.
+ * Copyright (c) 2018-Present VMware, Inc. or its affiliates.
  *
  *
  *-------------------------------------------------------------------------
@@ -36,11 +36,10 @@
 #include "utils/faultinjector.h"
 #include "gdddetector.h"
 #include "gdddetectorpriv.h"
+#include "pgstat.h"
 
 #define RET_STATUS_OK 0
 #define RET_STATUS_ERROR 1
-
-#define PGLOCKS_BATCH_SIZE 32
 
 typedef struct VertSatelliteData
 {
@@ -62,6 +61,7 @@ typedef struct EdgeSatelliteData
 
 void GlobalDeadLockDetectorMain(Datum main_arg);
 
+static bool IsValidGxid(List *gxids, DistributedTransactionId check_gxid);
 static void GlobalDeadLockDetectorLoop(void);
 static int  doDeadLockCheck(void);
 static void buildWaitGraph(GddCtx *ctx);
@@ -93,8 +93,7 @@ sigHupHandler(SIGNAL_ARGS)
 bool
 GlobalDeadLockDetectorStartRule(Datum main_arg)
 {
-	/* we only start gdd on master when -E is specified */
-	if (IsUnderMasterDispatchMode() &&
+	if (Gp_role == GP_ROLE_DISPATCH &&
 		gp_enable_global_deadlock_detector)
 		return true;
 
@@ -115,7 +114,7 @@ GlobalDeadLockDetectorMain(Datum main_arg)
 	BackgroundWorkerUnblockSignals();
 
 	/* Connect to our database */
-	BackgroundWorkerInitializeConnection(DB_FOR_COMMON_ACCESS, NULL);
+	BackgroundWorkerInitializeConnection(DB_FOR_COMMON_ACCESS, NULL, 0);
 
 	/* disable orca here */
 	extern bool optimizer;
@@ -125,6 +124,22 @@ GlobalDeadLockDetectorMain(Datum main_arg)
 
 	/* One iteration done, go away */
 	proc_exit(0);
+}
+
+static bool
+IsValidGxid(List *gxids, DistributedTransactionId check_gxid)
+{
+	ListCell *cell;
+	DistributedTransactionId gxid;
+
+	foreach(cell, gxids)
+	{
+		gxid = *(DistributedTransactionId*) lfirst(cell);
+		if (gxid == check_gxid)
+			return true;
+	}
+
+	return false;
 }
 
 static void
@@ -166,7 +181,8 @@ GlobalDeadLockDetectorLoop(void)
 
 		rc = WaitLatch(&MyProc->procLatch,
 					   WL_LATCH_SET | WL_TIMEOUT | WL_POSTMASTER_DEATH,
-					   timeout * 1000L);
+					   timeout * 1000L,
+					   WAIT_EVENT_GLOBAL_DEADLOCK_DETECTOR_MAIN);
 
 		ResetLatch(&MyProc->procLatch);
 
@@ -197,7 +213,6 @@ doDeadLockCheck(void)
 		if (!GddCtxEmpty(ctx))
 		{
 			StringInfoData wait_graph_str;
-			StringInfoData pglock_str;
 
 			/*
 			 * At least one deadlock cycle is detected, and as all the invalid
@@ -205,7 +220,6 @@ doDeadLockCheck(void)
 			 * deadlock cycles are all valid ones.
 			 */
 
-			initStringInfo(&pglock_str);
 			initStringInfo(&wait_graph_str);
 			dumpGddCtx(ctx, &wait_graph_str);
 
@@ -240,7 +254,6 @@ buildWaitGraph(GddCtx *ctx)
 	int			tuple_num;
 	int			i;
 	int         res;
-	MemoryContext spiContext = NULL;
 	volatile bool connected = false;
 
 	/*
@@ -274,15 +287,15 @@ buildWaitGraph(GddCtx *ctx)
 			 * Switch back to gdd memory context otherwise the graphs will be
 			 * created in SPI memory context and freed in SPI_finish().
 			 */
-			spiContext = MemoryContextSwitchTo(gddContext);
+			MemoryContextSwitchTo(gddContext);
 
 			/* Get all valid gxids, any other gxids are considered invalid. */
 			gxids = ListAllGxid();
 
 			for (i = 0; i < tuple_num; i++)
 			{
-				TransactionId  waiter_xid;
-				TransactionId  holder_xid;
+				DistributedTransactionId  waiter_xid;
+				DistributedTransactionId  holder_xid;
 				HeapTuple	   tuple;
 				Datum		   d;
 				bool		   solidedge;
@@ -304,11 +317,11 @@ buildWaitGraph(GddCtx *ctx)
 
 				d = heap_getattr(tuple, 2, tupdesc, &isnull);
 				Assert(!isnull);
-				waiter_xid = DatumGetTransactionId(d);
+				waiter_xid = DatumGetInt64(d);
 
 				d = heap_getattr(tuple, 3, tupdesc, &isnull);
 				Assert(!isnull);
-				holder_xid = DatumGetTransactionId(d);
+				holder_xid = DatumGetInt64(d);
 
 				d = heap_getattr(tuple, 4, tupdesc, &isnull);
 				Assert(!isnull);
@@ -339,8 +352,8 @@ buildWaitGraph(GddCtx *ctx)
 				holder_data->sessionid = DatumGetInt32(d);
 
 				/* Skip edges with invalid gxids */
-				if (!list_member_int(gxids, waiter_xid) ||
-					!list_member_int(gxids, holder_xid))
+				if (!IsValidGxid(gxids, waiter_xid) ||
+					!IsValidGxid(gxids, holder_xid))
 					continue;
 
 				edge = GddCtxAddEdge(ctx, segid, waiter_xid, holder_xid, solidedge);
@@ -348,6 +361,9 @@ buildWaitGraph(GddCtx *ctx)
 				edge->from->data = (void *) waiter_data;
 				edge->to->data = (void *) holder_data;
 			}
+
+			if (gxids != NIL)
+				list_free_deep(gxids);
 		}
 	}
 	PG_CATCH();
@@ -382,7 +398,7 @@ breakDeadLock(GddCtx *ctx)
 	{
 		int             pid;
 
-		TransactionId	xid = lfirst_int(cell);
+		DistributedTransactionId xid = *(DistributedTransactionId*) lfirst(cell);
 
 		pid = GetPidByGxid(xid);
 		Assert(pid > 0);
@@ -391,6 +407,9 @@ breakDeadLock(GddCtx *ctx)
 							Int32GetDatum(pid),
 							CStringGetTextDatum("cancelled by global deadlock detector"));
 	}
+
+	if (xids != NIL)
+		list_free_deep(xids);
 }
 
 static void
@@ -400,9 +419,9 @@ dumpCancelResult(StringInfo str, List *xids)
 
 	foreach(cell, xids)
 	{
-		TransactionId	xid = lfirst_int(cell);
+		DistributedTransactionId xid = *(DistributedTransactionId*) lfirst(cell);
 
-		appendStringInfo(str, "%u(Master Pid: %d)", xid, GetPidByGxid(xid));
+		appendStringInfo(str, UINT64_FORMAT"(Master Pid: %d)", xid, GetPidByGxid(xid));
 
 		if (lnext(cell))
 			appendStringInfo(str, ",");
@@ -477,8 +496,8 @@ dumpGddEdge(GddEdge *edge, StringInfo str)
 	Assert(str != NULL);
 
 	appendStringInfo(str,
-					 "\"p%d of dtx%d con%d waits for a %s lock on %s mode, "
-					 "blocked by p%d of dtx%d con%d\"",
+					 "\"p%d of dtx"UINT64_FORMAT" con%d waits for a %s lock on %s mode, "
+					 "blocked by p%d of dtx"UINT64_FORMAT" con%d\"",
 					 GET_PID_FROM_VERT(edge->from),
 					 edge->from->id,
 					 GET_SESSIONID_FROM_VERT(edge->from),

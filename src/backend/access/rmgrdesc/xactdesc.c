@@ -3,7 +3,7 @@
  * xactdesc.c
  *	  rmgr descriptor routines for access/transam/xact.c
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -16,18 +16,18 @@
 
 #include "access/transam.h"
 #include "access/xact.h"
-#include "catalog/catalog.h"
 #include "storage/dbdirnode.h"
 #include "storage/sinval.h"
+#include "storage/standbydefs.h"
 #include "utils/timestamp.h"
-#include "access/twophase.h"
+#include "access/twophase_xlog.h"
 
 /*
  * Parse the WAL format of an xact commit and abort records into an easier to
  * understand format.
  *
  * This routines are in xactdesc.c because they're accessed in backend (when
- * replaying WAL) and frontend (pg_xlogdump) code. This file is the only xact
+ * replaying WAL) and frontend (pg_waldump) code. This file is the only xact
  * specific one shared between both. They're complicated enough that
  * duplication would be bothersome.
  */
@@ -115,13 +115,21 @@ ParseCommitRecord(uint8 info, xl_xact_commit *xlrec, xl_xact_parsed_commit *pars
 		parsed->twophase_xid = xl_twophase->xid;
 
 		data += sizeof(xl_xact_twophase);
+
+		if (parsed->xinfo & XACT_XINFO_HAS_GID)
+		{
+			strlcpy(parsed->twophase_gid, data, sizeof(parsed->twophase_gid));
+			data += strlen(data) + 1;
+		}
 	}
+
+	/* Note: no alignment is guaranteed after this point */
 
 	if (parsed->xinfo & XACT_XINFO_HAS_ORIGIN)
 	{
 		xl_xact_origin xl_origin;
 
-		/* we're only guaranteed 4 byte alignment, so copy onto stack */
+		/* no alignment is guaranteed, so copy onto stack */
 		memcpy(&xl_origin, data, sizeof(xl_origin));
 
 		parsed->origin_lsn = xl_origin.origin_lsn;
@@ -134,7 +142,6 @@ ParseCommitRecord(uint8 info, xl_xact_commit *xlrec, xl_xact_parsed_commit *pars
 	{
 		xl_xact_distrib *xl_distrib = (xl_xact_distrib *) data;
 
-		parsed->distribTimeStamp = xl_distrib->distrib_timestamp;
 		parsed->distribXid = xl_distrib->distrib_xid;
 		data += sizeof(xl_xact_distrib);
 	}
@@ -160,6 +167,16 @@ ParseAbortRecord(uint8 info, xl_xact_abort *xlrec, xl_xact_parsed_abort *parsed)
 		parsed->xinfo = xl_xinfo->xinfo;
 
 		data += sizeof(xl_xact_xinfo);
+	}
+
+	if (parsed->xinfo & XACT_XINFO_HAS_DBINFO)
+	{
+		xl_xact_dbinfo *xl_dbinfo = (xl_xact_dbinfo *) data;
+
+		parsed->dbId = xl_dbinfo->dbId;
+		parsed->tsId = xl_dbinfo->tsId;
+
+		data += sizeof(xl_xact_dbinfo);
 	}
 
 	if (parsed->xinfo & XACT_XINFO_HAS_SUBXACTS)
@@ -202,6 +219,27 @@ ParseAbortRecord(uint8 info, xl_xact_abort *xlrec, xl_xact_parsed_abort *parsed)
 		parsed->twophase_xid = xl_twophase->xid;
 
 		data += sizeof(xl_xact_twophase);
+
+		if (parsed->xinfo & XACT_XINFO_HAS_GID)
+		{
+			strlcpy(parsed->twophase_gid, data, sizeof(parsed->twophase_gid));
+			data += strlen(data) + 1;
+		}
+	}
+
+	/* Note: no alignment is guaranteed after this point */
+
+	if (parsed->xinfo & XACT_XINFO_HAS_ORIGIN)
+	{
+		xl_xact_origin xl_origin;
+
+		/* no alignment is guaranteed, so copy onto stack */
+		memcpy(&xl_origin, data, sizeof(xl_origin));
+
+		parsed->origin_lsn = xl_origin.origin_lsn;
+		parsed->origin_timestamp = xl_origin.origin_timestamp;
+
+		data += sizeof(xl_xact_origin);
 	}
 
 }
@@ -243,32 +281,9 @@ xact_desc_commit(StringInfo buf, uint8 info, xl_xact_commit *xlrec, RepOriginId 
 	}
 	if (parsed.nmsgs > 0)
 	{
-		if (XactCompletionRelcacheInitFileInval(parsed.xinfo))
-			appendStringInfo(buf, "; relcache init file inval dbid %u tsid %u",
-							 parsed.dbId, parsed.tsId);
-
-		appendStringInfoString(buf, "; inval msgs:");
-		for (i = 0; i < parsed.nmsgs; i++)
-		{
-			SharedInvalidationMessage *msg = &parsed.msgs[i];
-
-			if (msg->id >= 0)
-				appendStringInfo(buf, " catcache %d", msg->id);
-			else if (msg->id == SHAREDINVALCATALOG_ID)
-				appendStringInfo(buf, " catalog %u", msg->cat.catId);
-			else if (msg->id == SHAREDINVALRELCACHE_ID)
-				appendStringInfo(buf, " relcache %u", msg->rc.relId);
-			/* not expected, but print something anyway */
-			else if (msg->id == SHAREDINVALSMGR_ID)
-				appendStringInfoString(buf, " smgr");
-			/* not expected, but print something anyway */
-			else if (msg->id == SHAREDINVALRELMAP_ID)
-				appendStringInfoString(buf, " relmap");
-			else if (msg->id == SHAREDINVALSNAPSHOT_ID)
-				appendStringInfo(buf, " snapshot %u", msg->sn.relId);
-			else
-				appendStringInfo(buf, " unknown id %d", msg->id);
-		}
+		standby_desc_invalidations(
+								   buf, parsed.nmsgs, parsed.msgs, parsed.dbId, parsed.tsId,
+								   XactCompletionRelcacheInitFileInval(parsed.xinfo));
 	}
 	if (parsed.ndeldbs > 0)
 	{
@@ -286,7 +301,7 @@ xact_desc_commit(StringInfo buf, uint8 info, xl_xact_commit *xlrec, RepOriginId 
 		appendStringInfo(buf, "; tablespace_oid_to_delete_on_commit: %u", xlrec->tablespace_oid_to_delete_on_commit);
 
 	if (XactCompletionForceSyncCommit(parsed.xinfo))
-		appendStringInfo(buf, "; sync");
+		appendStringInfoString(buf, "; sync");
 
 	if (parsed.xinfo & XACT_XINFO_HAS_ORIGIN)
 	{
@@ -297,10 +312,9 @@ xact_desc_commit(StringInfo buf, uint8 info, xl_xact_commit *xlrec, RepOriginId 
 						 timestamptz_to_str(parsed.origin_timestamp));
 	}
 
-	if (parsed.distribTimeStamp != 0 || parsed.distribXid != InvalidDistributedTransactionId)
+	if (parsed.distribXid != InvalidDistributedTransactionId)
 	{
-		appendStringInfo(buf, " gid = %u-%.10u", parsed.distribTimeStamp, parsed.distribXid);
-		appendStringInfo(buf, " gxid = %u", parsed.distribXid);
+		appendStringInfo(buf, " gxid = "UINT64_FORMAT, parsed.distribXid);
 	}
 }
 
@@ -312,15 +326,13 @@ xact_desc_distributed_commit(StringInfo buf, uint8 info, xl_xact_commit *xlrec, 
 	ParseCommitRecord(info, xlrec, &parsed);
 
 	appendStringInfoString(buf, timestamptz_to_str(xlrec->xact_time));
-	appendStringInfo(buf, " gid = %u-%.10u, gxid = %u",
-					 parsed.distribTimeStamp, parsed.distribXid, parsed.distribXid);
+	appendStringInfo(buf, " gxid = "UINT64_FORMAT, parsed.distribXid);
 }
 
 static void
 xact_desc_distributed_forget(StringInfo buf, xl_xact_distributed_forget *xlrec)
 {
-	appendStringInfo(buf, " gid = %s, gxid = %u",
-					 xlrec->gxact_log.gid, xlrec->gxact_log.gxid);
+	appendStringInfo(buf, "gxid = "UINT64_FORMAT, xlrec->gxid);
 }
 
 static void
@@ -388,11 +400,18 @@ xact_desc_assignment(StringInfo buf, xl_xact_assignment *xlrec)
 static void
 xact_desc_prepare(StringInfo buf, uint8 info, TwoPhaseFileHeader *tpfh)
 {
+	const char *gid;
 	Assert(info == XLOG_XACT_PREPARE);
 
 	appendStringInfo(buf, "at = %s", timestamptz_to_str(tpfh->prepared_at));
 
-	appendStringInfo(buf, "; gid = %s", tpfh->gid);
+	if (tpfh->gidlen > 0)
+	{
+		gid = (const char *)tpfh + MAXALIGN(sizeof(*tpfh));
+		Assert(strlen(gid) == (tpfh->gidlen -1));
+
+		appendStringInfo(buf, "; gid = %*s", tpfh->gidlen - 1, gid);
+	}
 
 	if (tpfh->tablespace_oid_to_delete_on_commit != InvalidOid)
 		appendStringInfo(buf, "; tablespace_oid_to_delete_on_commit = %u", tpfh->tablespace_oid_to_delete_on_commit);

@@ -1,6 +1,4 @@
-CREATE EXTENSION hstore;
-CREATE EXTENSION plperlu;
-CREATE EXTENSION hstore_plperlu;
+CREATE EXTENSION hstore_plperlu CASCADE;
 
 SELECT transforms.udt_schema, transforms.udt_name,
        routine_schema, routine_name,
@@ -17,6 +15,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
@@ -28,6 +27,7 @@ LANGUAGE plperlu
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
@@ -40,6 +40,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
@@ -54,6 +55,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]->[0], $_[0]->[1]));
 return scalar(keys %{$_[0]});
 $$;
@@ -68,6 +70,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 
 $rv = spi_exec_query(q{SELECT 'aa=>bb, cc=>NULL'::hstore AS col1});
 elog(INFO, Dumper($rv->{rows}[0]->{col1}));
@@ -92,6 +95,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_TD->{new}));
 if ($_TD->{new}{a} == 1) {
     $_TD->{new}{b} = {a => 1, b => 'boo', c => undef};

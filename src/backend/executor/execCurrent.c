@@ -3,7 +3,7 @@
  * execCurrent.c
  *	  executor support for WHERE CURRENT OF cursor
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	src/backend/executor/execCurrent.c
@@ -12,6 +12,7 @@
  */
 #include "postgres.h"
 
+#include "access/genam.h"
 #include "access/relscan.h"
 #include "access/sysattr.h"
 #include "catalog/pg_type.h"
@@ -21,16 +22,15 @@
 #include "utils/portal.h"
 #include "utils/rel.h"
 
+#include "access/table.h"
 #include "parser/parse_relation.h"
 #include "parser/parsetree.h"
 #include "cdb/cdbvars.h"
 
 
 static char *fetch_cursor_param_value(ExprContext *econtext, int paramId);
-#ifdef NOT_USED
 static ScanState *search_plan_tree(PlanState *node, Oid table_oid,
-				 bool *pending_rescan);
-#endif /* NOT_USED */
+								   bool *pending_rescan);
 
 /*
  * execCurrentOf
@@ -39,7 +39,7 @@ static ScanState *search_plan_tree(PlanState *node, Oid table_oid,
  * of the table is currently being scanned by the cursor named by CURRENT OF,
  * and return the row's TID into *current_tid.
  *
- * Returns TRUE if a row was identified.  Returns FALSE if the cursor is valid
+ * Returns true if a row was identified.  Returns false if the cursor is valid
  * for the table but is not currently scanning a row of the table (this is a
  * legal situation in inheritance cases).  Raises error if cursor is not a
  * valid updatable scan of the specified table.
@@ -178,7 +178,7 @@ getCurrentOf(CurrentOfExpr *cexpr,
 				(errcode(ERRCODE_INVALID_CURSOR_STATE),
 				 errmsg("cursor \"%s\" is not a SELECT query",
 						cursor_name)));
-	queryDesc = PortalGetQueryDesc(portal);
+	queryDesc = portal->queryDesc;
 	if (queryDesc == NULL || queryDesc->estate == NULL)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_CURSOR_STATE),
@@ -186,31 +186,62 @@ getCurrentOf(CurrentOfExpr *cexpr,
 						cursor_name)));
 
 	/*
-	 * The referenced cursor must be simply updatable. This has already
-	 * been discerned by parse/analyze for the DECLARE CURSOR of the given
-	 * cursor. This flag assures us that gp_segment_id, ctid, and tableoid (if necessary)
-	 * will be available as junk metadata, courtesy of preprocess_targetlist.
+	 * gpdb partition table routine is different with upstream
+	 * so we hold private updatable check method.
 	 */
-	if (!queryDesc->plannedstmt->simplyUpdatable)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_CURSOR_STATE),
-				 errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
-						cursor_name, table_name)));
+	/* better hold a lock already since we're scanning it */
+	Relation	rel = table_open(table_oid, NoLock);
+	char		relkind = rel->rd_rel->relkind;
+	bool		relispartition = rel->rd_rel->relispartition;
+	table_close(rel, NoLock);
 
-	/*
-	 * The target relation must directly match the cursor's relation. This throws out
-	 * the simple case in which a cursor is declared against table X and the update is
-	 * issued against Y. Moreover, this disallows some subtler inheritance cases where
-	 * Y inherits from X. While such cases could be implemented, it seems wiser to
-	 * simply error out cleanly.
-	 */
-	Index varno = extractSimplyUpdatableRTEIndex(queryDesc->plannedstmt->rtable);
-	Oid cursor_relid = getrelid(varno, queryDesc->plannedstmt->rtable);
-	if (table_oid != cursor_relid)
-		ereport(ERROR,
-				(errcode(ERRCODE_INVALID_CURSOR_STATE),
-				 errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
-						cursor_name, table_name)));
+	if (relkind == RELKIND_PARTITIONED_TABLE ||
+		relispartition ||
+		get_rel_persistence(table_oid) == RELPERSISTENCE_TEMP)
+	{
+		/*
+		 * The referenced cursor must be simply updatable. This has already
+		 * been discerned by parse/analyze for the DECLARE CURSOR of the given
+		 * cursor. This flag assures us that gp_segment_id, ctid, and tableoid (if necessary)
+		 * will be available as junk metadata, courtesy of preprocess_targetlist.
+		 */
+		if (!OidIsValid(queryDesc->plannedstmt->simplyUpdatableRel))
+			ereport(ERROR,
+			        (errcode(ERRCODE_INVALID_CURSOR_STATE),
+					        errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
+					               cursor_name, table_name)));
+
+		/*
+		 * The target relation must directly match the cursor's relation. This throws out
+		 * the simple case in which a cursor is declared against table X and the update is
+		 * issued against Y. Moreover, this disallows some subtler inheritance cases where
+		 * Y inherits from X. While such cases could be implemented, it seems wiser to
+		 * simply error out cleanly.
+		 */
+		if (table_oid != queryDesc->plannedstmt->simplyUpdatableRel)
+			ereport(ERROR,
+			        (errcode(ERRCODE_INVALID_CURSOR_STATE),
+					        errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
+					               cursor_name, table_name)));
+	}
+	else
+	{
+		ScanState  *scanstate;
+		bool		pending_rescan = false;
+
+		/*
+		 * Without FOR UPDATE, we dig through the cursor's plan to find the
+		 * scan node.  Fail if it's not there or buried underneath
+		 * aggregation.
+		 */
+		scanstate = search_plan_tree(queryDesc->planstate, table_oid,
+									 &pending_rescan);
+		if (!scanstate)
+			ereport(ERROR,
+			        (errcode(ERRCODE_INVALID_CURSOR_STATE),
+					        errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
+					               cursor_name, table_name)));
+	}
 
 	/*
 	 * The cursor must have a current result row: per the SQL spec, it's an
@@ -239,21 +270,22 @@ getCurrentOf(CurrentOfExpr *cexpr,
 	 * we use a different approach.
 	 */
 #if 0
-	if (queryDesc->estate->es_rowMarks)
+	if (queryDesc->estate->es_rowmarks)
 	{
 		ExecRowMark *erm;
-		ListCell   *lc;
+		Index		i;
 
 		/*
 		 * Here, the query must have exactly one FOR UPDATE/SHARE reference to
 		 * the target table, and we dig the ctid info out of that.
 		 */
 		erm = NULL;
-		foreach(lc, queryDesc->estate->es_rowMarks)
+		for (i = 0; i < queryDesc->estate->es_range_table_size; i++)
 		{
-			ExecRowMark *thiserm = (ExecRowMark *) lfirst(lc);
+			ExecRowMark *thiserm = queryDesc->estate->es_rowmarks[i];
 
-			if (!RowMarkRequiresRowShareLock(thiserm->markType))
+			if (thiserm == NULL ||
+				!RowMarkRequiresRowShareLock(thiserm->markType))
 				continue;		/* ignore non-FOR UPDATE/SHARE items */
 
 			if (thiserm->relid == table_oid)
@@ -350,7 +382,7 @@ getCurrentOf(CurrentOfExpr *cexpr,
 			 */
 			IndexScanDesc scan = ((IndexOnlyScanState *) scanstate)->ioss_ScanDesc;
 
-			*current_tid = scan->xs_ctup.t_self;
+			*current_tid = scan->xs_heaptid;
 		}
 		else
 		{
@@ -365,27 +397,25 @@ getCurrentOf(CurrentOfExpr *cexpr,
 			ItemPointer tuple_tid;
 
 #ifdef USE_ASSERT_CHECKING
-			if (!slot_getsysattr(scanstate->ss_ScanTupleSlot,
-								 TableOidAttributeNumber,
-								 &ldatum,
-								 &lisnull))
+			ldatum = slot_getsysattr(scanstate->ss_ScanTupleSlot,
+									 TableOidAttributeNumber,
+									 &lisnull);
+			if (lisnull)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_CURSOR_STATE),
 						 errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
 								cursor_name, table_name)));
-			Assert(!lisnull);
 			Assert(DatumGetObjectId(ldatum) == table_oid);
 #endif
 
-			if (!slot_getsysattr(scanstate->ss_ScanTupleSlot,
-								 SelfItemPointerAttributeNumber,
-								 &ldatum,
-								 &lisnull))
+			ldatum = slot_getsysattr(scanstate->ss_ScanTupleSlot,
+									 SelfItemPointerAttributeNumber,
+									 &lisnull);
+			if (lisnull)
 				ereport(ERROR,
 						(errcode(ERRCODE_INVALID_CURSOR_STATE),
 						 errmsg("cursor \"%s\" is not a simply updatable scan of table \"%s\"",
 								cursor_name, table_name)));
-			Assert(!lisnull);
 			tuple_tid = (ItemPointer) DatumGetPointer(ldatum);
 
 			*current_tid = *tuple_tid;
@@ -406,7 +436,8 @@ getCurrentOf(CurrentOfExpr *cexpr,
 		 * tuple yielded by the top node in the plan.
 		 */
 		slot = queryDesc->planstate->ps_ResultTupleSlot;
-		Insist(!TupIsNull(slot));
+		if (TupIsNull(slot))
+			elog(ERROR, "TupleTableslot is empty");
 		Assert(queryDesc->estate->es_junkFilter);
 
 		/* extract gp_segment_id metadata */
@@ -448,11 +479,7 @@ getCurrentOf(CurrentOfExpr *cexpr,
 			 * This is our last opportunity to verify that the physical table given
 			 * by tableoid is, indeed, simply updatable.
 			 */
-			if (!isSimplyUpdatableRelation(*current_table_oid, true /* noerror */))
-				ereport(ERROR,
-						(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
-						 errmsg("%s is not updatable",
-								get_rel_name_partition(*current_table_oid))));
+			(void) isSimplyUpdatableRelation(*current_table_oid, false /* noerror */);
 		}
 
 		if (p_cursor_name)
@@ -473,11 +500,14 @@ fetch_cursor_param_value(ExprContext *econtext, int paramId)
 	if (paramInfo &&
 		paramId > 0 && paramId <= paramInfo->numParams)
 	{
-		ParamExternData *prm = &paramInfo->params[paramId - 1];
+		ParamExternData *prm;
+		ParamExternData prmdata;
 
 		/* give hook a chance in case parameter is dynamic */
-		if (!OidIsValid(prm->ptype) && paramInfo->paramFetch != NULL)
-			(*paramInfo->paramFetch) (paramInfo, paramId);
+		if (paramInfo->paramFetch != NULL)
+			prm = paramInfo->paramFetch(paramInfo, paramId, false, &prmdata);
+		else
+			prm = &paramInfo->params[paramId - 1];
 
 		if (OidIsValid(prm->ptype) && !prm->isnull)
 		{
@@ -514,7 +544,6 @@ fetch_cursor_param_value(ExprContext *econtext, int paramId)
  * must initialize *pending_rescan to false, and should not trust its state
  * if multiple candidates are found.)
  */
-#ifdef NOT_USED
 static ScanState *
 search_plan_tree(PlanState *node, Oid table_oid,
 				 bool *pending_rescan)
@@ -525,17 +554,14 @@ search_plan_tree(PlanState *node, Oid table_oid,
 		return NULL;
 	switch (nodeTag(node))
 	{
-			/*
-			 * Relation scan nodes can all be treated alike
-			 */
+		/*
+		 * Relation scan nodes can all be treated alike
+		 */
 		case T_SeqScanState:
-		case T_DynamicSeqScanState:
 		case T_SampleScanState:
 		case T_IndexScanState:
-		case T_DynamicIndexScanState:
 		case T_IndexOnlyScanState:
 		case T_BitmapHeapScanState:
-		case T_DynamicBitmapHeapScanState:
 		case T_TidScanState:
 		case T_ForeignScanState:
 		case T_CustomScanState:
@@ -600,7 +626,6 @@ search_plan_tree(PlanState *node, Oid table_oid,
 			 */
 		case T_ResultState:
 		case T_LimitState:
-		case T_MotionState:
 			result = search_plan_tree(node->lefttree,
 									  table_oid,
 									  pending_rescan);
@@ -613,6 +638,10 @@ search_plan_tree(PlanState *node, Oid table_oid,
 			result = search_plan_tree(((SubqueryScanState *) node)->subplan,
 									  table_oid,
 									  pending_rescan);
+			break;
+
+		case T_MotionState:
+			result = search_plan_tree(node->lefttree, table_oid, pending_rescan);
 			break;
 
 		default:
@@ -629,4 +658,3 @@ search_plan_tree(PlanState *node, Oid table_oid,
 
 	return result;
 }
-#endif /* NOT_USED */

@@ -54,7 +54,7 @@ LOG_STATEMENT_TXT="#log_statement ="
 LISTEN_ADR_TXT="listen_addresses"
 CONTENT_ID_TXT="gp_contentid"
 DBID_TXT="gp_dbid"
-TMP_PG_HBA=/tmp/pg_hba_conf_master.$$
+TMP_PG_HBA=/tmp/pg_hba_conf_coordinator.$$
 
 #******************************************************************************
 # Functions
@@ -83,11 +83,12 @@ SET_VAR () {
 	    S=":"
             ;;
     esac
-    GP_HOSTADDRESS=`$ECHO $I|$CUT -d$S -f1`
-    GP_PORT=`$ECHO $I|$CUT -d$S -f2`
-    GP_DIR=`$ECHO $I|$CUT -d$S -f3`
-    GP_DBID=`$ECHO $I|$CUT -d$S -f4`
-    GP_CONTENT=`$ECHO $I|$CUT -d$S -f5`
+    GP_HOSTNAME=`$ECHO $I|$CUT -d$S -f1`
+    GP_HOSTADDRESS=`$ECHO $I|$CUT -d$S -f2`
+    GP_PORT=`$ECHO $I|$CUT -d$S -f3`
+    GP_DIR=`$ECHO $I|$CUT -d$S -f4`
+    GP_DBID=`$ECHO $I|$CUT -d$S -f5`
+    GP_CONTENT=`$ECHO $I|$CUT -d$S -f6`
 }
 
 PARA_EXIT () {
@@ -114,7 +115,7 @@ ADD_PG_HBA_ENTRIES() {
 CREATE_QES_PRIMARY () {
     LOG_MSG "[INFO][$INST_COUNT]:-Start Function $FUNCNAME"
     LOG_MSG "[INFO][$INST_COUNT]:-Processing segment $GP_HOSTADDRESS"
-    # build initdb command, capturing output in ${GP_DIR}.initdb
+    # build initdb command
     cmd="$EXPORT_LIB_PATH;$INITDB"
     cmd="$cmd -E $ENCODING"
     cmd="$cmd -D $GP_DIR"
@@ -125,15 +126,10 @@ CREATE_QES_PRIMARY () {
     if [ x"$HEAP_CHECKSUM" == x"on" ]; then
         cmd="$cmd --data-checksums"
     fi
-    cmd="$cmd --backend_output=$GP_DIR.initdb"
     
     $TRUSTED_SHELL ${GP_HOSTADDRESS} $cmd >> $LOG_FILE 2>&1
     RETVAL=$?
     
-    if [ $RETVAL -ne 0 ]; then
-        $TRUSTED_SHELL ${GP_HOSTADDRESS} "cat $GP_DIR.initdb" >> $LOG_FILE 2>&1
-    fi
-    $TRUSTED_SHELL ${GP_HOSTADDRESS} "rm -f $GP_DIR.initdb" >> $LOG_FILE 2>&1
     BACKOUT_COMMAND "$TRUSTED_SHELL ${GP_HOSTADDRESS} \"$RM -rf $GP_DIR > /dev/null 2>&1\""
     BACKOUT_COMMAND "$ECHO \"removing directory $GP_DIR on $GP_HOSTADDRESS\""
     PARA_EXIT $RETVAL "to start segment instance database $GP_HOSTADDRESS $GP_DIR"
@@ -168,21 +164,21 @@ CREATE_QES_PRIMARY () {
     # Configuring PG_HBA
     LOG_MSG "[INFO][$INST_COUNT]:-Configuring segment $PG_HBA"
     if [ $HBA_HOSTNAMES -eq 0 ]; then
-        for MASTER_IP in "${MASTER_IP_ADDRESS[@]}"
+        for COORDINATOR_IP in "${COORDINATOR_IP_ADDRESS[@]}"
         do
             # MPP-15889
-            CIDR_MASTER_IP=$(GET_CIDRADDR $MASTER_IP)
-            $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${CIDR_MASTER_IP}	trust >> ${GP_DIR}/$PG_HBA"
-            PARA_EXIT $? "Update $PG_HBA for master IP address ${CIDR_MASTER_IP}"
+            CIDR_COORDINATOR_IP=$(GET_CIDRADDR $COORDINATOR_IP)
+            $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${CIDR_COORDINATOR_IP}	trust >> ${GP_DIR}/$PG_HBA"
+            PARA_EXIT $? "Update $PG_HBA for coordinator IP address ${CIDR_COORDINATOR_IP}"
           done
         if [ x"" != x"$STANDBY_HOSTNAME" ];then
-          LOG_MSG "[INFO][$INST_COUNT]:-Processing Standby master IP address for segment instances"
+          LOG_MSG "[INFO][$INST_COUNT]:-Processing Standby coordinator IP address for segment instances"
           for STANDBY_IP in "${STANDBY_IP_ADDRESS[@]}"
           do
           # MPP-15889
               CIDR_STANDBY_IP=$(GET_CIDRADDR $STANDBY_IP)
               $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${CIDR_STANDBY_IP}	trust >> ${GP_DIR}/$PG_HBA"
-              PARA_EXIT $? "Update $PG_HBA for master standby address ${CIDR_STANDBY_IP}"
+              PARA_EXIT $? "Update $PG_HBA for coordinator standby address ${CIDR_STANDBY_IP}"
           done
         fi
     
@@ -208,15 +204,15 @@ CREATE_QES_PRIMARY () {
     else # use hostnames in pg_hba.conf
         # add localhost
         $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host     all          all         localhost      trust >> ${GP_DIR}/$PG_HBA"
-        $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${MASTER_HOSTNAME}	trust >> ${GP_DIR}/$PG_HBA"
+        $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${COORDINATOR_HOSTNAME}	trust >> ${GP_DIR}/$PG_HBA"
         if [ x"" != x"$MIRROR_HOSTADDRESS" ]; then
           $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host     all          $USER_NAME         $MIRROR_HOSTADDRESS      trust >> ${GP_DIR}/$PG_HBA"
         fi
-        PARA_EXIT $? "Update $PG_HBA for master IP address ${MASTER_HOSTNAME}"
+        PARA_EXIT $? "Update $PG_HBA for coordinator IP address ${COORDINATOR_HOSTNAME}"
         if [ x"" != x"$STANDBY_HOSTNAME" ];then
-            LOG_MSG "[INFO][$INST_COUNT]:-Processing Standby master IP address for segment instances"
+            LOG_MSG "[INFO][$INST_COUNT]:-Processing Standby coordinator IP address for segment instances"
             $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host	all	all	${STANDBY_HOSTNAME}	trust >> ${GP_DIR}/$PG_HBA"
-            PARA_EXIT $? "Update $PG_HBA for master standby address ${STANDBY_HOSTNAME}"
+            PARA_EXIT $? "Update $PG_HBA for coordinator standby address ${STANDBY_HOSTNAME}"
         fi
         $TRUSTED_SHELL ${GP_HOSTADDRESS} "$ECHO host     all          $USER_NAME         $GP_HOSTADDRESS      trust >> ${GP_DIR}/$PG_HBA"
     fi
@@ -229,8 +225,24 @@ CREATE_QES_MIRROR () {
     # on mirror, just copy data from primary as the primary has all the relevant pg_hba.conf content
     # only the entry for replication is added on the primary if mirror hosts are there
     LOG_MSG "[INFO]:-Running pg_basebackup to init mirror on ${GP_HOSTADDRESS} using primary on ${PRIMARY_HOSTADDRESS} ..." 1
-    RUN_COMMAND_REMOTE ${PRIMARY_HOSTADDRESS} "${EXPORT_GPHOME}; . ${GPHOME}/greenplum_path.sh; echo 'host  replication ${GP_USER} samenet trust' >> ${PRIMARY_DIR}/pg_hba.conf; pg_ctl -D ${PRIMARY_DIR} reload"
-    RUN_COMMAND_REMOTE ${GP_HOSTADDRESS} "${EXPORT_GPHOME}; . ${GPHOME}/greenplum_path.sh; rm -rf ${GP_DIR}; ${GPHOME}/bin/pg_basebackup --xlog-method=stream --slot='internal_wal_replication_slot' -R -c fast -E ./db_dumps -E ./gpperfmon/data -E ./gpperfmon/logs -D ${GP_DIR} -h ${PRIMARY_HOSTADDRESS} -p ${PRIMARY_PORT} --target-gp-dbid ${GP_DBID};"
+    # Add the samehost replication entry to support single-host development
+    local PG_HBA_ENTRIES="${PG_HBA_ENTRIES}"$'\n'"host replication ${GP_USER} samehost trust"
+    if [ $HBA_HOSTNAMES -eq 0 ];then
+        local MIRROR_ADDRESSES=($($TRUSTED_SHELL ${GP_HOSTADDRESS} "${GPHOME}"/libexec/ifaddrs --no-loopback))
+        local PRIMARY_ADDRESSES=($($TRUSTED_SHELL ${PRIMARY_HOSTADDRESS} "${GPHOME}"/libexec/ifaddrs --no-loopback))
+        for ADDR in "${MIRROR_ADDRESSES[@]}" "${PRIMARY_ADDRESSES[@]}"
+        do
+            CIDR_ADDR=$(GET_CIDRADDR $ADDR)
+            PG_HBA_ENTRIES="${PG_HBA_ENTRIES}"$'\n'"host replication ${GP_USER} ${CIDR_ADDR} trust"
+        done
+    else
+        PG_HBA_ENTRIES="${PG_HBA_ENTRIES}"$'\n'"host replication ${GP_USER} ${GP_HOSTADDRESS} trust"
+        if [ "${GP_HOSTADDRESS}" != "${PRIMARY_HOSTADDRESS}" ]; then
+            PG_HBA_ENTRIES="${PG_HBA_ENTRIES}"$'\n'"host replication ${GP_USER} ${PRIMARY_HOSTADDRESS} trust"
+        fi
+    fi
+    RUN_COMMAND_REMOTE ${PRIMARY_HOSTADDRESS} "${EXPORT_GPHOME}; . ${GPHOME}/greenplum_path.sh; cat - >> ${PRIMARY_DIR}/pg_hba.conf; pg_ctl -D ${PRIMARY_DIR} reload" <<< "${PG_HBA_ENTRIES}"
+    RUN_COMMAND_REMOTE ${GP_HOSTADDRESS} "${EXPORT_GPHOME}; . ${GPHOME}/greenplum_path.sh; rm -rf ${GP_DIR}; ${GPHOME}/bin/pg_basebackup --wal-method=stream --create-slot --slot='internal_wal_replication_slot' -R -c fast -E ./db_dumps -D ${GP_DIR} -h ${PRIMARY_HOSTADDRESS} -p ${PRIMARY_PORT} --target-gp-dbid ${GP_DBID};"
     START_QE "-w"
     RETVAL=$?
     PARA_EXIT $RETVAL "pg_basebackup of segment data directory from ${PRIMARY_HOSTADDRESS} to ${GP_HOSTADDRESS}"
@@ -240,12 +252,12 @@ CREATE_QES_MIRROR () {
 START_QE() {
 	LOG_MSG "[INFO][$INST_COUNT]:-Starting Functioning instance on segment ${GP_HOSTADDRESS}"
 	PG_CTL_WAIT=$1
-	$TRUSTED_SHELL ${GP_HOSTADDRESS} "$EXPORT_LIB_PATH;export PGPORT=${GP_PORT}; $PG_CTL $PG_CTL_WAIT -l $GP_DIR/pg_log/startup.log -D $GP_DIR -o \"-i -p ${GP_PORT}\" start" >> $LOG_FILE 2>&1
+	$TRUSTED_SHELL ${GP_HOSTADDRESS} "$EXPORT_LIB_PATH;export PGPORT=${GP_PORT}; $PG_CTL $PG_CTL_WAIT -l $GP_DIR/log/startup.log -D $GP_DIR -o \"-p ${GP_PORT} -c gp_role=execute\" start" >> $LOG_FILE 2>&1
 	RETVAL=$?
 	if [ $RETVAL -ne 0 ]; then
 		BACKOUT_COMMAND "$TRUSTED_SHELL $GP_HOSTADDRESS \"${EXPORT_LIB_PATH};export PGPORT=${GP_PORT}; $PG_CTL -w -D $GP_DIR -o \"-i -p ${GP_PORT}\" -m immediate  stop\""
 		BACKOUT_COMMAND "$ECHO \"Stopping segment instance on $GP_HOSTADDRESS\""
-		$TRUSTED_SHELL ${GP_HOSTADDRESS} "$CAT ${GP_DIR}/pg_log/startup.log "|$TEE -a $LOG_FILE
+		$TRUSTED_SHELL ${GP_HOSTADDRESS} "$CAT ${GP_DIR}/log/startup.log "|$TEE -a $LOG_FILE
 		PARA_EXIT $RETVAL "Start segment instance database"
 	fi	
 	BACKOUT_COMMAND "$TRUSTED_SHELL $GP_HOSTADDRESS \"${EXPORT_LIB_PATH};export PGPORT=${GP_PORT}; $PG_CTL -w -D $GP_DIR -o \"-i -p ${GP_PORT}\" -m immediate  stop\""
@@ -256,7 +268,7 @@ START_QE() {
 #******************************************************************************
 # Main Section
 #******************************************************************************
-trap '$ECHO "KILLED:$SEGMENT_TO_CREATE" >> $PARALLEL_STATUS_FILE;ERROR_EXIT "[FATAL]:-[$INST_COUNT]-Recieved INT or TERM signal" 2' INT TERM
+trap '$ECHO "KILLED:$SEGMENT_TO_CREATE" >> $PARALLEL_STATUS_FILE;ERROR_EXIT "[FATAL]:-[$INST_COUNT]-Recieved INT or TERM signal"' INT TERM
 while getopts ":qp:" opt
 do
 	case $opt in
@@ -271,7 +283,7 @@ done
 
 # gpcreateseg.sh is called for creating primary and mirror segments.
 # Below is an example for invocation to create a primary
-# MASTER_HOSTNAME=bhuvi.local HBA_HOSTNAMES=0 /usr/local/gpdb/bin/lib/gpcreateseg.sh -p clusterConfigPostgresAddonsFile 65324 1
+# COORDINATOR_HOSTNAME=bhuvi.local HBA_HOSTNAMES=0 /usr/local/gpdb/bin/lib/gpcreateseg.sh -p clusterConfigPostgresAddonsFile 65324 1
 # IS_PRIMARY host1.local~45432~/tmp/demoDataDir0~2~0 host2.local~45433~/tmp/demoDataDir0~3~0 0
 # /tmp/gpAdminLogs/gpinitsystem_20190903.log on  10.64.249.254~192.168.1.72~::1~fe80::1%lo0 10.64.249.252~192.168.1.73~::1~fe81::1%lo1 &
 # PARALLEL_COUNT 1 4
@@ -318,9 +330,9 @@ LOG_FILE=$1;shift		#Central logging file
 LOG_MSG "[INFO][$INST_COUNT]:-Start Main"
 LOG_MSG "[INFO][$INST_COUNT]:-Command line options passed to utility = $*"
 HEAP_CHECKSUM=$1;shift
-TMP_MASTER_IP_ADDRESS=$1;shift	#List of IP addresses for the master instance
-MASTER_IP_ADDRESS=(`$ECHO $TMP_MASTER_IP_ADDRESS|$TR '~' ' '`)
-TMP_STANDBY_IP_ADDRESS=$1;shift #List of IP addresses for standby master
+TMP_COORDINATOR_IP_ADDRESS=$1;shift	#List of IP addresses for the coordinator instance
+COORDINATOR_IP_ADDRESS=(`$ECHO $TMP_COORDINATOR_IP_ADDRESS|$TR '~' ' '`)
+TMP_STANDBY_IP_ADDRESS=$1;shift #List of IP addresses for standby coordinator
 STANDBY_IP_ADDRESS=(`$ECHO $TMP_STANDBY_IP_ADDRESS|$TR '~' ' '`)
 if [ x"IS_PRIMARY" == x"$PRIMARY_OR_MIRROR_IDENTIFIER" ]; then
     CREATE_QES_PRIMARY

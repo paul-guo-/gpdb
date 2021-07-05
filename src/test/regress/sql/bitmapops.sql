@@ -1,12 +1,9 @@
 -- Test bitmap AND and OR
 
--- Currently greenplum sets random_page_cost as 100 while postgres sets it as 4.
--- This makes some BitmapOps cases are not tested as expected, so I'm
--- temporarily settting random_page_cost as 4 to test those functionalities.
--- Also bump up the statistics target, so that the plans are more stable,
--- and add explain tests to make sure BitmapOps are tested.
-SET random_page_cost  = 4;
 SET default_statistics_target=1000;
+
+-- Encourage index use
+SET seq_page_cost=100;
 
 
 -- Generate enough data that we can test the lossy bitmaps.
@@ -51,6 +48,7 @@ CREATE TABLE bmscantest2 (a int, b int, c int, d int, t text);
 INSERT INTO bmscantest2
   SELECT (r%53), (r%59), (r%53), (r%59), 'foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
   FROM generate_series(1,70000) r;
+ANALYZE bmscantest2;
 CREATE INDEX i_bmtest2_a ON bmscantest2 USING BITMAP(a);
 CREATE INDEX i_bmtest2_b ON bmscantest2 USING BITMAP(b);
 CREATE INDEX i_bmtest2_c ON bmscantest2(c);
@@ -69,6 +67,7 @@ CREATE TABLE bmscantest_ao (a int, b int, c int, d int, t text) WITH(appendonly=
 INSERT INTO bmscantest_ao
   SELECT (r%53), (r%59), (r%53), (r%59), 'foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
   FROM generate_series(1,70000) r;
+ANALYZE bmscantest_ao;
 CREATE INDEX i_bmtest_ao_a ON bmscantest_ao USING BITMAP(a);
 CREATE INDEX i_bmtest_ao_b ON bmscantest_ao USING BITMAP(b);
 CREATE INDEX i_bmtest_ao_c ON bmscantest_ao(c);
@@ -89,6 +88,7 @@ CREATE TABLE bmscantest_aocs (a int, b int, c int, d int, t text) WITH(appendonl
 INSERT INTO bmscantest_aocs
   SELECT (r%53), (r%59), (r%53), (r%59), 'foooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooooo'
   FROM generate_series(1,70000) r;
+ANALYZE bmscantest_aocs;
 CREATE INDEX i_bmtest_aocs_a ON bmscantest_aocs USING BITMAP(a);
 CREATE INDEX i_bmtest_aocs_b ON bmscantest_aocs USING BITMAP(b);
 CREATE INDEX i_bmtest_aocs_c ON bmscantest_aocs(c);

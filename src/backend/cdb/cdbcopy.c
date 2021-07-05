@@ -42,7 +42,7 @@
  * When you're done, call cdbCopyEnd().
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -55,6 +55,7 @@
 #include "miscadmin.h"
 #include "libpq-fe.h"
 #include "libpq-int.h"
+#include "access/xact.h"
 #include "cdb/cdbconn.h"
 #include "cdb/cdbcopy.h"
 #include "cdb/cdbdisp_query.h"
@@ -67,6 +68,7 @@
 #include "commands/defrem.h"
 #include "mb/pg_wchar.h"
 #include "nodes/makefuncs.h"
+#include "pgstat.h"
 #include "storage/pmsignal.h"
 #include "tcop/tcopprot.h"
 #include "utils/faultinjector.h"
@@ -109,9 +111,6 @@ makeCdbCopy(CopyState cstate, bool is_copy_in)
 	c->dispatcherState = NULL;
 	initStringInfo(&(c->copy_out_buf));
 
-	/* init total_segs */
-	c->aotupcounts = NULL;
-
 	/*
 	 * COPY replicated table TO file, pick only one replica, otherwise, duplicate
 	 * rows will be copied.
@@ -143,18 +142,11 @@ makeCdbCopy(CopyState cstate, bool is_copy_in)
  * may pg_throw via elog/ereport.
  */
 void
-cdbCopyStart(CdbCopy *c, CopyStmt *stmt,
-			 PartitionNode *partitions, List *ao_segnos, int file_encoding)
+cdbCopyStart(CdbCopy *c, CopyStmt *stmt, int file_encoding)
 {
 	int			flags;
 
 	stmt = copyObject(stmt);
-
-	/* add in partitions for dispatch */
-	stmt->partitions = partitions;
-
-	/* add in AO segno map for dispatch */
-	stmt->ao_segnos = ao_segnos;
 
 	/*
 	 * If the output needs to be in a different encoding, tell the segment.
@@ -199,7 +191,7 @@ cdbCopyStart(CdbCopy *c, CopyStmt *stmt,
 
 			stmt->options = lappend(stmt->options,
 									makeDefElem("encoding",
-												(Node *) makeString(pstrdup(encname))));
+												(Node *) makeString(pstrdup(encname)), -1));
 		}
 	}
 
@@ -446,6 +438,8 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 	struct pollfd	*pollRead;
 	bool		io_errors = false;
 	StringInfoData io_err_msg;
+	Bitmapset	   *oidMap = NULL;
+	int				nest_level;
 
 	initStringInfo(&io_err_msg);
 
@@ -508,6 +502,8 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 		}
 	}
 
+	nest_level = GetCurrentTransactionNestLevel();
+
 	pollRead = (struct pollfd *) palloc(sizeof(struct pollfd));
 	for (seg = 0; seg < gp->size; seg++)
 	{
@@ -568,6 +564,21 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 					first_error = cdbdisp_get_PQerror(res);
 			}
 
+			pgstat_combine_one_qe_result(&oidMap, res, nest_level, q->segindex);
+
+			if (q->conn->wrote_xlog)
+			{
+				MarkTopTransactionWriteXLogOnExecutor();
+
+				/*
+				* Reset the worte_xlog here. Since if the received pgresult not process
+				* the xlog write message('x' message sends from QE in ReadyForQuery),
+				* the value may still refer to previous dispatch statement. Which may
+				* always mark current top transaction has wrote xlog on executor.
+				*/
+				q->conn->wrote_xlog = false;
+			}
+
 			/*
 			 * If we are still in copy mode, tell QE to stop it.  COPY_IN
 			 * protocol has a way to say 'end of copy' but COPY_OUT doesn't.
@@ -622,6 +633,8 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 						break;
 					}
 				}
+				if (buffer)
+					PQfreemem(buffer);
 			}
 
 			/* in SREH mode, check if this seg rejected (how many) rows */
@@ -635,9 +648,6 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 			if (res->numCompleted > 0)
 				segment_rows_completed = res->numCompleted;
 
-			/* Get AO tuple counts */
-			c->aotupcounts = PQprocessAoTupCounts(c->aotupcounts,
-												  res->aotupcounts, res->naotupcounts);
 			/* free the PGresult object */
 			PQclear(res);
 		}
@@ -695,7 +705,10 @@ cdbCopyEndInternal(CdbCopy *c, char *abort_msg,
 	{
 		/* errors reported by the segments */
 		if (first_error)
+		{
+			FlushErrorState();
 			ReThrowError(first_error);
+		}
 
 		/* errors that occurred in the COPY itself */
 		if (io_errors)

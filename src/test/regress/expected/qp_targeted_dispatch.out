@@ -64,7 +64,7 @@ fetch c0;
 (0 rows)
 
 End;
-INFO:  Distributed transaction command 'Distributed Commit Not Prepared' to ALL contents: 0 1 2
+INFO:  Distributed transaction command 'Distributed Commit (one-phase)' to ALL contents: 0 1 2
 reset test_print_direct_dispatch_info;
 -- ----------------------------------------------------------------------
 -- Test: query03.sql
@@ -136,19 +136,6 @@ partition by range (attribute066)
 start (date '2009-10-01') inclusive end (date '2009-12-31') inclusive every (interval '1 week')
 )
 ;
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_1" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_2" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_3" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_4" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_5" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_6" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_7" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_8" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_9" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_10" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_11" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_12" for table "mwv_cdetail_table"
-NOTICE:  CREATE TABLE will create partition "mwv_cdetail_table_1_prt_13" for table "mwv_cdetail_table"
 --explain
 SELECT
   ATTRIBUTE066,ATTRIBUTE032 ,ATTRIBUTE031
@@ -487,15 +474,6 @@ reset test_print_direct_dispatch_info;
 create table mpp7638 (a int, b int, c int, d int) partition by range(d) (start(1) end(10) every(1));
 NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause -- Using column named 'a' as the Greenplum Database data distribution key for this table.
 HINT:  The 'DISTRIBUTED BY' clause determines the distribution of data. Make sure column(s) chosen are the optimal data distribution key to minimize skew.
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_1" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_2" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_3" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_4" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_5" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_6" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_7" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_8" for table "mpp7638"
-NOTICE:  CREATE TABLE will create partition "mpp7638_1_prt_9" for table "mpp7638"
 insert into mpp7638 select i, i+1, i+2, i+3 from generate_series(1, 2) i;
 insert into mpp7638 select i, i+1, i+2, i+3 from generate_series(1, 3) i;
 insert into mpp7638 select i, i+1, i+2, i+3 from generate_series(1, 4) i;
@@ -516,9 +494,9 @@ INFO:  (slice 1) Dispatch command to SINGLE content
 explain select count(*) from mpp7638 where a =1;
                                         QUERY PLAN                                        
 ------------------------------------------------------------------------------------------
- Aggregate  (cost=8900.41..8900.42 rows=1 width=8)
-   ->  Gather Motion 1:1  (slice1; segments: 1)  (cost=8900.35..8900.40 rows=1 width=8)
-         ->  Aggregate  (cost=8900.35..8900.36 rows=1 width=8)
+ Finalize Aggregate  (cost=8900.38..8900.39 rows=1 width=8)
+   ->  Gather Motion 1:1  (slice1; segments: 1)  (cost=8900.35..8900.38 rows=1 width=8)
+         ->  Partial Aggregate  (cost=8900.35..8900.36 rows=1 width=8)
                ->  Append  (cost=0.00..8898.75 rows=214 width=0)
                      ->  Seq Scan on mpp7638_1_prt_1  (cost=0.00..988.75 rows=24 width=0)
                            Filter: (a = 1)
@@ -537,13 +515,11 @@ explain select count(*) from mpp7638 where a =1;
                      ->  Seq Scan on mpp7638_1_prt_8  (cost=0.00..988.75 rows=24 width=0)
                            Filter: (a = 1)
                      ->  Seq Scan on mpp7638_1_prt_9  (cost=0.00..988.75 rows=24 width=0)
-                           Filter: a = 1
+                           Filter: (a = 1)
  Optimizer: Postgres query optimizer
-(24 rows)
+(23 rows)
 
 alter table mpp7638 set distributed by (a, b, c);
-INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
-INFO:  (slice 0) Dispatch command to ALL contents: 0 1 2
 INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
 INFO:  (slice 0) Dispatch command to ALL contents: 0 1 2
 INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
@@ -585,12 +561,8 @@ CREATE TABLE range_table (id INTEGER)
 (START (0) END (200000) EVERY (100000)) ;
 NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause -- Using column named 'id' as the Greenplum Database data distribution key for this table.
 HINT:  The 'DISTRIBUTED BY' clause determines the distribution of data. Make sure column(s) chosen are the optimal data distribution key to minimize skew.
-NOTICE:  CREATE TABLE will create partition "range_table_1_prt_1" for table "range_table"
-NOTICE:  CREATE TABLE will create partition "range_table_1_prt_2" for table "range_table"
 INSERT INTO range_table(id) VALUES (0);
 CREATE INDEX id3 ON range_table USING BITMAP (id);
-NOTICE:  building index for child partition "range_table_1_prt_1"
-NOTICE:  building index for child partition "range_table_1_prt_2"
 set test_print_direct_dispatch_info=on;
 INSERT INTO range_table(id) VALUES (1);
 INFO:  (slice 0) Dispatch command to SINGLE content
@@ -599,8 +571,6 @@ DROP INDEX id3;
 INFO:  Distributed transaction command 'Distributed Prepare' to ALL contents: 0 1 2
 INFO:  Distributed transaction command 'Distributed Commit Prepared' to ALL contents: 0 1 2
 CREATE INDEX id3 ON range_table USING BITMAP (id);
-NOTICE:  building index for child partition "range_table_1_prt_1"
-NOTICE:  building index for child partition "range_table_1_prt_2"
 INFO:  Distributed transaction command 'Distributed Prepare' to ALL contents: 0 1 2
 INFO:  Distributed transaction command 'Distributed Commit Prepared' to ALL contents: 0 1 2
 INSERT INTO range_table(id) VALUES (2);
@@ -680,13 +650,11 @@ insert into mpp7620 values (200, 200);
 INFO:  (slice 0) Dispatch command to SINGLE content
 INFO:  Distributed transaction command 'Distributed Commit (one-phase)' to SINGLE content
 insert into zoompp7620 select * from mpp7620 where key=200;
-INFO:  (slice 0) Dispatch command to ALL contents: 0 1 2
-INFO:  Distributed transaction command 'Distributed Prepare' to ALL contents: 0 1 2
-INFO:  Distributed transaction command 'Distributed Commit Prepared' to ALL contents: 0 1 2
+INFO:  (slice 0) Dispatch command to SINGLE content
+INFO:  Distributed transaction command 'Distributed Commit (one-phase)' to SINGLE content
 insert into zoompp7620(key) select key from mpp7620 where mpp7620.key=200;
-INFO:  (slice 0) Dispatch command to ALL contents: 0 1 2
-INFO:  Distributed transaction command 'Distributed Prepare' to ALL contents: 0 1 2
-INFO:  Distributed transaction command 'Distributed Commit Prepared' to ALL contents: 0 1 2
+INFO:  (slice 0) Dispatch command to SINGLE content
+INFO:  Distributed transaction command 'Distributed Commit (one-phase)' to SINGLE content
 select key from mpp7620 where mpp7620.key=200;
 INFO:  (slice 1) Dispatch command to SINGLE content
  key 
@@ -742,6 +710,7 @@ CREATE TABLE table_a (a0 int, a1 int, a2 int, a3 int);
 NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause -- Using column named 'a0' as the Greenplum Database data distribution key for this table.
 HINT:  The 'DISTRIBUTED BY' clause determines the distribution of data. Make sure column(s) chosen are the optimal data distribution key to minimize skew.
 INSERT INTO table_a (a3, a2, a0, a1) VALUES (nextval('s'), nextval('s'), nextval('s'), nextval('s'));
+ANALYZE table_a;
 insert into table_a (a3,a2,a0,a1) values (1,2,3,4);
 set test_print_direct_dispatch_info=on;
 --Check to see distributed vs distributed randomly
@@ -749,7 +718,7 @@ alter table table_a set distributed randomly;
 INFO:  Distributed transaction command 'Distributed Prepare' to ALL contents: 0 1 2
 INFO:  Distributed transaction command 'Distributed Commit Prepared' to ALL contents: 0 1 2
 select max(a0) from table_a where a0=3;
-INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
+INFO:  (slice 2) Dispatch command to ALL contents: 0 1 2
  max 
 -----
    3
@@ -771,25 +740,24 @@ explain select * from table_a where a0=3;
 (5 rows)
 
 explain select a0 from table_a where a0 in (select max(a1) from table_a);
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
- Gather Motion 3:1  (slice3; segments: 3)  (cost=1.13..2.17 rows=4 width=4)
-   ->  Hash Semi Join  (cost=1.13..2.17 rows=2 width=4)
-         Hash Cond: (table_a.a0 = (max((max(table_a_1.a1)))))
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)  (cost=1.08..2.20 rows=4 width=4)
+   ->  Hash Join  (cost=1.08..2.13 rows=2 width=4)
+         Hash Cond: (table_a.a0 = (max(table_a_1.a1)))
          ->  Seq Scan on table_a  (cost=0.00..1.01 rows=1 width=4)
-         ->  Hash  (cost=1.11..1.11 rows=1 width=4)
-               ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=1.07..1.11 rows=1 width=4)
-                     Hash Key: (max((max(table_a_1.a1))))
-                     ->  Aggregate  (cost=1.07..1.08 rows=1 width=4)
-                           ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=1.01..1.06 rows=1 width=4)
-                                 ->  Aggregate  (cost=1.01..1.02 rows=1 width=4)
-                                       ->  Seq Scan on table_a table_a_1  (cost=0.00..1.01 rows=1 width=4)
+         ->  Hash  (cost=1.07..1.07 rows=1 width=4)
+               ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=1.03..1.07 rows=1 width=4)
+                     Hash Key: (max(table_a_1.a1))
+                     ->  Aggregate  (cost=1.03..1.04 rows=1 width=4)
+                           ->  Gather Motion 3:1  (slice3; segments: 3)  (cost=0.00..1.03 rows=1 width=4)
+                                 ->  Seq Scan on table_a table_a_1  (cost=0.00..1.01 rows=1 width=4)
  Optimizer: Postgres query optimizer
-(13 rows)
+(11 rows)
 
 select a0 from table_a where a0 in (select max(a1) from table_a);
-INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
 INFO:  (slice 3) Dispatch command to ALL contents: 0 1 2
+INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
 INFO:  (slice 2) Dispatch command to SINGLE content
  a0 
 ----
@@ -803,31 +771,56 @@ INFO:  (slice 1) Dispatch command to ALL contents: 0 1 2
 (1 row)
 
 select max(a0) from table_a where a0=1;
-INFO:  (slice 1) Dispatch command to SINGLE content
+INFO:  (slice 2) Dispatch command to SINGLE content
  max 
 -----
    1
 (1 row)
 
 explain select a0 from table_a where a0 in (select max(a1) from table_a where a0=1);
-                                                QUERY PLAN                                                 
------------------------------------------------------------------------------------------------------------
- Gather Motion 3:1  (slice3; segments: 3)  (cost=1.13..2.18 rows=4 width=4)
-   ->  Hash Semi Join  (cost=1.13..2.18 rows=2 width=4)
-         Hash Cond: (table_a.a0 = (max((max(table_a_1.a1)))))
+                                                QUERY PLAN                                                
+----------------------------------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)  (cost=1.09..2.20 rows=4 width=4)
+   ->  Hash Join  (cost=1.09..2.13 rows=2 width=4)
+         Hash Cond: (table_a.a0 = (max(table_a_1.a1)))
          ->  Seq Scan on table_a  (cost=0.00..1.01 rows=1 width=4)
-         ->  Hash  (cost=1.12..1.12 rows=1 width=4)
-               ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=1.08..1.12 rows=1 width=4)
-                     Hash Key: (max((max(table_a_1.a1))))
-                     ->  Aggregate  (cost=1.08..1.09 rows=1 width=4)
-                           ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=1.01..1.06 rows=1 width=4)
-                                 ->  Aggregate  (cost=1.01..1.02 rows=1 width=4)
-                                       ->  Seq Scan on table_a table_a_1  (cost=0.00..1.01 rows=1 width=4)
-                                             Filter: a0 = 1
+         ->  Hash  (cost=1.07..1.07 rows=1 width=4)
+               ->  Redistribute Motion 1:3  (slice2; segments: 1)  (cost=1.03..1.07 rows=1 width=4)
+                     Hash Key: (max(table_a_1.a1))
+                     ->  Aggregate  (cost=1.03..1.04 rows=1 width=4)
+                           ->  Gather Motion 1:1  (slice3; segments: 1)  (cost=0.00..1.03 rows=1 width=4)
+                                 ->  Seq Scan on table_a table_a_1  (cost=0.00..1.01 rows=1 width=4)
+                                       Filter: (a0 = 1)
  Optimizer: Postgres query optimizer
-(14 rows)
+(12 rows)
 
 reset test_print_direct_dispatch_info;
+-- the filter is over a window, do not direct dispatch
+create table foo_direct_dispatch (dist_key int, non_dist_key int);
+NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause -- Using column named 'dist_key' as the Greenplum Database data distribution key for this table.
+HINT:  The 'DISTRIBUTED BY' clause determines the distribution of data. Make sure column(s) chosen are the optimal data distribution key to minimize skew.
+insert into foo_direct_dispatch select i, i from generate_series (1,100)i;
+select rank from ( select rank() over ( order by dist_key asc ) as rank , * from foo_direct_dispatch )a where 10 = dist_key;
+ rank 
+------
+   10
+(1 row)
+
+explain select rank from ( select rank() over ( order by dist_key asc ) as rank , * from foo_direct_dispatch )a where 10 = dist_key;
+                                         QUERY PLAN                                         
+--------------------------------------------------------------------------------------------
+ Subquery Scan on a  (cost=7.32..10.32 rows=1 width=8)
+   Filter: (10 = a.dist_key)
+   ->  WindowAgg  (cost=7.32..9.07 rows=100 width=8)
+         Order By: foo_direct_dispatch.dist_key
+         ->  Gather Motion 3:1  (slice1; segments: 3)  (cost=7.32..7.57 rows=100 width=8)
+               Merge Key: foo_direct_dispatch.dist_key
+               ->  Sort  (cost=7.32..7.57 rows=34 width=8)
+                     Sort Key: foo_direct_dispatch.dist_key
+                     ->  Seq Scan on foo_direct_dispatch  (cost=0.00..4.00 rows=34 width=8)
+ Optimizer: Postgres query optimizer
+(10 rows)
+
 -- ----------------------------------------------------------------------
 -- Test: teardown.sql
 -- ----------------------------------------------------------------------

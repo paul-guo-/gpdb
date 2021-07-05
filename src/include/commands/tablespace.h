@@ -4,7 +4,7 @@
  *		Tablespace management commands (create/drop tablespace).
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/commands/tablespace.h
@@ -41,6 +41,7 @@ typedef struct TableSpaceOpts
 	int32		vl_len_;		/* varlena header (do not touch directly!) */
 	float8		random_page_cost;
 	float8		seq_page_cost;
+	int			effective_io_concurrency;
 } TableSpaceOpts;
 
 extern Oid	CreateTableSpace(CreateTableSpaceStmt *stmt);
@@ -51,7 +52,7 @@ extern Oid	AlterTableSpaceOptions(AlterTableSpaceOptionsStmt *stmt);
 extern void TablespaceCreateDbspace(Oid spcNode, Oid dbNode, bool isRedo);
 extern void UnlinkTablespaceDirectory(Oid tablepace_oid_to_unlink, bool isRedo);
 
-extern Oid	GetDefaultTablespace(char relpersistence);
+extern Oid	GetDefaultTablespace(char relpersistence, bool partitioned);
 
 extern void PrepareTempTablespaces(void);
 
@@ -65,4 +66,4 @@ extern void tblspc_redo(XLogReaderState *rptr);
 extern void tblspc_desc(StringInfo buf, XLogReaderState *rptr);
 extern const char *tblspc_identify(uint8 info);
 
-#endif   /* TABLESPACE_H */
+#endif							/* TABLESPACE_H */

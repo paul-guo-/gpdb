@@ -5,7 +5,7 @@
  *	  tables.
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -22,14 +22,13 @@
 #include "libpq-fe.h"
 #include "access/transam.h"
 #include "access/xact.h"
-#include "catalog/gp_policy.h"
+#include "catalog/gp_distribution_policy.h"
 #include "catalog/namespace.h"
 #include "catalog/pg_attribute.h"
-#include "catalog/pg_exttable.h"
+#include "catalog/pg_namespace.h"
 #include "catalog/pg_type.h"
 #include "cdb/cdbdisp_query.h"
 #include "cdb/cdbdispatchresult.h"
-#include "cdb/cdbpartition.h"
 #include "cdb/cdbsreh.h"
 #include "cdb/cdbvars.h"
 #include "commands/dbcommands.h"
@@ -42,14 +41,26 @@
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/bytea.h"
+#include "utils/lsyscache.h"
+#include "utils/syscache.h"
 #include "utils/timestamp.h"
+#include "utils/varlena.h"
 
-static void PreprocessByteaData(char *src);
+static void ErrorLogFileName(Oid dbid, Oid relid, bool persistent, char *fname /* out */);
 static void ErrorLogWrite(CdbSreh *cdbsreh);
+static Datum ReadValidErrorLogDatum(FILE *fp, TupleDesc tupledesc, const char* fname);
+static bool RetrievePersistentErrorLogFromRangeVar(RangeVar *relrv, AclMode mode, char *fname /*out*/);
+static bool ErrorLogPrefixDelete(Oid databaseId, Oid namespaceId, bool persistent);
+static bool TruncateErrorLog(text *relname, bool persistent);
 
 #define ErrorLogDir "errlog"
-#define ErrorLogFileName(fname, dbId, relId) \
-	snprintf(fname, MAXPGPATH, "errlog/%u_%u", dbId, relId)
+#define PersistentErrorLogDir "errlogpersistent"
+
+#define ErrorLogNormalFileName(fname, dbId, relId) \
+	snprintf(fname, MAXPGPATH, "%s/%u_%u", ErrorLogDir, dbId, relId)
+
+#define ErrorLogPersistentFileName(fname, dbId, namespaceId, relName) \
+	snprintf(fname, MAXPGPATH, "%s/%u_%u_%s", PersistentErrorLogDir, dbId, namespaceId, relName)
 
 /*
  * Function context for gp_read_error_log
@@ -69,6 +80,32 @@ typedef enum RejectLimitCode
 
 int			gp_initial_bad_row_limit = 1000;
 
+
+/*
+ * ErrorLogFileName - get error log file path.
+ *
+ * If the current error log is set to be persistent.
+ * The log file will be different from normal one.
+ */
+static void
+ErrorLogFileName(Oid dbid, Oid relid, bool persistent, char *fname /* out */)
+{
+	Assert(fname);
+	Assert(OidIsValid(relid) && OidIsValid(dbid));
+
+	if (persistent)
+	{
+		char	   *relname = get_rel_name(relid);
+		Oid namespace = get_rel_namespace(relid);
+
+		if (OidIsValid(namespace))
+			ErrorLogPersistentFileName(fname, dbid, namespace, relname);
+		else
+			elog(ERROR, "relid %u does not exist for db %u", relid, dbid);
+	}
+	else
+		ErrorLogNormalFileName(fname, dbid, relid);
+}
 /*
  * makeCdbSreh
  *
@@ -79,14 +116,15 @@ int			gp_initial_bad_row_limit = 1000;
 CdbSreh *
 makeCdbSreh(int rejectlimit, bool is_limit_in_rows,
 			char *filename, char *relname,
-			bool log_to_file)
+			char logerrors)
 {
 	CdbSreh    *h;
 
 	h = palloc(sizeof(CdbSreh));
 
 	h->errmsg = NULL;
-	h->rawdata = NULL;
+	h->rawdata = (StringInfo) palloc(sizeof(StringInfoData));
+	memset(h->rawdata, 0, sizeof(StringInfoData));
 	h->linenumber = 0;
 	h->processed = 0;
 	h->relname = relname;
@@ -94,7 +132,7 @@ makeCdbSreh(int rejectlimit, bool is_limit_in_rows,
 	h->is_limit_in_rows = is_limit_in_rows;
 	h->rejectcount = 0;
 	h->is_server_enc = false;
-	h->log_to_file = log_to_file;
+	h->logerrors = logerrors;
 
 	snprintf(h->filename, sizeof(h->filename),
 			 "%s", filename ? filename : "<stdin>");
@@ -120,7 +158,7 @@ destroyCdbSreh(CdbSreh *cdbsreh)
 
 	/* delete the bad row context */
 	MemoryContextDelete(cdbsreh->badrowcontext);
-
+	pfree(cdbsreh->rawdata);
 	pfree(cdbsreh);
 }
 
@@ -144,26 +182,17 @@ HandleSingleRowError(CdbSreh *cdbsreh)
 	cdbsreh->rejectcount++;
 
 	/*
-	 * if reached the segment reject limit don't do anything. (this will get
-	 * checked and handled later on by the caller).
-	 */
-	if (IsRejectLimitReached(cdbsreh))
-		return;
-
-	/*
 	 * If not specified table or file, do nothing.  Otherwise, record the
 	 * error: QD - send the bad data row to a random QE (via roundrobin). QE -
 	 * log the error in the error log file.
 	 */
-	if (cdbsreh->log_to_file)
+	if (IS_LOG_TO_FILE(cdbsreh->logerrors))
 	{
 		if (Gp_role == GP_ROLE_DISPATCH)
 			elog(ERROR, "cannot not log suppressed input error in dispatcher");
 
 		ErrorLogWrite(cdbsreh);
 	}
-
-	return;						/* OK */
 }
 
 /*
@@ -183,7 +212,7 @@ GetErrorTupleDesc(void)
 		TupleDesc	tmp;
 		MemoryContext oldcontext = MemoryContextSwitchTo(CacheMemoryContext);
 
-		tmp = CreateTemplateTupleDesc(NUM_ERRORTABLE_ATTR, false);
+		tmp = CreateTemplateTupleDesc(NUM_ERRORTABLE_ATTR);
 		TupleDescInitEntry(tmp, 1, "cmdtime", TIMESTAMPTZOID, -1, 0);
 		TupleDescInitEntry(tmp, 2, "relname", TEXTOID, -1, 0);
 		TupleDescInitEntry(tmp, 3, "filename", TEXTOID, -1, 0);
@@ -228,14 +257,13 @@ FormErrorTuple(CdbSreh *cdbsreh)
 	if (cdbsreh->is_server_enc)
 	{
 		/* raw data */
-		values[errtable_rawdata - 1] = CStringGetTextDatum(cdbsreh->rawdata);
+		values[errtable_rawdata - 1] = CStringGetTextDatum(cdbsreh->rawdata->data);
 		nulls[errtable_rawdata - 1] = false;
 	}
 	else
 	{
 		/* raw bytes */
-		PreprocessByteaData(cdbsreh->rawdata);
-		values[errtable_rawbytes - 1] = DirectFunctionCall1(byteain, CStringGetDatum(cdbsreh->rawdata));
+		values[errtable_rawbytes - 1] = DirectFunctionCall1(bytearecv, PointerGetDatum(cdbsreh->rawdata));
 		nulls[errtable_rawbytes - 1] = false;
 	}
 
@@ -278,8 +306,14 @@ ReportSrehResults(CdbSreh *cdbsreh, uint64 total_rejected)
 	}
 }
 
-static void
-sendnumrows_internal(int64 numrejected, int64 numcompleted)
+/*
+ * SendNumRows
+ *
+ * Using this function the QE sends back to the client QD the number
+ * of rows that were rejected and completed in this last data load
+ */
+void
+SendNumRows(int64 numrejected, int64 numcompleted)
 {
 	StringInfoData buf;
 
@@ -292,30 +326,6 @@ sendnumrows_internal(int64 numrejected, int64 numcompleted)
 								 * ON SEGMENT */
 		pq_sendint64(&buf, numcompleted);
 	pq_endmessage(&buf);
-}
-
-/*
- * SendNumRowsRejected
- *
- * Using this function the QE sends back to the client QD the number
- * of rows that were rejected in this last data load in SREH mode.
- */
-void
-SendNumRowsRejected(int64 numrejected)
-{
-	sendnumrows_internal(numrejected, 0);
-}
-
-/*
- * SendNumRows
- *
- * Using this function the QE sends back to the client QD the number
- * of rows that were rejected and completed in this last data load
- */
-void
-SendNumRows(int64 numrejected, int64 numcompleted)
-{
-	sendnumrows_internal(numrejected, numcompleted);
 }
 
 /* Identify the reject limit type */
@@ -418,67 +428,11 @@ IsRejectLimitReached(CdbSreh *cdbsreh)
 	return GetRejectLimitCode(cdbsreh) != REJECT_NONE;
 }
 
-/*
- * This function is called when we are preparing to insert a bad row that
- * includes an encoding error into the bytea field of the error log file
- * (rawbytes). In rare occasions this bad row may also have an invalid bytea
- * sequence - a backslash not followed by a valid octal sequence - in which
- * case inserting into the error log file will fail. In here we make a pass to
- * detect if there's a risk of failing. If there isn't we just return. If there
- * is we remove the backslash and replace it with a x20 char. Yes, we are
- * actually modifying the user data, but this is a much better opion than
- * failing the entire load. It's also a bad row - a row that will require user
- * intervention anyway in order to reload.
- *
- * reference: MPP-2107
- *
- * NOTE: code is copied from esc_dec_len() in encode.c and slightly modified.
- */
-static
-void
-PreprocessByteaData(char *src)
-{
-	const char *end = src + strlen(src);
-
-	while (src < end)
-	{
-		if (src[0] != '\\')
-			src++;
-		else if (src + 3 < end &&
-				 (src[1] >= '0' && src[1] <= '3') &&
-				 (src[2] >= '0' && src[2] <= '7') &&
-				 (src[3] >= '0' && src[3] <= '7'))
-		{
-			/*
-			 * backslash + valid octal
-			 */
-			src += 4;
-		}
-		else if (src + 1 < end &&
-				 (src[1] == '\\'))
-		{
-			/*
-			 * two backslashes = backslash
-			 */
-			src += 2;
-		}
-		else
-		{
-			/*
-			 * one backslash, not followed by ### valid octal. remove the
-			 * backslash and put a x20 in its place.
-			 */
-			src[0] = ' ';
-			src++;
-		}
-	}
-
-}
 
 /*
  * IsRejectLimitValid
  *
- * verify that the the reject limit specified by the user is within the
+ * verify that the reject limit specified by the user is within the
  * allowed values for ROWS or PERCENT.
  */
 void
@@ -520,7 +474,9 @@ ErrorLogWrite(CdbSreh *cdbsreh)
 	int			ret;
 
 	Assert(OidIsValid(cdbsreh->relid));
-	ErrorLogFileName(filename, MyDatabaseId, cdbsreh->relid);
+	ErrorLogFileName(MyDatabaseId, cdbsreh->relid,
+					 IS_LOG_ERRORS_PERSISTENTLY(cdbsreh->logerrors),
+					 filename/* out */);
 	tuple = FormErrorTuple(cdbsreh);
 
 	INIT_CRC32C(crc);
@@ -537,13 +493,16 @@ ErrorLogWrite(CdbSreh *cdbsreh)
 
 	if (!fp && errno == ENOENT)
 	{
-		ret = mkdir(ErrorLogDir, S_IRWXU);
+		char	   *errordir = ErrorLogDir;
+		if (IS_LOG_ERRORS_PERSISTENTLY(cdbsreh->logerrors))
+			errordir = PersistentErrorLogDir;
+		ret = mkdir(errordir, S_IRWXU);
 		if (ret == 0)
 			fp = AllocateFile(filename, "a");
 		else
 			ereport(ERROR,
 					(errmsg("could not create directory for errorlog \"%s\": %m",
-							ErrorLogDir)));
+							errordir)));
 	}
 	if (!fp)
 		ereport(ERROR, (errmsg("could not open \"%s\": %m", filename)));
@@ -630,6 +589,54 @@ ResultToDatum(PGresult *result, int row, AttrNumber attnum, PGFunction func, boo
 }
 
 /*
+ * Utility to read error log and execute CRC check.
+ */
+static Datum
+ReadValidErrorLogDatum(FILE *fp, TupleDesc tupledesc, const char* fname)
+{
+	HeapTuple		tuple;
+	Datum			result;
+	pg_crc32c		crc,
+					written_crc;
+
+	tuple = ErrorLogRead(fp, &written_crc);
+
+	/*
+	 * CRC check.
+	 */
+	if (HeapTupleIsValid(tuple))
+	{
+		INIT_CRC32C(crc);
+		COMP_CRC32C(crc, tuple->t_data, tuple->t_len);
+		FIN_CRC32C(crc);
+
+		if (!EQ_CRC32C(crc, written_crc))
+		{
+			elog(LOG, "incorrect checksum in error log %s", fname);
+			tuple = NULL;
+		}
+	}
+
+	/*
+	 * If we found a valid tuple, return it.  Otherwise, fall through in
+	 * the DONE routine.
+	 */
+	if (HeapTupleIsValid(tuple))
+	{
+		/*
+		 * We need to set typmod for the executor to understand its type
+		 * we just blessed.
+		 */
+		HeapTupleHeaderSetTypMod(tuple->t_data,
+								 tupledesc->tdtypmod);
+
+		result = HeapTupleGetDatum(tuple);
+		return result;
+	}
+	return PointerGetDatum(NULL);
+}
+
+/*
  * gp_read_error_log
  *
  * Returns set of error log tuples.
@@ -639,7 +646,6 @@ gp_read_error_log(PG_FUNCTION_ARGS)
 {
 	FuncCallContext *funcctx;
 	ReadErrorLogContext *context;
-	HeapTuple	tuple;
 	Datum		result;
 
 	/*
@@ -682,9 +688,9 @@ gp_read_error_log(PG_FUNCTION_ARGS)
 			/* Requires SELECT priv to read error log. */
 			aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_SELECT);
 			if (aclresult != ACLCHECK_OK)
-				aclcheck_error(aclresult, ACL_KIND_CLASS, relrv->relname);
+				aclcheck_error(aclresult, OBJECT_TABLE, relrv->relname);
 
-			ErrorLogFileName(context->filename, MyDatabaseId, relid);
+			ErrorLogNormalFileName(context->filename, MyDatabaseId, relid);
 			context->fp = AllocateFile(context->filename, "r");
 		}
 
@@ -700,44 +706,10 @@ gp_read_error_log(PG_FUNCTION_ARGS)
 	 */
 	if (context->fp)
 	{
-		pg_crc32c	crc,
-					written_crc;
-
-		tuple = ErrorLogRead(context->fp, &written_crc);
-
-		/*
-		 * CRC check.
-		 */
-		if (HeapTupleIsValid(tuple))
-		{
-			INIT_CRC32C(crc);
-			COMP_CRC32C(crc, tuple->t_data, tuple->t_len);
-			FIN_CRC32C(crc);
-
-			if (!EQ_CRC32C(crc, written_crc))
-			{
-				elog(LOG, "incorrect checksum in error log %s",
-					 context->filename);
-				tuple = NULL;
-			}
-		}
-
-		/*
-		 * If we found a valid tuple, return it.  Otherwise, fall through in
-		 * the DONE routine.
-		 */
-		if (HeapTupleIsValid(tuple))
-		{
-			/*
-			 * We need to set typmod for the executor to understand its type
-			 * we just blessed.
-			 */
-			HeapTupleHeaderSetTypMod(tuple->t_data,
-									 funcctx->tuple_desc->tdtypmod);
-
-			result = HeapTupleGetDatum(tuple);
+		result = ReadValidErrorLogDatum(
+			context->fp, funcctx->tuple_desc, context->filename);
+		if (DatumGetPointer(result) != NULL)
 			SRF_RETURN_NEXT(funcctx, result);
-		}
 	}
 
 	/*
@@ -753,6 +725,273 @@ gp_read_error_log(PG_FUNCTION_ARGS)
 }
 
 /*
+ * Utility to retrieve the error log persistent file from RangeVar.
+ */
+static bool
+RetrievePersistentErrorLogFromRangeVar(RangeVar *relrv, AclMode mode, char *fname /*out*/)
+{
+	AclResult	aclresult;
+	bool		findfile = false;
+	Oid			namespaceId;
+	char	   *schemaname;
+	Oid			relid = InvalidOid;
+
+	relid = RangeVarGetRelid(relrv, NoLock, true);
+
+	if (OidIsValid(relid))
+	{
+		/* Requires priv on relation to operate error log. */
+		aclresult = pg_class_aclcheck(relid, GetUserId(), mode);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error(aclresult, OBJECT_TABLE, relrv->relname);
+
+		ErrorLogFileName(MyDatabaseId, relid, true, fname /* out */);
+		return true;
+	}
+
+	if (relrv->schemaname)
+	{
+		/* use exact schema given */
+		namespaceId = LookupExplicitNamespace(relrv->schemaname, true);
+		if (OidIsValid(namespaceId))
+		{
+			schemaname = relrv->schemaname;
+			findfile = true;
+			ErrorLogPersistentFileName(fname, MyDatabaseId, namespaceId, relrv->relname);
+		}
+	}
+	else
+	{
+		ListCell			   *cell;
+		OverrideSearchPath	   *searchPath;
+		char					filename[MAXPGPATH];
+
+		searchPath = GetOverrideSearchPath(CurrentMemoryContext);
+		foreach(cell, searchPath->schemas)
+		{
+			namespaceId = lfirst_oid(cell);
+			ErrorLogPersistentFileName(filename, MyDatabaseId, namespaceId, relrv->relname);
+			if (0 == access(filename, R_OK))
+			{
+				HeapTuple			tuple;
+				Form_pg_namespace	pg_namespace_tuple;
+
+				tuple = SearchSysCache1(NAMESPACEOID, ObjectIdGetDatum(namespaceId));
+				if (!HeapTupleIsValid(tuple))
+					elog(ERROR, "cache lookup failed for namespace %u", namespaceId);
+
+				pg_namespace_tuple = (Form_pg_namespace) GETSTRUCT(tuple);
+				schemaname = pstrdup(NameStr(pg_namespace_tuple->nspname));
+				ReleaseSysCache(tuple);
+				StrNCpy(fname, filename, MAXPGPATH);
+				findfile = true;
+				break;
+			}
+		}
+	}
+	if (findfile)
+	{
+		/* Requires priv on namespace to operate error log. */
+		aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), mode);
+		if (aclresult != ACLCHECK_OK)
+			aclcheck_error(aclresult, OBJECT_SCHEMA, schemaname);
+		return true;
+	}
+	return false;
+}
+
+/*
+ * gp_read_persistent_error_log
+ *
+ * Returns set of persistent error log tuples.
+ */
+Datum
+gp_read_persistent_error_log(PG_FUNCTION_ARGS)
+{
+	FuncCallContext *funcctx;
+	ReadErrorLogContext *context;
+	Datum		result;
+
+	/*
+	 * This function is marked as EXECUTE ON ALL SEGMENTS, so we should not
+	 * get here in the dispatcher.
+	 */
+	Assert(Gp_role != GP_ROLE_DISPATCH);
+
+	/*
+	 * First call setup
+	 */
+	if (SRF_IS_FIRSTCALL())
+	{
+		MemoryContext oldcontext;
+		text	   *relname;
+		RangeVar   *relrv;
+		bool		finderrorlog;
+
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		relname = PG_GETARG_TEXT_P(0);
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		context = palloc0(sizeof(ReadErrorLogContext));
+		funcctx->user_fctx = (void *) context;
+
+		funcctx->tuple_desc = BlessTupleDesc(GetErrorTupleDesc());
+
+		/*
+		 * Open the error log file.
+		 */
+
+		relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
+
+		/* Requires SELECT priv to read error log. */
+		finderrorlog = RetrievePersistentErrorLogFromRangeVar(
+			relrv, ACL_SELECT, context->filename /* out */);
+
+		if (finderrorlog)
+		{
+			context->fp = AllocateFile(context->filename, "r");
+		}
+
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	funcctx = SRF_PERCALL_SETUP();
+	context = (ReadErrorLogContext *) funcctx->user_fctx;
+
+	/*
+	 * Read error log, probably on segments.  We don't check Gp_role, however,
+	 * in case master also wants to read the file.
+	 */
+	if (context->fp)
+	{
+		result = ReadValidErrorLogDatum(
+			context->fp, funcctx->tuple_desc, context->filename);
+		if (DatumGetPointer(result) != NULL)
+			SRF_RETURN_NEXT(funcctx, result);
+	}
+
+	/*
+	 * Close the file, if we have opened it.
+	 */
+	if (context->fp != NULL)
+	{
+		FreeFile(context->fp);
+		context->fp = NULL;
+	}
+
+	SRF_RETURN_DONE(funcctx);
+}
+
+static bool
+ErrorLogPrefixDelete(Oid databaseId, Oid namespaceId, bool persistent)
+{
+	char		filename[MAXPGPATH];
+	DIR		   *dir;
+	struct dirent *de;
+	char	   *dirpath;
+	char		prefix[MAXPGPATH];
+	int			len;
+
+	if (persistent)
+		dirpath = PersistentErrorLogDir;
+	else
+		dirpath = ErrorLogDir;
+
+	if (OidIsValid(databaseId))
+	{
+		if (OidIsValid(namespaceId))
+			snprintf(prefix, sizeof(prefix), "%u_%u_", databaseId, namespaceId);
+		else
+			snprintf(prefix, sizeof(prefix), "%u_", databaseId);
+	}
+
+	dir = AllocateDir(dirpath);
+
+	/*
+	 * If we cannot open the directory, most likely it does not exist. Do
+	 * nothing.
+	 */
+	if (dir == NULL)
+		return false;
+
+	while ((de = ReadDir(dir, dirpath)) != NULL)
+	{
+		if (strcmp(de->d_name, ".") == 0 ||
+			strcmp(de->d_name, "..") == 0 ||
+			strcmp(de->d_name, "/") == 0)
+			continue;
+
+		/*
+		 * If database id is not given, delete all files.
+		 * Or
+		 * Filter by the prefix for persistent error log.
+		 */
+		if (!OidIsValid(databaseId) ||
+			(strncmp(de->d_name, prefix, strlen(prefix)) == 0 && persistent))
+		{
+			len = snprintf(filename, MAXPGPATH, "%s/%s", dirpath, de->d_name);
+			if (len >= (MAXPGPATH - 1))
+			{
+				ereport(WARNING,
+						(errcode(ERRCODE_INTERNAL_ERROR),
+							(errmsg("log filename truncation on \"%s\", unable to delete error log",
+									de->d_name))));
+				continue;
+			}
+			LWLockAcquire(ErrorLogLock, LW_EXCLUSIVE);
+			unlink(filename);
+			LWLockRelease(ErrorLogLock);
+			continue;
+		}
+
+		/*
+		 * Filter by the database id prefix.
+		 */
+		if (strncmp(de->d_name, prefix, strlen(prefix)) == 0)
+		{
+			int			res;
+			Oid			dummyDbId,
+						dummyOid;
+
+			res = sscanf(de->d_name, "%u_%u", &dummyDbId, &dummyOid);
+			Assert(dummyDbId == databaseId);
+
+			/*
+			 * Recursively delete the file.
+			 */
+			if (res == 2)
+			{
+				ErrorLogDelete(databaseId, dummyOid);
+			}
+		}
+	}
+
+	FreeDir(dir);
+	return true;
+}
+
+
+/*
+ * PersistentErrorLogDelete - Delete the persistent error log.
+ *
+ * Only the superuser has the permission to delete.
+ */
+bool
+PersistentErrorLogDelete(Oid databaseId, Oid namespaceId, const char *fname)
+{
+	bool		result = true;
+	if (fname == NULL)
+		return ErrorLogPrefixDelete(databaseId, namespaceId, true);
+
+	LWLockAcquire(ErrorLogLock, LW_EXCLUSIVE);
+	if (unlink(fname) < 0)
+		result = false;
+	LWLockRelease(ErrorLogLock);
+	return result;
+}
+
+/*
  * Delete the error log of the relation and return true if any.
  * If relationId is InvalidOid, scan the directory to look for
  * all the files prefixed with the databaseId, and delete them.
@@ -764,78 +1003,10 @@ ErrorLogDelete(Oid databaseId, Oid relationId)
 	bool		result = true;
 
 	if (!OidIsValid(relationId))
-	{
-		DIR		   *dir;
-		struct dirent *de;
-		char	   *dirpath = ErrorLogDir;
-		char		prefix[MAXPGPATH];
-		int			len;
+		return ErrorLogPrefixDelete(databaseId, InvalidOid, false);
 
-		if (OidIsValid(databaseId))
-			snprintf(prefix, sizeof(prefix), "%u_", databaseId);
-		dir = AllocateDir(dirpath);
-
-		/*
-		 * If we cannot open the directory, most likely it does not exist. Do
-		 * nothing.
-		 */
-		if (dir == NULL)
-			return false;
-
-		while ((de = ReadDir(dir, dirpath)) != NULL)
-		{
-			if (strcmp(de->d_name, ".") == 0 ||
-				strcmp(de->d_name, "..") == 0 ||
-				strcmp(de->d_name, "/") == 0)
-				continue;
-
-			/*
-			 * If database id is not given, delete all files.
-			 */
-			if (!OidIsValid(databaseId))
-			{
-				len = snprintf(filename, MAXPGPATH, "%s/%s", dirpath, de->d_name);
-				if (len >= (MAXPGPATH - 1))
-				{
-					ereport(WARNING,
-							(errcode(ERRCODE_INTERNAL_ERROR),
-							 (errmsg("log filename truncation on \"%s\", unable to delete error log",
-									 de->d_name))));
-					continue;
-				}
-				LWLockAcquire(ErrorLogLock, LW_EXCLUSIVE);
-				unlink(filename);
-				LWLockRelease(ErrorLogLock);
-				continue;
-			}
-
-			/*
-			 * Filter by the database id prefix.
-			 */
-			if (strncmp(de->d_name, prefix, strlen(prefix)) == 0)
-			{
-				int			res;
-				Oid			dummyDbId,
-							relid;
-
-				res = sscanf(de->d_name, "%u_%u", &dummyDbId, &relid);
-				Assert(dummyDbId == databaseId);
-
-				/*
-				 * Recursively delete the file.
-				 */
-				if (res == 2)
-				{
-					ErrorLogDelete(databaseId, relid);
-				}
-			}
-		}
-
-		FreeDir(dir);
-		return true;
-	}
 	LWLockAcquire(ErrorLogLock, LW_EXCLUSIVE);
-	ErrorLogFileName(filename, databaseId, relationId);
+	ErrorLogNormalFileName(filename, databaseId, relationId);
 	if (unlink(filename) < 0)
 		result = false;
 	LWLockRelease(ErrorLogLock);
@@ -843,20 +1014,13 @@ ErrorLogDelete(Oid databaseId, Oid relationId)
 	return result;
 }
 
-/*
- * Delete error log of the specified relation.  This returns true from master
- * iif all segments and master find the relation.
- */
-Datum
-gp_truncate_error_log(PG_FUNCTION_ARGS)
+static bool
+TruncateErrorLog(text *relname, bool persistent)
 {
-	text	   *relname;
 	char	   *relname_str;
 	RangeVar   *relrv;
 	Oid			relid;
 	bool		allResults = true;
-
-	relname = PG_GETARG_TEXT_P(0);
 
 	relname_str = text_to_cstring(relname);
 	if (strcmp(relname_str, "*.*") == 0)
@@ -869,7 +1033,7 @@ gp_truncate_error_log(PG_FUNCTION_ARGS)
 					(errcode(ERRCODE_INSUFFICIENT_PRIVILEGE),
 					 (errmsg("must be superuser to delete all error log files"))));
 
-		ErrorLogDelete(InvalidOid, InvalidOid);
+		ErrorLogPrefixDelete(InvalidOid, InvalidOid, persistent);
 	}
 	else if (strcmp(relname_str, "*") == 0)
 	{
@@ -877,31 +1041,49 @@ gp_truncate_error_log(PG_FUNCTION_ARGS)
 		 * Database owner can delete error log files.
 		 */
 		if (!pg_database_ownercheck(MyDatabaseId, GetUserId()))
-			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_DATABASE,
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_DATABASE,
 						   get_database_name(MyDatabaseId));
 
-		ErrorLogDelete(MyDatabaseId, InvalidOid);
+		ErrorLogPrefixDelete(MyDatabaseId, InvalidOid, persistent);
 	}
 	else
 	{
 		AclResult	aclresult;
 
 		relrv = makeRangeVarFromNameList(textToQualifiedNameList(relname));
-		relid = RangeVarGetRelid(relrv, NoLock, true);
+		if (persistent)
+		{
+			char filename[MAXPGPATH];
+			bool finderrorlog;
 
-		/* Return false if the relation does not exist. */
-		if (!OidIsValid(relid))
-			PG_RETURN_BOOL(false);
+			/* Allow the table owner to truncate error log.
+			 * But if the table is already dropped, allow the
+			 * schema owner to truncate error log. */
+			finderrorlog = RetrievePersistentErrorLogFromRangeVar(
+				relrv, ACL_TRUNCATE, filename /* out */);
 
-		/*
-		 * Allow only the table owner to truncate error log.
-		 */
-		aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_TRUNCATE);
-		if (aclresult != ACLCHECK_OK)
-			aclcheck_error(aclresult, ACL_KIND_CLASS, relrv->relname);
+			/* We don't care if this fails or not. */
+			if (finderrorlog)
+				PersistentErrorLogDelete(MyDatabaseId, InvalidOid, filename);
+		}
+		else
+		{
+			relid = RangeVarGetRelid(relrv, NoLock, true);
 
-		/* We don't care if this fails or not. */
-		ErrorLogDelete(MyDatabaseId, relid);
+			/* Return false if the relation does not exist. */
+			if (!OidIsValid(relid))
+				PG_RETURN_BOOL(false);
+
+			/*
+			 * Allow only the table owner to truncate error log.
+			 */
+			aclresult = pg_class_aclcheck(relid, GetUserId(), ACL_TRUNCATE);
+			if (aclresult != ACLCHECK_OK)
+				aclcheck_error(aclresult, OBJECT_TABLE, relrv->relname);
+
+			/* We don't care if this fails or not. */
+			ErrorLogDelete(MyDatabaseId, relid);
+		}
 	}
 
 	/*
@@ -913,8 +1095,12 @@ gp_truncate_error_log(PG_FUNCTION_ARGS)
 		char	   *sql;
 		CdbPgResults cdb_pgresults = {NULL, 0};
 
-		sql = psprintf("SELECT pg_catalog.gp_truncate_error_log(%s)",
+		if (persistent)
+			sql = psprintf("SELECT pg_catalog.gp_truncate_persistent_error_log(%s)",
 					   quote_literal_cstr(text_to_cstring(relname)));
+		else
+			sql = psprintf("SELECT pg_catalog.gp_truncate_error_log(%s)",
+						quote_literal_cstr(text_to_cstring(relname)));
 
 		CdbDispatchCommand(sql, DF_WITH_SNAPSHOT, &cdb_pgresults);
 
@@ -940,5 +1126,34 @@ gp_truncate_error_log(PG_FUNCTION_ARGS)
 	}
 
 	/* Return true iif all segments return true. */
-	PG_RETURN_BOOL(allResults);
+	return allResults;
+}
+
+/*
+ * Delete error log of the specified relation.  This returns true from master
+ * iif all segments and master find the relation.
+ */
+Datum
+gp_truncate_error_log(PG_FUNCTION_ARGS)
+{
+	text	   *relname;
+
+	relname = PG_GETARG_TEXT_P(0);
+
+	PG_RETURN_BOOL(TruncateErrorLog(relname, false));
+}
+
+/*
+ * Delete persistent error log of the specified relation.
+ * This returns true from master iif all segments and
+ * master find the relation.
+ */
+Datum
+gp_truncate_persistent_error_log(PG_FUNCTION_ARGS)
+{
+	text	   *relname;
+
+	relname = PG_GETARG_TEXT_P(0);
+
+	PG_RETURN_BOOL(TruncateErrorLog(relname, true));
 }

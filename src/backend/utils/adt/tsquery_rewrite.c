@@ -3,7 +3,7 @@
  * tsquery_rewrite.c
  *	  Utilities for reconstructing tsquery
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  *
  *
  * IDENTIFICATION
@@ -280,7 +280,7 @@ Datum
 tsquery_rewrite_query(PG_FUNCTION_ARGS)
 {
 	TSQuery		query = PG_GETARG_TSQUERY_COPY(0);
-	text	   *in = PG_GETARG_TEXT_P(1);
+	text	   *in = PG_GETARG_TEXT_PP(1);
 	TSQuery		rewrited = query;
 	MemoryContext outercontext = CurrentMemoryContext;
 	MemoryContext oldcontext;
@@ -289,7 +289,6 @@ tsquery_rewrite_query(PG_FUNCTION_ARGS)
 	SPIPlanPtr	plan;
 	Portal		portal;
 	bool		isnull;
-	int64			i;
 
 	if (query->size == 0)
 	{
@@ -323,6 +322,8 @@ tsquery_rewrite_query(PG_FUNCTION_ARGS)
 
 	while (SPI_processed > 0 && tree)
 	{
+		uint64		i;
+
 		for (i = 0; i < SPI_processed && tree; i++)
 		{
 			Datum		qdata = SPI_getbinval(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, 1, &isnull);

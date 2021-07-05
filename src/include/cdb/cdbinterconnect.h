@@ -3,7 +3,7 @@
  *	  Defines state that is used by both the Motion Layer and IPC Layer.
  *
  * Portions Copyright (c) 2006-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -28,9 +28,11 @@
 #include "cdb/tupleremap.h"
 
 struct CdbProcess;                          /* #include "nodes/execnodes.h" */
-struct Slice;                               /* #include "nodes/execnodes.h" */
+struct ExecSlice;                           /* #include "nodes/execnodes.h" */
 struct SliceTable;                          /* #include "nodes/execnodes.h" */
 struct EState;                              /* #include "nodes/execnodes.h" */
+/* TODO: move "src/backend/cdb/motion/ic_proxy_backend.h" into public include folder*/
+struct ICProxyBackendContext;
 
 typedef struct icpkthdr
 {
@@ -331,9 +333,9 @@ typedef struct ChunkTransportStateEntry
 
     int         scanStart;
 
-    /* slice table entries */
-    struct Slice   *sendSlice;
-    struct Slice   *recvSlice;
+	/* slice table entries */
+	struct ExecSlice *sendSlice;
+	struct ExecSlice *recvSlice;
 
 	/* setup info */
 	int			txfd;
@@ -505,6 +507,9 @@ typedef struct ChunkTransportState
 	bool		activated;
 
 	bool		aggressiveRetry;
+	
+	/* whether we've logged when network timeout happens */
+	bool		networkTimeoutIsLogged;
 
 	bool		teardownActive;
 	List		*incompleteConns;
@@ -522,6 +527,9 @@ typedef struct ChunkTransportState
 	TupleChunkListItem (*RecvTupleChunkFromAny)(struct ChunkTransportState *transportStates, int16 motNodeID, int16 *srcRoute);
 	void (*doSendStopMessage)(struct ChunkTransportState *transportStates, int16 motNodeID);
 	void (*SendEos)(struct ChunkTransportState *transportStates, int motNodeID, TupleChunkListItem tcItem);
+
+	/* ic_proxy backend context */
+	struct ICProxyBackendContext *proxyContext;
 } ChunkTransportState;
 
 extern void dumpICBufferList(ICBufferList *list, const char *fname);

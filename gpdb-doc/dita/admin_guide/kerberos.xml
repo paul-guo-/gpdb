@@ -29,17 +29,15 @@
       <ul id="ul_ojr_rvj_2p">
         <li id="nr157373">You can identify the KDC server you use for Kerberos
           authentication and the Kerberos realm for your Greenplum Database
-            system.<ul id="ul_cn2_nfc_c2b">
-            <li>If you plan to use an MIT Kerberos KDC server but have not yet
-              configured it, see <xref href="#task_setup_kdc" format="dita"/>
-              for example instructions.</li>
-            <li>If you are using an existing Active Directory KDC server, also
+          system. If you have not yet configured your MIT Kerberos KDC server, 
+          see <xref href="#task_setup_kdc" format="dita"/> for example
+          instructions.</li>
+        <!-- li>If you are using an existing Active Directory KDC server, also
               ensure that you have:<ul id="ul_oq5_tfc_c2b">
                 <li>Installed all Active Directory service roles on your AD KDC
                   server.</li>
                 <li>Enabled the LDAP service.</li>
-              </ul></li>
-          </ul></li>
+              </ul></li -->
         <li>System time on the Kerberos Key Distribution Center (KDC) server and
           Greenplum Database master is synchronized. (For example, install the
             <codeph>ntp</codeph> package on both servers.) </li>
@@ -61,10 +59,9 @@
         <li id="nr165111"><xref href="#topic7" format="dita"/></li>
         <li><xref href="#topic_kmr_gws_d2b" format="dita"/></li>
         <li><xref href="#topic9" format="dita"/></li>
-        <li><xref href="kerberos-win-client.xml#topic_vjg_d5m_sv" format="dita"
+        <li><xref href="kerberos-lin-client.xml#topic_j1d_4qz_rz" format="dita"
           /></li>
-        <li><xref href="kerberos-win-client.xml#topic_uzb_t5m_sv" format="dita"
-          /></li>
+        <li><xref href="kerberos-win-client.xml#topic1" format="dita" /></li>
       </ul>
     </section>
   </body>
@@ -104,7 +101,7 @@
             <codeph>gpdb-kerberos.keytab</codeph> in the current directory with
           authentication information for the Greenplum Database service
           principal and the gpadmin/admin principal.
-          <codeblock># kadmin.local -q "ktadd -k gpdb-kerberos.keytab postgres/mdw@GPDB.KRB gadmin/admin@GPDB.KRB"</codeblock></li>
+          <codeblock># kadmin.local -q "ktadd -k gpdb-kerberos.keytab postgres/mdw@GPDB.KRB gpadmin/admin@GPDB.KRB"</codeblock></li>
         <li>Copy the keytab file to the master host.
           <codeblock># scp gpdb-kerberos.keytab gpadmin@mdw:~</codeblock></li>
       </ol>
@@ -172,11 +169,9 @@ $ chmod 400 /home/gpadmin/gpdb-kerberos.keytab</codeblock>
               <codeph>pg_hba.conf</codeph> file.
             <codeblock>$ gpstop -ar</codeblock>         
         </li>
-        <li>Create the gpadmin/admin Greenplum Database superuser role.
-            <codeblock>$ createuser gpadmin/admin
-Shall the new role be a superuser? (y/n) y</codeblock>         
-          <p>The Kerberos keys for this database role are in the keyfile you
-            copied from the KDC server.</p>
+        <li>Create the gpadmin/admin Greenplum Database superuser role. <codeblock>$ createuser gpadmin/admin2 --superuser</codeblock>
+          <p>The Kerberos keys for this database role are in the keyfile you copied from the KDC
+            server.</p>
         </li>
         <li id="nr166157">Create a ticket using <codeph>kinit</codeph> and show the tickets
             in the Kerberos ticket cache with <codeph>klist</codeph>.
@@ -249,12 +244,12 @@ postgres=# select current_user;
         <li>If the <codeph>map=&lt;map-name></codeph> option is specified, the
           Kerberos principal name is compared to entries labeled with the
           specified <codeph>&lt;map-name></codeph> in the
-            <codeph>$MASTER_DATA_DIRECTORY/pg_ident.conf</codeph> file and
+            <codeph>$COORDINATOR_DATA_DIRECTORY/pg_ident.conf</codeph> file and
           replaced with the Greenplum Database role name specified in the first
           matching entry.</li>
       </ul>
       <p>A user name map is defined in the
-          <codeph>$MASTER_DATA_DIRECTORY/pg_ident.conf</codeph> configuration
+          <codeph>$COORDINATOR_DATA_DIRECTORY/pg_ident.conf</codeph> configuration
         file. This example defines a map named <codeph>mymap</codeph> with two
         entries.</p>
       <p>
@@ -339,9 +334,8 @@ mymap       /^(.*)_gp)@GPDB.KRB$   \1</codeblock>
       <ol id="steps_r5w_rtc_2p">
         <li>Install the Kerberos server and client
           packages:<codeblock>$ sudo yum install krb5-libs krb5-server krb5-workstation</codeblock></li>
-        <li>Edit the <filepath>/etc/krb5.conf</filepath> configuration file. The
-          following example shows a Kerberos server configured with a default
-            <codeph>GPDB.KRB</codeph> realm.
+        <li>Edit the <filepath>/etc/krb5.conf</filepath> configuration file. The following example
+          shows a Kerberos server configured with a default <codeph>GPDB.KRB</codeph> realm.
             <codeblock>[logging]
  default = FILE:/var/log/krb5libs.log
  kdc = FILE:/var/log/krb5kdc.log
@@ -379,16 +373,14 @@ mymap       /^(.*)_gp)@GPDB.KRB$   \1</codeblock>
  }
 </codeblock><p>The
               <codeph>kdc</codeph> and <codeph>admin_server</codeph> keys in the
-              <codeph>[realms]</codeph> section specify the host
-              (<codeph>gpdb-kdc</codeph>) and port where the Kerberos server is
-            running. IP numbers can be used in place of host names. </p><p>If
-            your Kerberos server manages authentication for other realms, you
-            would instead add the <codeph>GPDB.KRB</codeph> realm in the
-              <codeph>[realms]</codeph> and <codeph>[domain_realm]</codeph>
-            section of the <codeph>kdc.conf</codeph> file. See the <xref
-              href="http://web.mit.edu/kerberos/krb5-latest/doc/" format="html"
-              scope="external">Kerberos documentation</xref> for information
-            about the <codeph>kdc.conf</codeph> file.</p></li>
+              <codeph>[realms]</codeph> section specify the host (<codeph>gpdb-kdc</codeph>) and
+            port where the Kerberos server is running. IP numbers can be used in place of host
+            names. </p><p>If your Kerberos server manages authentication for other realms, you would
+            instead add the <codeph>GPDB.KRB</codeph> realm in the <codeph>[realms]</codeph> and
+              <codeph>[domain_realm]</codeph> section of the <codeph>kdc.conf</codeph> file. See the
+              <xref href="http://web.mit.edu/kerberos/krb5-latest/doc/" format="html"
+              scope="external">Kerberos documentation</xref> for information about the
+              <codeph>kdc.conf</codeph> file.</p></li>
         <li>To create the Kerberos database, run the <codeph>kdb5_util</codeph>.
             <codeblock># kdb5_util create -s</codeblock><p>The
               <codeph>kdb5_util</codeph>

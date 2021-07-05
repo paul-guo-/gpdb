@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 # Line too long            - pylint: disable=C0301
 # Invalid name             - pylint: disable=C0103
 #
@@ -9,7 +9,7 @@
 from gppylib.mainUtils import *
 
 from optparse import Option, OptionGroup, OptionParser, OptionValueError, SUPPRESS_USAGE
-import os, sys, getopt, socket, StringIO, signal, copy
+import os, sys, getopt, socket, io, signal, copy
 
 from gppylib import gparray, gplog, pgconf, userinput, utils, heapchecksum
 from gppylib.commands.base import Command
@@ -19,19 +19,18 @@ from gppylib.db import catalog, dbconn
 from gppylib.gpparseopts import OptParser, OptChecker
 from gppylib.operations.startSegments import *
 from gppylib.operations.buildMirrorSegments import *
+from gppylib.operations.update_pg_hba_on_segments import update_pg_hba_on_segments
 from gppylib.programs import programIoUtils
 from gppylib.system import configurationInterface as configInterface
-from gppylib.system.environment import GpMasterEnvironment
+from gppylib.system.environment import GpCoordinatorEnvironment
 from gppylib.parseutils import line_reader, check_values, canonicalize_address
 from gppylib.utils import writeLinesToFile, readAllLinesFromFile, TableLogger, \
     PathNormalizationException, normalizeAndValidateInputPath
-from gppylib.gphostcache import GpInterfaceToHostNameCache
 from gppylib.userinput import *
 from gppylib.mainUtils import ExceptionNoStackTraceNeeded
 
 logger = gplog.get_default_logger()
 
-MAX_PARALLEL_ADD_MIRRORS = 96
 
 class GpMirrorBuildCalculator:
     """
@@ -51,17 +50,17 @@ class GpMirrorBuildCalculator:
         self.__nextDbId = max([seg.getSegmentDbId() for seg in gpArray.getDbList()]) + 1
         self.__minPrimaryPortOverall = min([seg.getSegmentPort() for seg in self.__primaries])
 
-        def comparePorts(left, right):
-            return cmp(left.getSegmentPort(), right.getSegmentPort())
+        def portKey(segment):
+            return segment.getSegmentPort()
 
         self.__mirrorsAddedByHost = {}  # map hostname to the # of mirrors that have been added to that host
         self.__primariesUpdatedToHaveMirrorsByHost = {}  # map hostname to the # of primaries that have been attached to mirrors for that host
         self.__primaryPortBaseByHost = {}  # map hostname to the lowest port number in-use by a primary on that host
-        for hostName, segments in self.__primariesByHost.iteritems():
+        for hostName, segments in self.__primariesByHost.items():
             self.__primaryPortBaseByHost[hostName] = min([seg.getSegmentPort() for seg in segments])
             self.__mirrorsAddedByHost[hostName] = 0
             self.__primariesUpdatedToHaveMirrorsByHost[hostName] = 0
-            segments.sort(comparePorts)
+            segments.sort(key = portKey)
 
         self.__mirrorPortOffset = options.mirrorOffset
         self.__mirrorDataDirs = mirrorDataDirs
@@ -213,7 +212,7 @@ class GpMirrorBuildCalculator:
          Side-effect: self.__gpArray and other fields are updated to contain the returned segments
         """
 
-        hosts = self.__primariesByHost.keys()
+        hosts = list(self.__primariesByHost.keys())
         hosts.sort()
 
         result = []
@@ -232,7 +231,7 @@ class GpMirrorBuildCalculator:
          Side-effect: self.__gpArray is updated to contain the returned segments
         """
 
-        hosts = self.__primariesByHost.keys()
+        hosts = list(self.__primariesByHost.keys())
         hosts.sort()
 
         result = []
@@ -292,8 +291,6 @@ class GpAddMirrorsProgram:
                 rows.append(self._getParsedRow(filename, lineno, line))
 
         allAddresses = [row["address"] for row in rows]
-        interfaceLookup = GpInterfaceToHostNameCache(self.__pool, allAddresses, [None]*len(allAddresses))
-
         #
         # build up the output now
         #
@@ -308,9 +305,8 @@ class GpAddMirrorsProgram:
             contentId = int(row['contentId'])
             address = row['address']
             dataDir = normalizeAndValidateInputPath(row['dataDirectory'], "in config file", row['lineno'])
-            hostName = interfaceLookup.getHostName(address)
-            if hostName is None:
-                raise Exception("Segment Host Address %s is unreachable" % address)
+            # FIXME: hostname probably should not be address, but to do so, "hostname" should be added to gpaddmirrors config file
+            hostName = address
 
             primary = segsByContentId[contentId]
             if primary is None:
@@ -322,7 +318,8 @@ class GpAddMirrorsProgram:
             raise Exception("Wrong number of mirrors specified (specified %s mirror(s) for %s primarie(s))" % \
                             (len(toBuild), len(primaries)))
 
-        return GpMirrorListToBuild(toBuild, self.__pool, self.__options.quiet, self.__options.parallelDegree)
+        return GpMirrorListToBuild(toBuild, self.__pool, self.__options.quiet, self.__options.batch_size,
+                                   parallelPerHost=self.__options.segment_batch_size)
 
     def __outputToFile(self, mirrorBuilder, file, gpArray):
         """
@@ -374,13 +371,13 @@ class GpAddMirrorsProgram:
             # get from stdin
             #
             while len(dirs) < maxPrimariesPerHost:
-                print 'Enter mirror segment data directory location %d of %d >' % (len(dirs) + 1, maxPrimariesPerHost)
-                line = raw_input().strip()
+                print('Enter mirror segment data directory location %d of %d >' % (len(dirs) + 1, maxPrimariesPerHost))
+                line = input().strip()
                 if len(line) > 0:
                     try:
                         dirs.append(normalizeAndValidateInputPath(line))
-                    except PathNormalizationException, e:
-                        print "\n%s\n" % e
+                    except PathNormalizationException as e:
+                        print("\n%s\n" % e)
 
         return dirs
 
@@ -389,7 +386,7 @@ class GpAddMirrorsProgram:
 
         maxPrimariesPerHost = 0
         segments = [seg for seg in gpArray.getDbList() if seg.isSegmentPrimary(False)]
-        for hostName, hostSegments in GpArray.getSegmentsByHostName(segments).iteritems():
+        for hostName, hostSegments in GpArray.getSegmentsByHostName(segments).items():
             if len(hostSegments) > maxPrimariesPerHost:
                 maxPrimariesPerHost = len(hostSegments)
 
@@ -400,7 +397,7 @@ class GpAddMirrorsProgram:
         else:
             toBuild = calc.getGroupMirrors()
 
-        gpPrefix = gp_utils.get_gp_prefix(gpEnv.getMasterDataDir())
+        gpPrefix = gp_utils.get_gp_prefix(gpEnv.getCoordinatorDataDir())
         if not gpPrefix:
             gpPrefix = 'gp'
 
@@ -411,7 +408,8 @@ class GpAddMirrorsProgram:
             dataDir = utils.createSegmentSpecificPath(mir.getSegmentDataDirectory(), gpPrefix, mir)
             mir.setSegmentDataDirectory(dataDir)
 
-        return GpMirrorListToBuild(toBuild, self.__pool, self.__options.quiet, self.__options.parallelDegree)
+        return GpMirrorListToBuild(toBuild, self.__pool, self.__options.quiet, self.__options.batch_size,
+                                   parallelPerHost=self.__options.segment_batch_size)
 
     def __getMirrorsToBuildBasedOnOptions(self, gpEnv, gpArray):
         """
@@ -425,23 +423,24 @@ class GpAddMirrorsProgram:
 
     def __displayAddMirrors(self, gpEnv, mirrorBuilder, gpArray):
         logger.info('Greenplum Add Mirrors Parameters')
-        logger.info('---------------------------------------------------------')
-        logger.info('Greenplum master data directory          = %s' % gpEnv.getMasterDataDir())
-        logger.info('Greenplum master port                    = %d' % gpEnv.getMasterPort())
-        logger.info('Parallel batch limit                     = %d' % self.__options.parallelDegree)
+        logger.info('--------------------------------------------')
+        logger.info('Greenplum coordinator data directory    = %s' % gpEnv.getCoordinatorDataDir())
+        logger.info('Greenplum coordinator port              = %d' % gpEnv.getCoordinatorPort())
+        logger.info('Batch size                              = %d' % self.__options.batch_size)
+        logger.info('Segment batch size                      = %d' % self.__options.segment_batch_size)
 
         total = len(mirrorBuilder.getMirrorsToBuild())
         for i, toRecover in enumerate(mirrorBuilder.getMirrorsToBuild()):
-            logger.info('---------------------------------------------------------')
+            logger.info('--------------------------------------------')
             logger.info('Mirror %d of %d' % (i + 1, total))
-            logger.info('---------------------------------------------------------')
+            logger.info('--------------------------------------------')
 
             tabLog = TableLogger()
             programIoUtils.appendSegmentInfoForOutput("Primary", gpArray, toRecover.getLiveSegment(), tabLog)
             programIoUtils.appendSegmentInfoForOutput("Mirror", gpArray, toRecover.getFailoverSegment(), tabLog)
             tabLog.outputTable()
 
-        logger.info('---------------------------------------------------------')
+        logger.info('--------------------------------------------')
 
     def checkMirrorOffset(self, gpArray):
         """
@@ -468,25 +467,25 @@ class GpAddMirrorsProgram:
 
 
     def validate_heap_checksums(self, gpArray):
-        num_workers = min(len(gpArray.get_hostlist()), MAX_PARALLEL_ADD_MIRRORS)
+        num_workers = min(len(gpArray.get_hostlist()), self.__options.batch_size)
         heap_checksum_util = heapchecksum.HeapChecksum(gparray=gpArray, num_workers=num_workers, logger=logger)
         successes, failures = heap_checksum_util.get_segments_checksum_settings()
         if len(successes) == 0:
             logger.fatal("No segments responded to ssh query for heap checksum. Not expanding the cluster.")
             return 1
 
-        consistent, inconsistent, master_heap_checksum = heap_checksum_util.check_segment_consistency(successes)
+        consistent, inconsistent, coordinator_heap_checksum = heap_checksum_util.check_segment_consistency(successes)
 
         inconsistent_segment_msgs = []
         for segment in inconsistent:
             inconsistent_segment_msgs.append("dbid: %s "
-                                             "checksum set to %s differs from master checksum set to %s" %
+                                             "checksum set to %s differs from coordinator checksum set to %s" %
                                              (segment.getSegmentDbId(), segment.heap_checksum,
-                                              master_heap_checksum))
+                                              coordinator_heap_checksum))
 
         if not heap_checksum_util.are_segments_consistent(consistent, inconsistent):
             logger.fatal("Cluster heap checksum setting differences reported")
-            logger.fatal("Heap checksum settings on %d of %d segment instances do not match master <<<<<<<<"
+            logger.fatal("Heap checksum settings on %d of %d segment instances do not match coordinator <<<<<<<<"
                               % (len(inconsistent_segment_msgs), len(gpArray.segmentPairs)))
             logger.fatal("Review %s for details" % get_logfile())
             log_to_file_only("Failed checksum consistency validation:", logging.WARN)
@@ -495,58 +494,31 @@ class GpAddMirrorsProgram:
 
             for msg in inconsistent_segment_msgs:
                 log_to_file_only(msg, logging.WARN)
-                raise Exception("Segments have heap_checksum set inconsistently to master")
+                raise Exception("Segments have heap_checksum set inconsistently to coordinator")
         else:
             logger.info("Heap checksum setting consistent across cluster")
 
-    def config_primaries_for_replication(self, gpArray):
-        logger.info("Starting to modify pg_hba.conf on primary segments to allow replication connections")
-        replicationStr = ". {0}/greenplum_path.sh; echo 'host  replication {1} samenet trust {2}' >> {3}/pg_hba.conf; pg_ctl -D {3} reload"
-
-        try:
-            for segmentPair in gpArray.getSegmentList():
-                allow_pair_hba_line_entries = []
-                if self.__options.hba_hostnames:
-                    mirror_hostname, _, _ = socket.gethostbyaddr(segmentPair.mirrorDB.getSegmentHostName())
-                    hba_line_entry = "\nhost all {0} {1} trust".format(unix.getUserName(), mirror_hostname)
-                    allow_pair_hba_line_entries.append(hba_line_entry)
-                else:
-                    mirror_ips = unix.InterfaceAddrs.remote('get mirror ips', segmentPair.mirrorDB.getSegmentHostName())
-                    for ip in mirror_ips:
-                        cidr_suffix = '/128' if ':' in ip else '/32'
-                        cidr = ip + cidr_suffix
-                        hba_line_entry = "\nhost all {0} {1} trust".format(unix.getUserName(), cidr)
-                        allow_pair_hba_line_entries.append(hba_line_entry)
-                cmdStr = replicationStr.format(os.environ["GPHOME"], unix.getUserName(), " ".join(allow_pair_hba_line_entries), segmentPair.primaryDB.datadir)
-                logger.debug(cmdStr)
-                cmd = Command(name="append to pg_hba.conf", cmdStr=cmdStr, ctxt=base.REMOTE, remoteHost=segmentPair.primaryDB.hostname)
-                cmd.run(validateAfter=True)
-
-        except Exception, e:
-            logger.error("Failed while modifying pg_hba.conf on primary segments to allow replication connections: %s" % str(e))
-            raise
-
-        else:
-            logger.info("Successfully modified pg_hba.conf on primary segments to allow replication connections")
-
-
     def run(self):
-        if self.__options.parallelDegree < 1 or self.__options.parallelDegree > 64:
+        if self.__options.batch_size < 1 or self.__options.batch_size > gp.MAX_COORDINATOR_NUM_WORKERS:
             raise ProgramArgumentValidationException(
-                "Invalid parallelDegree provided with -B argument: %d" % self.__options.parallelDegree)
+                "Invalid batch_size provided with -B argument: %d" % self.__options.batch_size)
+        if self.__options.segment_batch_size < 1 or self.__options.segment_batch_size > gp.MAX_SEGHOST_NUM_WORKERS:
+            raise ProgramArgumentValidationException(
+                "Invalid segment_batch_size provided with -b argument: %d" % self.__options.segment_batch_size)
 
-        self.__pool = base.WorkerPool(self.__options.parallelDegree)
-        gpEnv = GpMasterEnvironment(self.__options.masterDataDirectory, True)
+        self.__pool = base.WorkerPool(self.__options.batch_size)
+        gpEnv = GpCoordinatorEnvironment(self.__options.coordinatorDataDirectory, True)
 
-        faultProberInterface.getFaultProber().initializeProber(gpEnv.getMasterPort())
-        confProvider = configInterface.getConfigurationProvider().initializeProvider(gpEnv.getMasterPort())
+        faultProberInterface.getFaultProber().initializeProber(gpEnv.getCoordinatorPort())
+        confProvider = configInterface.getConfigurationProvider().initializeProvider(gpEnv.getCoordinatorPort())
         gpArray = confProvider.loadSystemConfig(useUtilityMode=False)
 
         # check that heap_checksums is consistent across cluster, fail immediately if not
         self.validate_heap_checksums(gpArray)
 
-        self.checkMirrorOffset(gpArray)
-        
+        if self.__options.mirrorConfigFile is None:
+            self.checkMirrorOffset(gpArray)
+
         # check that we actually have mirrors
         if gpArray.hasMirrors:
             raise ExceptionNoStackTraceNeeded( \
@@ -566,7 +538,7 @@ class GpAddMirrorsProgram:
                 if not userinput.ask_yesno(None, "\nContinue with add mirrors procedure", 'N'):
                     raise UserAbortedException()
 
-            self.config_primaries_for_replication(gpArray)
+            update_pg_hba_on_segments(gpArray, self.__options.hba_hostnames, self.__options.batch_size)
             if not mirrorBuilder.buildMirrors("add", gpEnv, gpArray):
                 return 1
 
@@ -599,7 +571,7 @@ class GpAddMirrorsProgram:
 
         addTo = OptionGroup(parser, "Connection Options")
         parser.add_option_group(addTo)
-        addMasterDirectoryOptionForSingleClusterProgram(addTo)
+        addCoordinatorDirectoryOptionForSingleClusterProgram(addTo)
 
         addTo = OptionGroup(parser, "Mirroring Options")
         parser.add_option_group(addTo)
@@ -629,10 +601,14 @@ class GpAddMirrorsProgram:
                          help="Mirror port offset.  The mirror port offset will be used multiple times "
                               "to derive three sets of ports [default: %default]")
 
-        addTo.add_option("-B", None, type="int", default=16,
-                         dest="parallelDegree",
-                         metavar="<parallelDegree>",
-                         help="Max # of workers to use for building recovery segments.  [default: %default]")
+        addTo.add_option("-B", "--batch-size", type="int", default=gp.DEFAULT_COORDINATOR_NUM_WORKERS,
+                         dest="batch_size",
+                         metavar="<batch_size>",
+                         help='Max number of hosts to operate on in parallel. Valid values are 1-%d' % gp.MAX_COORDINATOR_NUM_WORKERS)
+        addTo.add_option("-b", "--segment-batch-size", type="int", default=gp.DEFAULT_SEGHOST_NUM_WORKERS,
+                         dest="segment_batch_size",
+                         metavar="<segment_batch_size>",
+                         help='Max number of segments per host to operate on in parallel. Valid values are: 1-%d' % gp.MAX_SEGHOST_NUM_WORKERS)
 
         addTo.add_option('', '--hba-hostnames', action='store_true', dest='hba_hostnames',
                           help='use hostnames instead of CIDR in pg_hba.conf')

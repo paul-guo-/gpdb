@@ -6,7 +6,7 @@
  *	  changes should be made with care.
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/access/gist.h
@@ -41,10 +41,20 @@
  */
 #define F_LEAF				(1 << 0)	/* leaf page */
 #define F_DELETED			(1 << 1)	/* the page has been deleted */
-#define F_TUPLES_DELETED	(1 << 2)	/* some tuples on the page are dead */
+#define F_TUPLES_DELETED	(1 << 2)	/* some tuples on the page were
+										 * deleted */
 #define F_FOLLOW_RIGHT		(1 << 3)	/* page to the right has no downlink */
+#define F_HAS_GARBAGE		(1 << 4)	/* some tuples on the page are dead,
+										 * but not deleted yet */
 
 typedef XLogRecPtr GistNSN;
+
+/*
+ * A bogus LSN / NSN value used during index build. Must be smaller than any
+ * real or fake unlogged LSN, so that after an index build finishes, all the
+ * splits are considered completed.
+ */
+#define GistBuildLSN	((XLogRecPtr) 1)
 
 /*
  * For on-disk compatibility with pre-9.3 servers, NSN is stored as two
@@ -102,12 +112,12 @@ typedef struct GIST_SPLITVEC
 	OffsetNumber *spl_left;		/* array of entries that go left */
 	int			spl_nleft;		/* size of this array */
 	Datum		spl_ldatum;		/* Union of keys in spl_left */
-	bool		spl_ldatum_exists;		/* true, if spl_ldatum already exists. */
+	bool		spl_ldatum_exists;	/* true, if spl_ldatum already exists. */
 
 	OffsetNumber *spl_right;	/* array of entries that go right */
 	int			spl_nright;		/* size of the array */
 	Datum		spl_rdatum;		/* Union of keys in spl_right */
-	bool		spl_rdatum_exists;		/* true, if spl_rdatum already exists. */
+	bool		spl_rdatum_exists;	/* true, if spl_rdatum already exists. */
 } GIST_SPLITVEC;
 
 /*
@@ -137,12 +147,20 @@ typedef struct GISTENTRY
 #define GistMarkTuplesDeleted(page) ( GistPageGetOpaque(page)->flags |= F_TUPLES_DELETED)
 #define GistClearTuplesDeleted(page)	( GistPageGetOpaque(page)->flags &= ~F_TUPLES_DELETED)
 
+#define GistPageHasGarbage(page) ( GistPageGetOpaque(page)->flags & F_HAS_GARBAGE)
+#define GistMarkPageHasGarbage(page) ( GistPageGetOpaque(page)->flags |= F_HAS_GARBAGE)
+#define GistClearPageHasGarbage(page)	( GistPageGetOpaque(page)->flags &= ~F_HAS_GARBAGE)
+
 #define GistFollowRight(page) ( GistPageGetOpaque(page)->flags & F_FOLLOW_RIGHT)
 #define GistMarkFollowRight(page) ( GistPageGetOpaque(page)->flags |= F_FOLLOW_RIGHT)
 #define GistClearFollowRight(page)	( GistPageGetOpaque(page)->flags &= ~F_FOLLOW_RIGHT)
 
 #define GistPageGetNSN(page) ( PageXLogRecPtrGet(GistPageGetOpaque(page)->nsn))
 #define GistPageSetNSN(page, val) ( PageXLogRecPtrSet(GistPageGetOpaque(page)->nsn, val))
+
+/* For deleted pages we store last xid which could see the page in scan */
+#define GistPageGetDeleteXid(page) ( ((PageHeader) (page))->pd_prune_xid )
+#define GistPageSetDeleteXid(page, val) ( ((PageHeader) (page))->pd_prune_xid = val)
 
 /*
  * Vector of GISTENTRY structs; user-defined methods union and picksplit
@@ -163,4 +181,4 @@ typedef struct
 	do { (e).key = (k); (e).rel = (r); (e).page = (pg); \
 		 (e).offset = (o); (e).leafkey = (l); } while (0)
 
-#endif   /* GIST_H */
+#endif							/* GIST_H */

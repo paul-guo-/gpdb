@@ -4,7 +4,7 @@
  *	  Provides fault tolerance service routines for mpp.
  *
  * Portions Copyright (c) 2003-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -42,9 +42,8 @@
 #define MASTER_SEGMENT_ID -1
 
 volatile FtsProbeInfo *ftsProbeInfo = NULL;	/* Probe process updates this structure */
-static LWLockId ftsControlLock;
 
-extern volatile bool *pm_launch_walreceiver;
+extern volatile pid_t *shmFtsProbePID;
 
 /*
  * get fts share memory size
@@ -52,12 +51,6 @@ extern volatile bool *pm_launch_walreceiver;
 int
 FtsShmemSize(void)
 {
-	/*
-	 * this shared memory block doesn't even need to *exist* on the QEs!
-	 */
-	if ((Gp_role != GP_ROLE_DISPATCH) && (Gp_role != GP_ROLE_UTILITY))
-		return 0;
-
 	return MAXALIGN(sizeof(FtsControlBlock));
 }
 
@@ -67,35 +60,17 @@ FtsShmemInit(void)
 	bool		found;
 	FtsControlBlock *shared;
 
-	shared = (FtsControlBlock *) ShmemInitStruct("Fault Tolerance manager", FtsShmemSize(), &found);
+	shared = (FtsControlBlock *) ShmemInitStruct("Fault Tolerance manager", sizeof(FtsControlBlock), &found);
 	if (!shared)
 		elog(FATAL, "FTS: could not initialize fault tolerance manager share memory");
 
-	/* Initialize locks and shared memory area */
-	ftsControlLock = shared->ControlLock;
+	/* Initialize shared memory area */
 	ftsProbeInfo = &shared->fts_probe_info;
-	pm_launch_walreceiver = &shared->pm_launch_walreceiver;
+	shmFtsProbePID = &shared->fts_probe_pid;
+	*shmFtsProbePID = 0;
 
 	if (!IsUnderPostmaster)
-	{
-		shared->ControlLock = LWLockAssign();
-		ftsControlLock = shared->ControlLock;
-
 		shared->fts_probe_info.status_version = 0;
-		shared->pm_launch_walreceiver = false;
-	}
-}
-
-void
-ftsLock(void)
-{
-	LWLockAcquire(ftsControlLock, LW_EXCLUSIVE);
-}
-
-void
-ftsUnlock(void)
-{
-	LWLockRelease(ftsControlLock);
 }
 
 /* see src/backend/fts/README */
@@ -106,6 +81,9 @@ FtsNotifyProber(void)
 	int32			initial_started;
 	int32			started;
 	int32			done;
+
+	if (am_ftsprobe)
+		return;
 
 	SpinLockAcquire(&ftsProbeInfo->lock);
 	initial_started = ftsProbeInfo->start_count;

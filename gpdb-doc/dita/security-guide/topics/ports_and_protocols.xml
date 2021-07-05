@@ -127,14 +127,6 @@ MIRROR_PORT_BASE = 7000</codeblock></note>
                 ranges specified in a configuration file.</p></entry>
           </row>
           <row>
-            <entry>Gpperfmon agents</entry>
-            <entry>TCP 8888</entry>
-            <entry>Connection port for gpperfmon agents (<codeph>gpmmon</codeph> and
-                <codeph>gpsmon</codeph>) executing on Greenplum Database hosts. Configure by setting
-              the <codeph>gpperfmon_port</codeph> configuration variable in
-                <filepath>postgresql.conf</filepath> on master and segment hosts.</entry>
-          </row>
-          <row>
             <entry>Backup completion notification</entry>
             <entry>TCP 25, TCP 587, SMTP</entry>
             <entry>The <codeph>gpbackup</codeph> backup utility can optionally send email to a list
@@ -204,17 +196,6 @@ MIRROR_PORT_BASE = 7000</codeblock></note>
             <entry>Used when replication is configured on the Data Domain system. This port can be
               configured using the <codeph>replication modify</codeph> command on the Data Domain
               server.</entry>
-          </row>
-          <row>
-            <entry>Pgbouncer connection pooler</entry>
-            <entry>TCP, libpq</entry>
-            <entry>The pgbouncer connection pooler runs between libpq clients and Greenplum (or
-              PostgreSQL) databases. It can be run on the Greenplum master host, but running it on a
-              host outside of the Greenplum cluster is recommended. When it runs on a separate host,
-              pgbouncer can act as a warm standby mechanism for the Greenplum master host, switching
-              to the Greenplum standby host without requiring clients to reconfigure. Set the client
-              connection port and the Greenplum master host address and port in the
-                <filepath>pgbouncer.ini</filepath> configuration file. </entry>
           </row>
         </tbody>
       </tgroup>

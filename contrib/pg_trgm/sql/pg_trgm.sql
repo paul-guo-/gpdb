@@ -1,5 +1,17 @@
 CREATE EXTENSION pg_trgm;
 
+-- Check whether any of our opclasses fail amvalidate
+SELECT amname, opcname
+FROM pg_opclass opc LEFT JOIN pg_am am ON am.oid = opcmethod
+WHERE opc.oid >= 16384 AND NOT amvalidate(opc.oid);
+
+--backslash is used in tests below, installcheck will fail if
+--standard_conforming_string is off
+set standard_conforming_strings=on;
+
+-- reduce noise
+set extra_float_digits = 0;
+
 select show_trgm('');
 select show_trgm('(*&^$@%@');
 select show_trgm('a b c');
@@ -13,7 +25,7 @@ select similarity('wow',' WOW ');
 
 select similarity('---', '####---');
 
-CREATE TABLE test_trgm(t text);
+CREATE TABLE test_trgm(t text COLLATE "C");
 
 \copy test_trgm from 'data/trgm.data'
 
@@ -43,7 +55,7 @@ select t,similarity(t,'gwertyu0988') as sml from test_trgm where t % 'gwertyu098
 select t,similarity(t,'gwertyu1988') as sml from test_trgm where t % 'gwertyu1988' order by sml desc, t;
 select count(*) from test_trgm where t ~ '[qwerty]{2}-?[qwerty]{2}';
 
-create table test2(t text);
+create table test2(t text COLLATE "C");
 insert into test2 values ('abcdef');
 insert into test2 values ('quark');
 insert into test2 values ('  z foo bar');
@@ -122,3 +134,24 @@ select * from test2 where t ~ '  z foo bar';
 select * from test2 where t ~ '  z foo';
 select * from test2 where t ~ 'qua(?!foo)';
 select * from test2 where t ~ '/\d+/-\d';
+
+-- Check similarity threshold (bug #14202)
+
+CREATE TEMP TABLE restaurants (city text);
+INSERT INTO restaurants SELECT 'Warsaw' FROM generate_series(1, 10000);
+INSERT INTO restaurants SELECT 'Szczecin' FROM generate_series(1, 10000);
+CREATE INDEX ON restaurants USING gist(city gist_trgm_ops);
+
+-- Similarity of the two names (for reference).
+SELECT similarity('Szczecin', 'Warsaw');
+
+-- Should get only 'Warsaw' for either setting of set_limit.
+EXPLAIN (COSTS OFF)
+SELECT DISTINCT city, similarity(city, 'Warsaw'), show_limit()
+  FROM restaurants WHERE city % 'Warsaw';
+SELECT set_limit(0.3);
+SELECT DISTINCT city, similarity(city, 'Warsaw'), show_limit()
+  FROM restaurants WHERE city % 'Warsaw';
+SELECT set_limit(0.5);
+SELECT DISTINCT city, similarity(city, 'Warsaw'), show_limit()
+  FROM restaurants WHERE city % 'Warsaw';

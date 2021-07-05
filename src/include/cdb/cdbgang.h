@@ -3,7 +3,7 @@
  * cdbgang.h
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -32,7 +32,7 @@ struct CdbDispatcherState;
 typedef struct Gang
 {
 	GangType type;
-	int	gang_id;
+
 	int	size;
 
 	/*
@@ -65,9 +65,7 @@ cdbgang_createGang(List *segments, SegmentType segmentType);
 
 extern const char *gangTypeToString(GangType type);
 
-extern void setupCdbProcessList(Slice *slice);
-
-extern bool GangOK(Gang *gp);
+extern void setupCdbProcessList(ExecSlice *slice);
 
 extern List *getCdbProcessesForQD(int isPrimary);
 
@@ -77,6 +75,7 @@ extern void DisconnectAndDestroyAllGangs(bool resetSession);
 extern void DisconnectAndDestroyUnusedQEs(void);
 
 extern void CheckForResetSession(void);
+extern void ResetAllGangs(void);
 
 extern struct SegmentDatabaseDescriptor *getSegmentDescriptorFromGang(const Gang *gp, int seg);
 
@@ -85,6 +84,7 @@ bool build_gpqeid_param(char *buf, int bufsz, bool is_writer, int identifier, in
 
 char *makeOptions(void);
 extern bool segment_failure_due_to_recovery(const char *error_message);
+extern bool segment_failure_due_to_missing_writer(const char *error_message);
 
 /*
  * cdbgang_parse_gpqeid_params
@@ -105,7 +105,7 @@ extern void cdbgang_parse_gpqeid_params(struct Port *port, const char *gpqeid_va
  * It is constructed on the entry process (QD) and transmitted as part of
  * the global slice table to the involved QEs. Note that this is an
  * immutable, fixed-size structure so it can be held in a contiguous
- * array. In the Slice node, however, it is held in a List.
+ * array. In the ExecSlice node, however, it is held in a List.
  */
 typedef struct CdbProcess
 {
@@ -122,6 +122,7 @@ typedef struct CdbProcess
 	int pid; /* Backend PID of the process. */
 
 	int contentid;
+	int dbid;
 } CdbProcess;
 
 typedef Gang *(*CreateGangFunc)(List *segments, SegmentType segmentType);

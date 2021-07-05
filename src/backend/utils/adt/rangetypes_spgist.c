@@ -25,7 +25,7 @@
  * This implementation only uses the comparison function of the range element
  * datatype, therefore it works for any range type.
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * IDENTIFICATION
@@ -43,22 +43,15 @@
 #include "utils/datum.h"
 #include "utils/rangetypes.h"
 
-/* SP-GiST API functions */
-Datum		spg_range_quad_config(PG_FUNCTION_ARGS);
-Datum		spg_range_quad_choose(PG_FUNCTION_ARGS);
-Datum		spg_range_quad_picksplit(PG_FUNCTION_ARGS);
-Datum		spg_range_quad_inner_consistent(PG_FUNCTION_ARGS);
-Datum		spg_range_quad_leaf_consistent(PG_FUNCTION_ARGS);
-
 static int16 getQuadrant(TypeCacheEntry *typcache, RangeType *centroid,
-			RangeType *tst);
+						 RangeType *tst);
 static int	bound_cmp(const void *a, const void *b, void *arg);
 
-static int adjacent_inner_consistent(TypeCacheEntry *typcache,
-						  RangeBound *arg, RangeBound *centroid,
-						  RangeBound *prev);
-static int adjacent_cmp_bounds(TypeCacheEntry *typcache, RangeBound *arg,
-					RangeBound *centroid);
+static int	adjacent_inner_consistent(TypeCacheEntry *typcache,
+									  RangeBound *arg, RangeBound *centroid,
+									  RangeBound *prev);
+static int	adjacent_cmp_bounds(TypeCacheEntry *typcache, RangeBound *arg,
+								RangeBound *centroid);
 
 /*
  * SP-GiST 'config' interface function.
@@ -139,7 +132,7 @@ spg_range_quad_choose(PG_FUNCTION_ARGS)
 {
 	spgChooseIn *in = (spgChooseIn *) PG_GETARG_POINTER(0);
 	spgChooseOut *out = (spgChooseOut *) PG_GETARG_POINTER(1);
-	RangeType  *inRange = DatumGetRangeType(in->datum),
+	RangeType  *inRange = DatumGetRangeTypeP(in->datum),
 			   *centroid;
 	int16		quadrant;
 	TypeCacheEntry *typcache;
@@ -149,7 +142,7 @@ spg_range_quad_choose(PG_FUNCTION_ARGS)
 		out->resultType = spgMatchNode;
 		/* nodeN will be set by core */
 		out->result.matchNode.levelAdd = 0;
-		out->result.matchNode.restDatum = RangeTypeGetDatum(inRange);
+		out->result.matchNode.restDatum = RangeTypePGetDatum(inRange);
 		PG_RETURN_VOID();
 	}
 
@@ -168,11 +161,11 @@ spg_range_quad_choose(PG_FUNCTION_ARGS)
 		else
 			out->result.matchNode.nodeN = 1;
 		out->result.matchNode.levelAdd = 1;
-		out->result.matchNode.restDatum = RangeTypeGetDatum(inRange);
+		out->result.matchNode.restDatum = RangeTypePGetDatum(inRange);
 		PG_RETURN_VOID();
 	}
 
-	centroid = DatumGetRangeType(in->prefixDatum);
+	centroid = DatumGetRangeTypeP(in->prefixDatum);
 	quadrant = getQuadrant(typcache, centroid, inRange);
 
 	Assert(quadrant <= in->nNodes);
@@ -181,7 +174,7 @@ spg_range_quad_choose(PG_FUNCTION_ARGS)
 	out->resultType = spgMatchNode;
 	out->result.matchNode.nodeN = quadrant - 1;
 	out->result.matchNode.levelAdd = 1;
-	out->result.matchNode.restDatum = RangeTypeGetDatum(inRange);
+	out->result.matchNode.restDatum = RangeTypePGetDatum(inRange);
 
 	PG_RETURN_VOID();
 }
@@ -220,7 +213,7 @@ spg_range_quad_picksplit(PG_FUNCTION_ARGS)
 			   *upperBounds;
 
 	typcache = range_get_typcache(fcinfo,
-						  RangeTypeGetOid(DatumGetRangeType(in->datums[0])));
+								  RangeTypeGetOid(DatumGetRangeTypeP(in->datums[0])));
 
 	/* Allocate memory for bounds */
 	lowerBounds = palloc(sizeof(RangeBound) * in->nTuples);
@@ -230,7 +223,7 @@ spg_range_quad_picksplit(PG_FUNCTION_ARGS)
 	/* Deserialize bounds of ranges, count non-empty ranges */
 	for (i = 0; i < in->nTuples; i++)
 	{
-		range_deserialize(typcache, DatumGetRangeType(in->datums[i]),
+		range_deserialize(typcache, DatumGetRangeTypeP(in->datums[i]),
 						  &lowerBounds[j], &upperBounds[j], &empty);
 		if (!empty)
 			j++;
@@ -256,9 +249,9 @@ spg_range_quad_picksplit(PG_FUNCTION_ARGS)
 		/* Place all ranges into node 0 */
 		for (i = 0; i < in->nTuples; i++)
 		{
-			RangeType  *range = DatumGetRangeType(in->datums[i]);
+			RangeType  *range = DatumGetRangeTypeP(in->datums[i]);
 
-			out->leafTupleDatums[i] = RangeTypeGetDatum(range);
+			out->leafTupleDatums[i] = RangeTypePGetDatum(range);
 			out->mapTuplesToNodes[i] = 0;
 		}
 		PG_RETURN_VOID();
@@ -274,7 +267,7 @@ spg_range_quad_picksplit(PG_FUNCTION_ARGS)
 	centroid = range_serialize(typcache, &lowerBounds[nonEmptyCount / 2],
 							   &upperBounds[nonEmptyCount / 2], false);
 	out->hasPrefix = true;
-	out->prefixDatum = RangeTypeGetDatum(centroid);
+	out->prefixDatum = RangeTypePGetDatum(centroid);
 
 	/* Create node for empty ranges only if it is a root node */
 	out->nNodes = (in->level == 0) ? 5 : 4;
@@ -289,10 +282,10 @@ spg_range_quad_picksplit(PG_FUNCTION_ARGS)
 	 */
 	for (i = 0; i < in->nTuples; i++)
 	{
-		RangeType  *range = DatumGetRangeType(in->datums[i]);
+		RangeType  *range = DatumGetRangeTypeP(in->datums[i]);
 		int16		quadrant = getQuadrant(typcache, centroid, range);
 
-		out->leafTupleDatums[i] = RangeTypeGetDatum(range);
+		out->leafTupleDatums[i] = RangeTypePGetDatum(range);
 		out->mapTuplesToNodes[i] = quadrant - 1;
 	}
 
@@ -310,14 +303,12 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 	spgInnerConsistentOut *out = (spgInnerConsistentOut *) PG_GETARG_POINTER(1);
 	int			which;
 	int			i;
+	MemoryContext oldCtx;
 
 	/*
 	 * For adjacent search we need also previous centroid (if any) to improve
 	 * the precision of the consistent check. In this case needPrevious flag
-	 * is set and centroid is passed into reconstructedValues. This is not the
-	 * intended purpose of reconstructedValues (because we already have the
-	 * full value available at the leaf), but it's a convenient place to store
-	 * state while traversing the tree.
+	 * is set and centroid is passed into traversalValue.
 	 */
 	bool		needPrevious = false;
 
@@ -356,7 +347,7 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 			 */
 			if (strategy != RANGESTRAT_CONTAINS_ELEM)
 				empty = RangeIsEmpty(
-							 DatumGetRangeType(in->scankeys[i].sk_argument));
+									 DatumGetRangeTypeP(in->scankeys[i].sk_argument));
 			else
 				empty = false;
 
@@ -424,9 +415,9 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 		RangeType  *centroid;
 
 		/* This node has a centroid. Fetch it. */
-		centroid = DatumGetRangeType(in->prefixDatum);
+		centroid = DatumGetRangeTypeP(in->prefixDatum);
 		typcache = range_get_typcache(fcinfo,
-							   RangeTypeGetOid(DatumGetRangeType(centroid)));
+									  RangeTypeGetOid(DatumGetRangeTypeP(centroid)));
 		range_deserialize(typcache, centroid, &centroidLower, &centroidUpper,
 						  &centroidEmpty);
 
@@ -491,7 +482,7 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 			}
 			else
 			{
-				range = DatumGetRangeType(in->scankeys[i].sk_argument);
+				range = DatumGetRangeTypeP(in->scankeys[i].sk_argument);
 				range_deserialize(typcache, range, &lower, &upper, &empty);
 			}
 
@@ -565,9 +556,9 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 					 * for lower or upper bounds to be adjacent. Deserialize
 					 * previous centroid range if present for checking this.
 					 */
-					if (in->reconstructedValue != (Datum) 0)
+					if (in->traversalValue)
 					{
-						prevCentroid = DatumGetRangeType(in->reconstructedValue);
+						prevCentroid = DatumGetRangeTypeP(in->traversalValue);
 						range_deserialize(typcache, prevCentroid,
 										  &prevLower, &prevUpper, &prevEmpty);
 					}
@@ -583,7 +574,7 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 					 */
 					cmp = adjacent_inner_consistent(typcache, &lower,
 													&centroidUpper,
-										   prevCentroid ? &prevUpper : NULL);
+													prevCentroid ? &prevUpper : NULL);
 					if (cmp > 0)
 						which1 = (1 << 1) | (1 << 4);
 					else if (cmp < 0)
@@ -599,7 +590,7 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 					 */
 					cmp = adjacent_inner_consistent(typcache, &upper,
 													&centroidLower,
-										   prevCentroid ? &prevLower : NULL);
+													prevCentroid ? &prevLower : NULL);
 					if (cmp > 0)
 						which2 = (1 << 1) | (1 << 2);
 					else if (cmp < 0)
@@ -746,18 +737,37 @@ spg_range_quad_inner_consistent(PG_FUNCTION_ARGS)
 	/* We must descend into the quadrant(s) identified by 'which' */
 	out->nodeNumbers = (int *) palloc(sizeof(int) * in->nNodes);
 	if (needPrevious)
-		out->reconstructedValues = (Datum *) palloc(sizeof(Datum) * in->nNodes);
+		out->traversalValues = (void **) palloc(sizeof(void *) * in->nNodes);
 	out->nNodes = 0;
+
+	/*
+	 * Elements of traversalValues should be allocated in
+	 * traversalMemoryContext
+	 */
+	oldCtx = MemoryContextSwitchTo(in->traversalMemoryContext);
+
 	for (i = 1; i <= in->nNodes; i++)
 	{
 		if (which & (1 << i))
 		{
 			/* Save previous prefix if needed */
 			if (needPrevious)
-				out->reconstructedValues[out->nNodes] = in->prefixDatum;
-			out->nodeNumbers[out->nNodes++] = i - 1;
+			{
+				Datum		previousCentroid;
+
+				/*
+				 * We know, that in->prefixDatum in this place is varlena,
+				 * because it's range
+				 */
+				previousCentroid = datumCopy(in->prefixDatum, false, -1);
+				out->traversalValues[out->nNodes] = (void *) previousCentroid;
+			}
+			out->nodeNumbers[out->nNodes] = i - 1;
+			out->nNodes++;
 		}
 	}
+
+	MemoryContextSwitchTo(oldCtx);
 
 	PG_RETURN_VOID();
 }
@@ -911,7 +921,7 @@ spg_range_quad_leaf_consistent(PG_FUNCTION_ARGS)
 {
 	spgLeafConsistentIn *in = (spgLeafConsistentIn *) PG_GETARG_POINTER(0);
 	spgLeafConsistentOut *out = (spgLeafConsistentOut *) PG_GETARG_POINTER(1);
-	RangeType  *leafRange = DatumGetRangeType(in->leafDatum);
+	RangeType  *leafRange = DatumGetRangeTypeP(in->leafDatum);
 	TypeCacheEntry *typcache;
 	bool		res;
 	int			i;
@@ -935,35 +945,35 @@ spg_range_quad_leaf_consistent(PG_FUNCTION_ARGS)
 		{
 			case RANGESTRAT_BEFORE:
 				res = range_before_internal(typcache, leafRange,
-											DatumGetRangeType(keyDatum));
+											DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_OVERLEFT:
 				res = range_overleft_internal(typcache, leafRange,
-											  DatumGetRangeType(keyDatum));
+											  DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_OVERLAPS:
 				res = range_overlaps_internal(typcache, leafRange,
-											  DatumGetRangeType(keyDatum));
+											  DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_OVERRIGHT:
 				res = range_overright_internal(typcache, leafRange,
-											   DatumGetRangeType(keyDatum));
+											   DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_AFTER:
 				res = range_after_internal(typcache, leafRange,
-										   DatumGetRangeType(keyDatum));
+										   DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_ADJACENT:
 				res = range_adjacent_internal(typcache, leafRange,
-											  DatumGetRangeType(keyDatum));
+											  DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_CONTAINS:
 				res = range_contains_internal(typcache, leafRange,
-											  DatumGetRangeType(keyDatum));
+											  DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_CONTAINED_BY:
 				res = range_contained_by_internal(typcache, leafRange,
-												DatumGetRangeType(keyDatum));
+												  DatumGetRangeTypeP(keyDatum));
 				break;
 			case RANGESTRAT_CONTAINS_ELEM:
 				res = range_contains_elem_internal(typcache, leafRange,
@@ -971,7 +981,7 @@ spg_range_quad_leaf_consistent(PG_FUNCTION_ARGS)
 				break;
 			case RANGESTRAT_EQ:
 				res = range_eq_internal(typcache, leafRange,
-										DatumGetRangeType(keyDatum));
+										DatumGetRangeTypeP(keyDatum));
 				break;
 			default:
 				elog(ERROR, "unrecognized range strategy: %d",

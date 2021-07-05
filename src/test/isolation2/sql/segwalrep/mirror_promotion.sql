@@ -11,8 +11,6 @@
 -- between primary and mirror is still alive and hence walreceiver
 -- also exist during promotion.
 
-include: helpers/server_helpers.sql;
-
 SELECT role, preferred_role, content, mode, status FROM gp_segment_configuration;
 -- stop a primary in order to trigger a mirror promotion
 select pg_ctl((select datadir from gp_segment_configuration c
@@ -36,16 +34,7 @@ where content = 0;
 !\retcode gprecoverseg -aF --no-progress;
 
 -- loop while segments come in sync
-do $$
-begin /* in func */
-  for i in 1..120 loop /* in func */
-    if (select mode = 's' from gp_segment_configuration where content = 0 limit 1) then /* in func */
-      return; /* in func */
-    end if; /* in func */
-    perform gp_request_fts_probe_scan(); /* in func */
-  end loop; /* in func */
-end; /* in func */
-$$;
+select wait_until_all_segments_synchronized();
 
 -- expect: to see roles flipped and in sync
 select content, preferred_role, role, status, mode
@@ -53,9 +42,9 @@ from gp_segment_configuration
 where content = 0;
 
 -- set GUCs to speed-up the test
-!\retcode gpconfig -c gp_fts_probe_retries -v 2 --masteronly;
-!\retcode gpconfig -c gp_fts_probe_timeout -v 5 --masteronly;
-!\retcode gpstop -u;
+alter system set gp_fts_probe_retries to 2;
+alter system set gp_fts_probe_timeout to 5;
+select pg_reload_conf();
 
 -- start_ignore
 select dbid from gp_segment_configuration where content = 0 and role = 'p';
@@ -78,10 +67,10 @@ select content, preferred_role, role, status, mode
 from gp_segment_configuration
 where content = 0;
 
--- set GUCs to speed-up the test
-!\retcode gpconfig -r gp_fts_probe_retries --masteronly;
-!\retcode gpconfig -r gp_fts_probe_timeout --masteronly;
-!\retcode gpstop -u;
+-- reset GUCs
+alter system set gp_fts_probe_retries to default;
+alter system set gp_fts_probe_timeout to default;
+select pg_reload_conf();
 
 -- -- wait for content 0 (earlier mirror, now primary) to finish the promotion
 0U: select 1;
@@ -98,16 +87,7 @@ drop table mirror_promotion_tblspc_heap_table;
 drop tablespace mirror_promotion_tablespace;
 
 -- loop while segments come in sync
-do $$
-begin /* in func */
-  for i in 1..120 loop /* in func */
-    if (select mode = 's' from gp_segment_configuration where content = 0 limit 1) then /* in func */
-      return; /* in func */
-    end if; /* in func */
-    perform gp_request_fts_probe_scan(); /* in func */
-  end loop; /* in func */
-end; /* in func */
-$$;
+select wait_until_all_segments_synchronized();
 
 -- now, the content 0 primary and mirror should be at their preferred role
 -- and up and in-sync

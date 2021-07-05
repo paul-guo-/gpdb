@@ -20,6 +20,20 @@ SELECT rolresgroup FROM pg_authid WHERE rolname = 'rg_test_role_super';
 -------------
  6438        
 (1 row)
+ALTER ROLE rg_test_role_super NOSUPERUSER;
+ALTER
+SELECT rolresgroup FROM pg_authid WHERE rolname = 'rg_test_role_super';
+ rolresgroup 
+-------------
+ 6437        
+(1 row)
+ALTER ROLE rg_test_role_super SUPERUSER;
+ALTER
+SELECT rolresgroup FROM pg_authid WHERE rolname = 'rg_test_role_super';
+ rolresgroup 
+-------------
+ 6438        
+(1 row)
 
 ALTER ROLE rg_test_role RESOURCE GROUP none;
 ALTER
@@ -245,9 +259,9 @@ ERROR:  cpu_rate_limit range is [1, 100]
 CREATE RESOURCE GROUP rg_test_group WITH (cpu_rate_limit=10, memory_limit=-1);
 ERROR:  memory_limit range is [0, 100]
 CREATE RESOURCE GROUP rg_test_group WITH (cpu_rate_limit=10, memory_limit=0.9);
-ERROR:  invalid input syntax for integer: "0.9"
+ERROR:  invalid input syntax for type bigint: "0.9"
 CREATE RESOURCE GROUP rg_test_group WITH (cpu_rate_limit=10, memory_limit=1.9);
-ERROR:  invalid input syntax for integer: "1.9"
+ERROR:  invalid input syntax for type bigint: "1.9"
 -- negative: concurrency should be in [1, max_connections]
 CREATE RESOURCE GROUP rg_test_group WITH (concurrency=-1, cpu_rate_limit=10, memory_limit=10);
 ERROR:  concurrency range is [0, 'max_connections']
@@ -375,7 +389,7 @@ ERROR:  memory_spill_ratio requires a numeric value
 
 -- negative: memory_spill_ratio does not accept float values
 CREATE RESOURCE GROUP rg_test_group WITH (cpu_rate_limit=10, memory_limit=10, memory_spill_ratio=10.5);
-ERROR:  invalid input syntax for integer: "10.5"
+ERROR:  invalid input syntax for type bigint: "10.5"
 
 -- negative: when memory_limit is unlimited memory_spill_ratio must be set to 0
 CREATE RESOURCE GROUP rg_test_group WITH (cpu_rate_limit=10, memory_limit=0, memory_spill_ratio=10);

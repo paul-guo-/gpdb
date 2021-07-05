@@ -1,7 +1,7 @@
 /*
  * psql - the PostgreSQL interactive terminal
  *
- * Copyright (c) 2000-2015, PostgreSQL Global Development Group
+ * Copyright (c) 2000-2019, PostgreSQL Global Development Group
  *
  * src/bin/psql/settings.h
  */
@@ -10,8 +10,9 @@
 
 
 #include "variables.h"
-#include "print.h"
+#include "fe_utils/print.h"
 
+#define DEFAULT_CSV_FIELD_SEP ','
 #define DEFAULT_FIELD_SEP "|"
 #define DEFAULT_RECORD_SEP "\n"
 
@@ -86,10 +87,17 @@ typedef struct _psqlSettings
 
 	FILE	   *copyStream;		/* Stream to read/write for \copy command */
 
+	PGresult   *last_error_result;	/* most recent error result, if any */
+
 	printQueryOpt popt;
 
 	char	   *gfname;			/* one-shot file output argument for \g */
+	bool		g_expanded;		/* one-shot expanded output requested via \gx */
 	char	   *gset_prefix;	/* one-shot prefix argument for \gset */
+	bool		gdesc_flag;		/* one-shot request to describe query results */
+	bool		gexec_flag;		/* one-shot request to execute query results */
+	bool		crosstab_flag;	/* one-shot request to crosstab results */
+	char	   *ctv_args[4];	/* \crosstabview arguments */
 
 	bool		notty;			/* stdin or stdout is not a tty (as determined
 								 * on startup) */
@@ -119,7 +127,10 @@ typedef struct _psqlSettings
 	bool		quiet;
 	bool		singleline;
 	bool		singlestep;
+	bool		hide_tableam;
 	int			fetch_count;
+	int			histsize;
+	int			ignoreeof;
 	PSQL_ECHO	echo;
 	PSQL_ECHO_HIDDEN echo_hidden;
 	PSQL_ERROR_ROLLBACK on_error_rollback;
@@ -129,6 +140,7 @@ typedef struct _psqlSettings
 	const char *prompt2;
 	const char *prompt3;
 	PGVerbosity verbosity;		/* current error verbosity level */
+	PGContextVisibility show_context;	/* current context display level */
 } PsqlSettings;
 
 extern PsqlSettings pset;

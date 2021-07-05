@@ -50,13 +50,17 @@
           <li id="im16806f">
             <xref href="#topic10" type="topic" format="dita"/>
           </li>
+          <li><xref href="#topic_jlz_hzg_pkb" format="dita"/></li>
           <li id="im16806g">
             <xref href="#topic17" type="topic" format="dita"/>
           </li>
+        </ul></li>
           <li id="im16806h">
             <xref href="#topic22" type="topic" format="dita"/>
           </li>
-        </ul></li>
+      <li>
+        <xref href="#moverg" type="topic" format="dita"/>
+      </li>
       <li>
         <xref href="#topic777999" type="topic" format="dita"/>
       </li>
@@ -228,6 +232,14 @@
           </tbody>
         </tgroup>
       </table>
+      <p>
+        <note>For queries managed by resource groups that are configured to use the
+            <codeph>vmtracker</codeph> memory auditor, Greenplum Database supports the automatic
+          termination of queries based on the amount of memory the queries are using. See the server
+          configuration parameter <codeph><xref
+              href="../ref_guide/config_params/guc-list.xml#runaway_detector_activation_percent"
+              type="section"/></codeph>. </note>
+      </p>
     </body>
   </topic>
   <topic id="topic8339717179" xml:lang="en">
@@ -250,6 +262,12 @@
             href="../ref_guide/config_params/guc-list.xml#gp_resource_group_bypass" type="section"
             scope="peer">gp_resource_group_bypass</xref></codeph> to bypass a resource group
         concurrency limit.</p>
+      <p>You can set the server configuration parameter <codeph><xref
+            href="../ref_guide/config_params/guc-list.xml#gp_resource_group_queuing_timeout" type="section"
+            scope="peer">gp_resource_group_queuing_timeout</xref></codeph> to specify the
+         amount of time a transaction remains in the queue before Greenplum Database
+         cancels the transaction. The default timeout is zero, Greenplum queues
+         transactions indefinitely.</p>
     </body>
   </topic>
   <topic id="topic833971717" xml:lang="en">
@@ -345,17 +363,31 @@
               multiplied by 100, and</li>
             <li>The <codeph>gp_resource_group_cpu_limit</codeph> value.</li>
           </ul></p>
-        <p>CPU resource assignment for resource groups configured with a
-            <codeph>CPU_RATE_LIMIT</codeph> is elastic in that Greenplum Database may allocate the
-          CPU resources of an idle resource group to a busier one(s). In such situations, CPU
-          resources are re-allocated to the previously idle resource group when that resource group
-          next becomes active. If multiple resource groups are busy, they are allocated the CPU
-          resources of any idle resource groups based on the ratio of their
-            <codeph>CPU_RATE_LIMIT</codeph>s. For example, a resource group created with a
-            <codeph>CPU_RATE_LIMIT</codeph> of 40 will be allocated twice as much extra CPU resource
-          as a resource group that you create with a <codeph>CPU_RATE_LIMIT</codeph> of 20.</p>
         <p>When you configure <codeph>CPU_RATE_LIMIT</codeph> for a resource group, Greenplum
           Database disables <codeph>CPUSET</codeph> for the group and sets the value to -1.</p>
+        <p>There are two different ways of assigning CPU resources by percentage, determined by the
+          value of the configuration parameter
+            <codeph>gp_resource_group_cpu_ceiling_enforcement</codeph>:</p>
+        <section>
+          <title>Elastic mode</title>
+          <p>This mode is active when <codeph>gp_resource_group_cpu_ceiling_enforcement</codeph> is
+            set to <codeph>false</codeph> (default). It is elastic in that Greenplum Database may
+            allocate the CPU resources of an idle resource group to a busier one(s). In such
+            situations, CPU resources are re-allocated to the previously idle resource group when
+            that resource group next becomes active. If multiple resource groups are busy, they are
+            allocated the CPU resources of any idle resource groups based on the ratio of their
+              <codeph>CPU_RATE_LIMIT</codeph>s. For example, a resource group created with a
+              <codeph>CPU_RATE_LIMIT</codeph> of 40 will be allocated twice as much extra CPU
+            resource as a resource group that you create with a <codeph>CPU_RATE_LIMIT</codeph> of
+            20.</p>
+        </section>
+        <section>
+          <title>Ceiling Enforcement mode</title>
+          <p>This mode is active when <codeph>gp_resource_group_cpu_ceiling_enforcement</codeph> is
+            set to <codeph>true</codeph>. The resource group is enforced to not use more CPU
+            resources than the defined value <codeph>CPU_RATE_LIMIT</codeph>, avoiding the use of
+            the CPU burst feature.</p>
+        </section>
       </body>
     </topic>
   </topic>
@@ -536,7 +568,7 @@ SET statement_mem='10 MB';</codeblock></p>
   <topic id="topic999" otherprops="pivotal" xml:lang="en">
     <title>Using Greenplum Command Center to Manage Resource Groups</title>
     <body>
-      <p>Using Pivotal Greenplum Command Center, an administrator can create and manage resource
+      <p>Using Tanzu Greenplum Command Center, an administrator can create and manage resource
         groups, change roles' resource groups, and create workload management rules. </p>
       <p>Workload management assignment rules assign transactions to different resource groups based
         on user-defined criteria. If no assignment rule is matched, Greenplum Database assigns the
@@ -547,7 +579,7 @@ SET statement_mem='10 MB';</codeblock></p>
     </body>
   </topic>
   <topic id="topic71717999" xml:lang="en">
-    <title>Using Resource Groups</title>
+    <title>Configuring and Using Resource Groups</title>
     <body>
       <note type="important">Significant Greenplum Database performance degradation has been
         observed when enabling resource group-based workload management on RedHat 6.x and CentOS 6.x
@@ -822,6 +854,24 @@ gpstart
       </p>
     </body>
   </topic>
+  <topic id="topic_jlz_hzg_pkb">
+    <title>Configuring Automatic Query Termination Based on Memory Usage</title>
+    <body>
+      <p>When resource groups have a global shared memory pool, the server configuration parameter
+            <codeph><xref
+            href="../ref_guide/config_params/guc-list.xml#runaway_detector_activation_percent"
+            type="section"/></codeph> sets the percent of utilized global shared memory that
+        triggers the termination of queries that are managed by resource groups that are configured
+        to use the <codeph>vmtracker</codeph> memory auditor, such as <codeph>admin_group</codeph>
+        and <codeph>default_group</codeph>. </p>
+      <p>Resource groups have a global shared memory pool when the sum of the
+          <codeph>MEMORY_LIMIT</codeph> attribute values configured for all resource groups is less
+        than 100. For example, if you have 3 resource groups configured with
+          <codeph>MEMORY_LIMIT</codeph> values of 10 , 20, and 30, then global shared memory is 40%
+        = 100% - (10% + 20% + 30%). </p>
+      <p>For information about global shared memory, see <xref href="#topic833glob"/>.</p>
+    </body>
+  </topic>
   <topic id="topic17" xml:lang="en">
     <title id="iz172210">Assigning a Resource Group to a Role</title>
     <body>
@@ -983,7 +1033,14 @@ gpstart
           queue but has not yet been executed. Or, you may want to stop a running query that is
           taking too long to execute, or one that is sitting idle in a transaction and taking up
           resource group transaction slots that are needed by other users.</p>
-        <p>To cancel a running or queued transaction, you must first determine the process id (pid)
+        <p>By default, transactions can remain queued in a resource group indefinitely.
+          If you want Greenplum Database to cancel a queued transaction after a
+          specific amount of time, set the server configuration parameter <codeph><xref
+            href="../ref_guide/config_params/guc-list.xml#gp_resource_group_queuing_timeout" type="section"
+            scope="peer">gp_resource_group_queuing_timeout</xref></codeph>. When this
+          parameter is set to a value (milliseconds) greater than 0, Greenplum cancels
+          any queued transaction when it has waited longer than the configured timeout.</p>
+        <p>To manually cancel a running or queued transaction, you must first determine the process id (pid)
           associated with the transaction. Once you have obtained the process id, you can invoke
             <codeph>pg_cancel_backend()</codeph> to end that process, as shown below.</p>
         <p>For example, to view the process information associated with all statements currently
@@ -1016,6 +1073,52 @@ gpstart
         </note>
       </body>
     </topic>
+  </topic>
+  <topic id="moverg" xml:lang="en">
+    <title>Moving a Query to a Different Resource Group</title>
+    <body>
+      <p>A user with Greenplum Database superuser privileges can run the
+        <codeph>gp_toolkit.pg_resgroup_move_query()</codeph> function to move a
+        running query from one resource group to another, without stopping the
+        query. Use this function to expedite a long-running query by moving it to
+        a resource group with a higher resource allotment or availability.</p>
+      <note>You can move only an active or running query to a new resource group.
+        You cannot move a queued or pending query that is in an idle state due to
+        concurrency or memory limits.</note>
+      <p><codeph>pg_resgroup_move_query()</codeph> requires the process id
+        (pid) of the running query, as well as the name of the resource group
+        to which you want to move the query. The signature of the function follows:</p>
+      <codeblock>pg_resgroup_move_query( pid int4, group_name text );</codeblock>
+      <p>You can obtain the pid of a running query from the
+        <codeph>pg_stat_activity</codeph> system view as described in
+        <xref href="#topic27" type="topic" format="dita"/>. Use the
+        <codeph>gp_toolkit.gp_resgroup_status</codeph> view to list the name, id,
+        and status of each resource group.</p>
+      <p>When you invoke <codeph>pg_resgroup_move_query()</codeph>, the query is
+        subject to the limits configured for the destination resource group:</p>
+      <ul>
+        <li>If the group has already reached its concurrent task limit,
+          Greenplum Database queues the query until a slot opens.</li>
+        <li>If the destination resource group does not have enough memory
+          available to service the query's current memory requirements,
+          Greenplum Database returns the error: 
+          <codeph>group &lt;group_name> doesn't have enough memory ...</codeph>.
+          In this situation, you may choose to increase the group shared memory
+          allotted to the destination resource group, or perhaps wait a period
+          of time for running queries to complete and then invoke the function
+          again.</li>
+      </ul>
+      <p>After Greenplum moves the query, there is no way to guarantee that a
+        query currently running in the destination resource group does not
+        exceed the group memory quota. In this situation, one or more running
+        queries in the destination group may fail, including the moved query.
+        Reserve enough resource group global shared memory to minimize the
+        potential for this scenario to occur.</p>
+      <p><codeph>pg_resgroup_move_query()</codeph> moves only the specified
+        query to the destination resource group. Greenplum Database assigns
+        subsequent queries that you submit in the session to the original
+        resource group.</p>
+    </body>
   </topic>
   <topic id="topic777999" xml:lang="en">
     <title>Resource Group Frequently Asked Questions</title>

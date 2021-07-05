@@ -3,7 +3,7 @@
  * cdbdistributedsnapshot.c
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -28,9 +28,6 @@
  *		Is the given XID still-in-progress according to the
  *      distributed snapshot?  Or, is the transaction strictly local
  *      and needs to be tested with the local snapshot?
- *
- * The caller should've checked that the XID is committed (in clog),
- * otherwise the result of this function is undefined.
  */
 DistributedSnapshotCommitted
 DistributedSnapshotWithLocalMapping_CommittedTest(
@@ -85,7 +82,6 @@ DistributedSnapshotWithLocalMapping_CommittedTest(
 	 * Is this local xid in a process-local cache we maintain?
 	 */
 	if (LocalDistribXactCache_CommittedFind(localXid,
-											ds->distribTransactionTimeStamp,
 											&distribXid))
 	{
 		/*
@@ -102,27 +98,15 @@ DistributedSnapshotWithLocalMapping_CommittedTest(
 	}
 	else
 	{
-		DistributedTransactionTimeStamp checkDistribTimeStamp;
-
 		/*
 		 * Ok, now we must consult the distributed log.
 		 */
-		if (DistributedLog_CommittedCheck(localXid,
-										  &checkDistribTimeStamp,
-										  &distribXid))
+		if (DistributedLog_CommittedCheck(localXid, &distribXid))
 		{
 			/*
 			 * We found it in the distributed log.
 			 */
-			Assert(checkDistribTimeStamp != 0);
 			Assert(distribXid != InvalidDistributedTransactionId);
-
-			/*
-			 * Committed distributed transactions from other DTM starts are
-			 * weeded out.
-			 */
-			if (checkDistribTimeStamp != ds->distribTransactionTimeStamp)
-				return DISTRIBUTEDSNAPSHOT_COMMITTED_IGNORE;
 
 			/*
 			 * We have a distributed committed xid that corresponds to the
@@ -133,23 +117,17 @@ DistributedSnapshotWithLocalMapping_CommittedTest(
 			/*
 			 * Since we did not find it in our process local cache, add it.
 			 */
-			LocalDistribXactCache_AddCommitted(
-											   localXid,
-											   ds->distribTransactionTimeStamp,
+			LocalDistribXactCache_AddCommitted(localXid,
 											   distribXid);
 		}
 		else
 		{
 			/*
-			 * Since the local xid is committed (as determined by the
-			 * visibility routine) and distributedlog doesn't know of the
-			 * transaction, it must be local-only.
+			 * The distributedlog doesn't know of the transaction. It can be
+			 * local-only, or still in-progress. The caller will proceed to do
+			 * a local visibility check, which will determine which it is.
 			 */
-			LocalDistribXactCache_AddCommitted(localXid,
-											   ds->distribTransactionTimeStamp,
-											    /* distribXid */ InvalidDistributedTransactionId);
-
-			return DISTRIBUTEDSNAPSHOT_COMMITTED_IGNORE;
+			return DISTRIBUTEDSNAPSHOT_COMMITTED_UNKNOWN;
 		}
 	}
 
@@ -177,12 +155,12 @@ DistributedSnapshotWithLocalMapping_CommittedTest(
 
 	/*
 	 * Any xid >= xmax is in-progress, distributed xmax points to the
-	 * latestCompletedDxid + 1.
+	 * latestCompletedGxid + 1.
 	 */
 	if (distribXid >= ds->xmax)
 	{
 		elog((Debug_print_snapshot_dtm ? LOG : DEBUG5),
-			 "distributedsnapshot committed but invisible: distribXid %d dxmax %d dxmin %d distribSnapshotId %d",
+			 "distributedsnapshot committed but invisible: distribXid "UINT64_FORMAT" dxmax "UINT64_FORMAT" dxmin "UINT64_FORMAT" distribSnapshotId %d",
 			 distribXid, ds->xmax, ds->xmin, ds->distribSnapshotId);
 
 		return DISTRIBUTEDSNAPSHOT_COMMITTED_INPROGRESS;
@@ -242,7 +220,6 @@ DistributedSnapshotWithLocalMapping_CommittedTest(
 void
 DistributedSnapshot_Reset(DistributedSnapshot *distributedSnapshot)
 {
-	distributedSnapshot->distribTransactionTimeStamp = 0;
 	distributedSnapshot->xminAllDistributedSnapshots = InvalidDistributedTransactionId;
 	distributedSnapshot->distribSnapshotId = 0;
 	distributedSnapshot->xmin = InvalidDistributedTransactionId;
@@ -281,7 +258,6 @@ DistributedSnapshot_Copy(DistributedSnapshot *target,
 		 source->count,
 		 source->inProgressXidArray);
 
-	target->distribTransactionTimeStamp = source->distribTransactionTimeStamp;
 	target->xminAllDistributedSnapshots = source->xminAllDistributedSnapshots;
 	target->distribSnapshotId = source->distribSnapshotId;
 	target->xmin = source->xmin;
@@ -310,8 +286,7 @@ DistributedSnapshot_Copy(DistributedSnapshot *target,
 int
 DistributedSnapshot_SerializeSize(DistributedSnapshot *ds)
 {
-	return sizeof(DistributedTransactionTimeStamp) +
-		sizeof(DistributedSnapshotId) +
+	return sizeof(DistributedSnapshotId) +
 	/* xminAllDistributedSnapshots, xmin, xmax */
 		3 * sizeof(DistributedTransactionId) +
 	/* count */
@@ -325,8 +300,6 @@ DistributedSnapshot_Serialize(DistributedSnapshot *ds, char *buf)
 {
 	char	   *p = buf;
 
-	memcpy(p, &ds->distribTransactionTimeStamp, sizeof(DistributedTransactionTimeStamp));
-	p += sizeof(DistributedTransactionTimeStamp);
 	memcpy(p, &ds->xminAllDistributedSnapshots, sizeof(DistributedTransactionId));
 	p += sizeof(DistributedTransactionId);
 	memcpy(p, &ds->distribSnapshotId, sizeof(DistributedSnapshotId));
@@ -351,8 +324,6 @@ DistributedSnapshot_Deserialize(const char *buf, DistributedSnapshot *ds)
 {
 	const char *p = buf;
 
-	memcpy(&ds->distribTransactionTimeStamp, p, sizeof(DistributedTransactionTimeStamp));
-	p += sizeof(DistributedTransactionTimeStamp);
 	memcpy(&ds->xminAllDistributedSnapshots, p, sizeof(DistributedTransactionId));
 	p += sizeof(DistributedTransactionId);
 	memcpy(&ds->distribSnapshotId, p, sizeof(DistributedSnapshotId));

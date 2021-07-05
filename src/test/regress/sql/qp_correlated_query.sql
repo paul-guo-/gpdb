@@ -183,7 +183,6 @@ select A.i from A where A.i = all (select B.i from B where A.i = B.i) order by A
 
 select * from A,B where exists (select * from C where C.j = A.j and B.i = all (select min(C.j) from C)) order by 1,2,3,4;
 select * from A,B where exists (select * from C where C.j = A.j and B.i = all (select min(C.j) from C where C.j = 1)) order by 1,2,3,4;
--- Planner should fail due to skip-level correlation not supported. ORCA should pass
 select * from A,B where exists (select * from C where C.j = A.j and B.i = all (select min(C.j) from C where C.j = B.j)) order by 1,2,3,4;
 explain select A.i, B.i, C.j from A, B, C where A.j = (select sum(C.j) from C where C.j = A.j and C.i = all (select B.i from B where C.i = B.i and B.i !=10)) order by A.i, B.i, C.j limit 10;
 select A.i, B.i, C.j from A, B, C where A.j = (select sum(C.j) from C where C.j = A.j and C.i = all (select B.i from B where C.i = B.i and B.i !=10)) order by A.i, B.i, C.j limit 10;
@@ -211,11 +210,9 @@ with t as (select * from qp_csq_t2) select b from qp_csq_t1 where exists(select 
 
 select * from A where exists (select * from C where C.j = A.j) order by 1,2;
 select * from A where exists (select * from C,B where C.j = A.j and exists (select * from C where C.i = B.i)) order by 1,2;
--- Planner should fail due to skip-level correlation not supported. ORCA should pass
 select * from A,B where exists (select * from C where C.j = A.j and exists (select * from C where C.i = B.i));
 
 select * from A where exists (select * from B, C where C.j = A.j and exists (select sum(C.i) from C where C.i != 10 and C.i = B.i)) order by 1, 2;
--- Planner should fail due to skip-level correlation not supported. ORCA should pass
 select * from A where exists (select * from C where C.j = A.j and exists (select sum(C.i) from C where C.i !=10 and C.i = A.i)) order by 1, 2;
 
 select A.i, B.i, C.j from A, B, C where A.j = (select C.j from C where C.j = A.j and exists (select B.i from B where C.i = B.i and B.i !=10)) order by A.i, B.i, C.j limit 20;
@@ -224,7 +221,6 @@ select A.i, B.i, C.j from A, B, C where exists (select C.j from C where C.j = A.
 select * from A where exists (select * from C where C.j = A.j and not exists (select sum(B.i) from B where B.i = C.i));
 
 select * from A where exists (select * from C where C.i = A.i and exists (select * from B where C.j = B.j and B.j < 10)) order by 1,2;
--- Planner should fail due to skip-level correlation not supported. ORCA should pass
 select * from A where exists (select * from C where C.i = A.i and exists (select * from B where C.j = B.j and A.j < 10));
 select * from A where exists (select * from C where C.i = A.i and not exists (select * from B where C.j = B.j and B.j < 10)) order by 1,2;
 
@@ -667,6 +663,9 @@ CREATE TABLE qp_tab3(e int, f int);
 INSERT INTO qp_tab1 VALUES (1,2);
 INSERT INTO qp_tab2 VALUES (3,4);
 INSERT INTO qp_tab3 VALUES (4,5);
+ANALYZE qp_tab1;
+ANALYZE qp_tab2;
+ANALYZE qp_tab3;
 
 EXPLAIN SELECT a FROM qp_tab1 f1 LEFT JOIN qp_tab2 on a=c WHERE NOT EXISTS(SELECT 1 FROM qp_tab1 f2 WHERE f1.a = f2.a);
 
@@ -680,6 +679,8 @@ CREATE TABLE qp_non_eq_a (i int, f float8);
 CREATE TABLE qp_non_eq_b (i int, f float8);
 INSERT INTO qp_non_eq_a VALUES (1, '0'), (2, '-0');
 INSERT INTO qp_non_eq_b VALUES (3, '0'), (1, '-0');
+ANALYZE qp_non_eq_a;
+ANALYZE qp_non_eq_b;
 
 EXPLAIN SELECT * FROM qp_non_eq_a, qp_non_eq_b WHERE qp_non_eq_a.f = qp_non_eq_b.f AND qp_non_eq_a.f::text <> '-0';
 SELECT * FROM qp_non_eq_a, qp_non_eq_b WHERE qp_non_eq_a.f = qp_non_eq_b.f AND qp_non_eq_a.f::text <> '-0';
@@ -703,6 +704,7 @@ CREATE TABLE qp_nl_tab1 (c1 int, c2 int);
 CREATE TABLE qp_nl_tab2 (c1 int, c2 int);
 INSERT INTO qp_nl_tab1 values (1, 0), (1, 1);
 INSERT INTO qp_nl_tab2 values (1, 1), (1, 1);
+ANALYZE qp_nl_tab2;
 VACUUM qp_nl_tab2;
 SELECT * FROM qp_nl_tab1 t1 WHERE t1.c1 + 5 > ANY(SELECT t2.c2 FROM qp_nl_tab2 t2, generate_series(1, 1) i WHERE i = t1.c2 LIMIT 1);
 

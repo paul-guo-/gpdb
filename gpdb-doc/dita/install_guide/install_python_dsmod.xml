@@ -8,7 +8,7 @@
       used with the Greenplum Database PL/Python language. You can download these modules in
         <codeph>.gppkg</codeph> format from <xref
         href="https://network.pivotal.io/products/pivotal-gpdb" format="html" scope="external"
-        >Pivotal Network</xref>.</p>
+        >VMware Tanzu Network</xref>.</p>
     <p>This section contains the following information:</p>
     <ul>
       <li id="pw22228177">
@@ -22,13 +22,15 @@
       </li>
     </ul>
     <p>For information about the Greenplum Database PL/Python Language, see <xref scope="peer"
-        type="topic" format="dita" href="../ref_guide/extensions/pl_python.xml#topic1">Greenplum
-        PL/Python Language Extension</xref>.</p>
+        type="topic" format="dita" href="../analytics/pl_python.xml#topic1">Greenplum PL/Python
+        Language Extension</xref>.</p>
   </body>
   <topic id="topic_pydatascimod">
     <title>Python Data Science Modules</title>
     <body>
-      <p>Modules provided in the Python Data Science package include: <table id="iq1395577">
+      <p>Modules provided in the Python Data Science package are listed below.</p>
+      <p> Packages required for Deep Learning features of MADlib are now included. Note that it is
+        not supported for RHEL 6.<table id="iq1395577">
           <title>Data Science Modules</title>
           <tgroup cols="2">
             <colspec colnum="1" colname="col1" colwidth="1*"/>
@@ -138,8 +140,12 @@
                   3</entry>
               </row>
               <row>
-                <entry colname="col1"> Gensim </entry>
+                <entry colname="col1">Gensim </entry>
                 <entry colname="col2">Topic modeling and document indexing</entry>
+              </row>
+              <row>
+                <entry>GluonTS (Python 3 only)</entry>
+                <entry>Probabilistic time series modeling</entry>
               </row>
               <row>
                 <entry>h5py</entry>
@@ -170,7 +176,7 @@
                 <entry>JSON Schema validation</entry>
               </row>
               <row>
-                <entry colname="col1"> Keras (RHEL/CentOS 7 only) </entry>
+                <entry colname="col1">Keras (RHEL/CentOS 7 only) </entry>
                 <entry colname="col2">Deep learning</entry>
               </row>
               <row>
@@ -187,11 +193,11 @@
                 <entry>A fast implementation of the Cassowary constraint solver</entry>
               </row>
               <row>
-                <entry colname="col1"> Lifelines </entry>
+                <entry colname="col1">Lifelines </entry>
                 <entry colname="col2">Survival analysis</entry>
               </row>
               <row>
-                <entry colname="col1"> lxml </entry>
+                <entry colname="col1">lxml </entry>
                 <entry colname="col2">XML and HTML processing</entry>
               </row>
               <row>
@@ -223,7 +229,7 @@
                 <entry>Fast numerical expression evaluator for NumPy</entry>
               </row>
               <row>
-                <entry colname="col1"> NumPy </entry>
+                <entry colname="col1">NumPy </entry>
                 <entry colname="col2">Scientific computing</entry>
               </row>
               <row>
@@ -244,7 +250,7 @@
                   matrices</entry>
               </row>
               <row>
-                <entry colname="col1"> Pattern-en </entry>
+                <entry colname="col1">Pattern-en </entry>
                 <entry colname="col2">Part-of-speech tagging</entry>
               </row>
               <row>
@@ -272,11 +278,11 @@
                 <entry>Cross-python path, ini-parsing, io, code, log facilities</entry>
               </row>
               <row>
-                <entry colname="col1"> pyLDAvis </entry>
+                <entry colname="col1">pyLDAvis </entry>
                 <entry colname="col2">Interactive topic model visualization</entry>
               </row>
               <row>
-                <entry colname="col1"> PyMC3 </entry>
+                <entry colname="col1">PyMC3 </entry>
                 <entry colname="col2">Statistical modeling and probabilistic machine
                   learning</entry>
               </row>
@@ -313,11 +319,11 @@
                 <entry>Directory iteration function</entry>
               </row>
               <row>
-                <entry colname="col1"> scikit-learn </entry>
+                <entry colname="col1">scikit-learn </entry>
                 <entry colname="col2">Machine learning data mining and analysis</entry>
               </row>
               <row>
-                <entry colname="col1"> SciPy </entry>
+                <entry colname="col1">SciPy </entry>
                 <entry colname="col2">Scientific computing</entry>
               </row>
               <row>
@@ -334,7 +340,7 @@
                   forth)</entry>
               </row>
               <row>
-                <entry colname="col1"> spaCy </entry>
+                <entry colname="col1">spaCy </entry>
                 <entry colname="col2">Large scale natural language processing</entry>
               </row>
               <row>
@@ -342,7 +348,7 @@
                 <entry>Modern high-performance serialization utilities for Python</entry>
               </row>
               <row>
-                <entry colname="col1"> StatsModels </entry>
+                <entry colname="col1">StatsModels </entry>
                 <entry colname="col2">Statistical modeling</entry>
               </row>
               <row>
@@ -350,7 +356,7 @@
                 <entry>Backport of the subprocess module from Python 3</entry>
               </row>
               <row>
-                <entry colname="col1"> Tensorflow (RHEL/CentOS 7 only) </entry>
+                <entry colname="col1">Tensorflow (RHEL/CentOS 7 only) </entry>
                 <entry colname="col2">Numerical computation using data flow graphs</entry>
               </row>
               <row>
@@ -387,7 +393,7 @@
                 <entry>A built-package format for Python</entry>
               </row>
               <row>
-                <entry colname="col1"> XGBoost </entry>
+                <entry colname="col1">XGBoost </entry>
                 <entry colname="col2">Gradient boosting, classifying, ranking </entry>
               </row>
               <row>
@@ -408,13 +414,13 @@
         are set.</p>
       <note>The <codeph>PyMC3</codeph> module depends on <codeph>Tk</codeph>. If you want to use
           <codeph>PyMC3</codeph>, you must install the <codeph>tk</codeph> OS package on every node
-        in your cluster. For example: <codeblock>$ yum install tk
+        in your cluster. For example: <codeblock>$ sudo yum install tk
 </codeblock></note>
       <ol>
         <li>Locate the Python Data Science module package that you built or downloaded.<p>The file
             name format of the package is
               <codeph>DataSciencePython-&lt;version&gt;-relhel&lt;N&gt;-x86_64.gppkg</codeph>.</p></li>
-        <li>Copy the package to the Greenplum Database master host.</li>
+        <li>Copy the package to the Greenplum Database coordinator host.</li>
         <li>Use the <codeph>gppkg</codeph> command to install the package. For
               example:<codeblock>$ gppkg -i DataSciencePython-&lt;version&gt;-relhel&lt;N&gt;_x86_64.gppkg</codeblock><p><codeph>gppkg</codeph>
             installs the Python Data Science modules on all nodes in your Greenplum Database

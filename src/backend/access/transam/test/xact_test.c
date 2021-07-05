@@ -68,7 +68,7 @@ test_TransactionIdIsCurrentTransactionIdInternal(void **state)
 
 		s = (TransactionState)
 				MemoryContextAllocZero(TopTransactionContext, sizeof(TransactionStateData));
-		s->transactionId = i;
+		s->fullTransactionId.value = i;
 		s->parent = p;
 		s->nestingLevel = p->nestingLevel + 1;
 
@@ -141,7 +141,7 @@ test_TransactionIdIsCurrentTransactionIdInternal(void **state)
 static void
 helper_ExpectLWLock()
 {
-	expect_any(LWLockAcquire, l);
+	expect_any(LWLockAcquire, lock);
 	expect_value(LWLockAcquire, mode, LW_SHARED);
 	will_return(LWLockAcquire, true);
 	expect_any(LWLockRelease, lock);

@@ -39,7 +39,7 @@ You can install the most recent Jinja2 version using easy_install or pip:
 
 ```
 easy_install Jinja2
-pip install Jinja2
+pip3 install Jinja2
 ```
 
 For in-depth information, please refer to it's documentation.
@@ -77,7 +77,7 @@ all jobs accounted for
   Generate Pipeline type: .. : prod
   Pipeline file ............ : gpdb_master-generated.yml
   Template file ............ : gpdb-tpl.yml
-  OS Types ................. : ['centos6', 'centos7', 'aix7', 'win']
+  OS Types ................. : ['centos6', 'centos7', 'win']
   Test sections ............ : ['ICW', 'CS', 'MPP', 'MM', 'DPM', 'UD', 'FileRep']
   test_trigger ............. : True
 ======================================================================
@@ -89,14 +89,20 @@ fly -t gpdb-prod \
     -p gpdb_master \
     -c gpdb_master-generated.yml \
     -l ~/workspace/gp-continuous-integration/secrets/gpdb_common-ci-secrets.yml \
-    -l ~/workspace/gp-continuous-integration/secrets/gpdb_master-ci-secrets.prod.yml
+    -l ~/workspace/gp-continuous-integration/secrets/gpdb_master-ci-secrets.prod.yml \
+    -v gpdb-git-remote=https://github.com/greenplum-db/gpdb.git \
+    -v gpdb-git-branch=master \
+    -v pipeline-name=gpdb_master
 
 fly -t gpdb-prod \
     set-pipeline \
     -p gpdb_master_without_asserts \
     -c gpdb_master-generated.yml \
     -l ~/workspace/gp-continuous-integration/secrets/gpdb_common-ci-secrets.yml \
-    -l ~/workspace/gp-continuous-integration/secrets/gpdb_master_without_asserts-ci-secrets.yml
+    -l ~/workspace/gp-continuous-integration/secrets/gpdb_master_without_asserts-ci-secrets.yml \
+    -v gpdb-git-remote=https://github.com/greenplum-db/gpdb.git \
+    -v gpdb-git-branch=master \
+    -v pipeline-name=gpdb_master_without_asserts
 ```
 
 The generated pipeline file `gpdb_master-generated.yml` will be set,
@@ -107,13 +113,13 @@ template) to the source repository.
 
 As an example of generating a pipeline with a targeted test subset,
 the following can be used to generate a pipeline with supporting
-builds (default: centos6 platform) and `CLI` only jobs.
+builds (default: centos7 platform) and `CLI` only jobs.
 
 The generated pipeline and helper `fly` command are intended encourage
 engineers to set the pipeline with a team-name-string (-t) and engineer
 (-u) identifiable names.
 
-NOTE: The majority of jobs are only available for the `centos6`
+NOTE: The majority of jobs are only available for the `centos7`
       platform.
 
 ```
@@ -123,7 +129,7 @@ $ ./gen_pipeline.py -t dpm -u curry -a CLI
   Generate Pipeline type: .. : dpm
   Pipeline file ............ : gpdb-dpm-curry.yml
   Template file ............ : gpdb-tpl.yml
-  OS Types ................. : ['centos6']
+  OS Types ................. : ['centos7']
   Test sections ............ : ['CLI']
   test_trigger ............. : True
 ======================================================================
@@ -142,16 +148,16 @@ fly -t gpdb-dev \
 ```
 
 Use the following to generate a pipeline with `ICW` and `CS` test jobs
-for `centos6` and `ubuntu18.04` platforms.
+for `centos7` and `ubuntu18.04` platforms.
 
 ```
-$ ./gen_pipeline.py -t cs -u durant -O {centos6,ubuntu18.04} -a {ICW,CS}
+$ ./gen_pipeline.py -t cs -u durant -O {centos7,ubuntu18.04} -a {ICW,CS}
 
 ======================================================================
   Generate Pipeline type: .. : cs
   Pipeline file ............ : gpdb-cs-durant.yml
   Template file ............ : gpdb-tpl.yml
-  OS Types ................. : ['centos6', 'ubuntu18.04']
+  OS Types ................. : ['centos7', 'ubuntu18.04']
   Test sections ............ : ['ICW', 'CS']
   test_trigger ............. : True
 ======================================================================

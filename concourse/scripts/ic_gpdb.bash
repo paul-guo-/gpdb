@@ -29,12 +29,9 @@ function gen_env(){
 		    exit 1
 		}
 		source /usr/local/greenplum-db-devel/greenplum_path.sh
-		if [ -f /opt/gcc_env.sh ]; then
-		    source /opt/gcc_env.sh
-		fi
 		cd "\${1}/gpdb_src"
 		source gpAux/gpdemo/gpdemo-env.sh
-		make -s ${MAKE_TEST_COMMAND}
+		PG_TEST_EXTRA="kerberos ssl" make -s ${MAKE_TEST_COMMAND}
 	EOF
 
 	chmod a+x /opt/run_test.sh
@@ -56,7 +53,7 @@ function _main() {
     fi
 
     case "${TEST_OS}" in
-    centos|ubuntu) ;; #Valid
+    centos|ubuntu|sles) ;; #Valid
     *)
       echo "FATAL: TEST_OS is set to an invalid value: $TEST_OS"
       echo "Configure TEST_OS to be centos, or ubuntu"

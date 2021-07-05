@@ -197,15 +197,14 @@ select * from update_pk_test order by 1,2;
 (1 row)
 
 explain update update_pk_test set a = 5;
-                                       QUERY PLAN                                        
------------------------------------------------------------------------------------------
- Update on update_pk_test  (cost=0.00..1.01 rows=1 width=14)
-   ->  Redistribute Motion 3:3  (slice1; segments: 3)  (cost=0.00..1.01 rows=1 width=14)
-         Hash Key: a
-         ->  Split  (cost=0.00..1.01 rows=1 width=14)
-               ->  Seq Scan on update_pk_test  (cost=0.00..1.01 rows=1 width=14)
+                                            QUERY PLAN                                            
+--------------------------------------------------------------------------------------------------
+ Update on update_pk_test  (cost=0.00..1.05 rows=1 width=22)
+   ->  Explicit Redistribute Motion 3:3  (slice1; segments: 3)  (cost=0.00..1.05 rows=1 width=22)
+         ->  Split  (cost=0.00..1.01 rows=1 width=22)
+               ->  Seq Scan on update_pk_test  (cost=0.00..1.01 rows=1 width=22)
  Optimizer: Postgres query optimizer
-(6 rows)
+(5 rows)
 
 update update_pk_test set a = 5;
 select * from update_pk_test order by 1,2;
@@ -293,37 +292,3 @@ select * from execinsert_test;
 (1 row)
 
 drop table execinsert_test;
---
--- Test RETURNING on a table with OIDs.
---
--- See https://github.com/greenplum-db/gpdb/issues/8765
--- This was also coincidentally covered by the upstream tests in
--- 'rowsecurity', but better to have an explicit test.
---
-CREATE TABLE tabwithoids (a int, b text) WITH OIDS;
-NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause -- Using column named 'a' as the Greenplum Database data distribution key for this table.
-NOTICE:  OIDS=TRUE is not recommended for user-created tables
-insert into tabwithoids values (1, 'foo') RETURNING oid > 1000, tabwithoids;
- ?column? | tabwithoids 
-----------+-------------
- t        | (1,foo)
-(1 row)
-
-update tabwithoids set b = 'foobar' RETURNING oid > 1000, tabwithoids;
- ?column? | tabwithoids 
-----------+-------------
- t        | (1,foobar)
-(1 row)
-
-update tabwithoids set a = a + 1 RETURNING oid > 1000, tabwithoids; -- split update
- ?column? | tabwithoids 
-----------+-------------
- t        | (2,foobar)
-(1 row)
-
-delete from tabwithoids RETURNING oid > 1000, tabwithoids;
- ?column? | tabwithoids 
-----------+-------------
- t        | (2,foobar)
-(1 row)
-

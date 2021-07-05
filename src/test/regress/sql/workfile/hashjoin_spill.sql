@@ -9,7 +9,8 @@ create schema hashjoin_spill;
 set search_path to hashjoin_spill;
 
 -- start_ignore
-create language plpythonu;
+create language plpython3u;
+select disable_xform('CXformLeftJoin2RightJoin'); -- disable right join in orca to force left join spilling
 -- end_ignore
 
 -- set workfile is created to true if all segment did it.
@@ -26,14 +27,14 @@ result = []
 for i in range(len(rv)):
     cur_line = rv[i]['QUERY PLAN']
     if search_text.lower() in cur_line.lower():
-        p = re.compile('.+\((segment [\d]+).+ Workfile: \(([\d+]) spilling\)')
+        p = re.compile('.+\((segment \d+).+ Workfile: \((\d+) spilling\)')
         m = p.match(cur_line)
         workfile_created = int(m.group(2))
         cur_row = int(workfile_created == nsegments)
         result.append(cur_row)
 return result
 $$
-language plpythonu;
+language plpython3u;
 
 CREATE TABLE test_hj_spill (i1 int, i2 int, i3 int, i4 int, i5 int, i6 int, i7 int, i8 int);
 insert into test_hj_spill SELECT i,i,i%1000,i,i,i,i,i from

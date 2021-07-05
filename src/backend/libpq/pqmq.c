@@ -3,7 +3,7 @@
  * pqmq.c
  *	  Use the frontend/backend protocol for communication over a shm_mq
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *	src/backend/libpq/pqmq.c
@@ -17,15 +17,16 @@
 #include "libpq/pqformat.h"
 #include "libpq/pqmq.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "tcop/tcopprot.h"
 #include "utils/builtins.h"
 
-static shm_mq *pq_mq;
 static shm_mq_handle *pq_mq_handle;
 static bool pq_mq_busy = false;
 static pid_t pq_mq_parallel_master_pid = 0;
 static pid_t pq_mq_parallel_master_backend_id = InvalidBackendId;
 
+static void pq_cleanup_redirect_to_shm_mq(dsm_segment *seg, Datum arg);
 static void mq_comm_reset(void);
 static int	mq_flush(void);
 static int	mq_flush_if_writable(void);
@@ -35,7 +36,7 @@ static void mq_putmessage_noblock(char msgtype, const char *s, size_t len);
 static void mq_startcopyout(void);
 static void mq_endcopyout(bool errorAbort);
 
-static PQcommMethods PqCommMqMethods = {
+static const PQcommMethods PqCommMqMethods = {
 	mq_comm_reset,
 	mq_flush,
 	mq_flush_if_writable,
@@ -51,13 +52,24 @@ static PQcommMethods PqCommMqMethods = {
  * message queue.
  */
 void
-pq_redirect_to_shm_mq(shm_mq *mq, shm_mq_handle *mqh)
+pq_redirect_to_shm_mq(dsm_segment *seg, shm_mq_handle *mqh)
 {
 	PqCommMethods = &PqCommMqMethods;
-	pq_mq = mq;
 	pq_mq_handle = mqh;
 	whereToSendOutput = DestRemote;
 	FrontendProtocol = PG_PROTOCOL_LATEST;
+	on_dsm_detach(seg, pq_cleanup_redirect_to_shm_mq, (Datum) 0);
+}
+
+/*
+ * When the DSM that contains our shm_mq goes away, we need to stop sending
+ * messages to it.
+ */
+static void
+pq_cleanup_redirect_to_shm_mq(dsm_segment *seg, Datum arg)
+{
+	pq_mq_handle = NULL;
+	whereToSendOutput = DestNone;
 }
 
 /*
@@ -120,11 +132,20 @@ mq_putmessage(char msgtype, const char *s, size_t len)
 	 */
 	if (pq_mq_busy)
 	{
-		if (pq_mq != NULL)
-			shm_mq_detach(pq_mq);
-		pq_mq = NULL;
+		if (pq_mq_handle != NULL)
+			shm_mq_detach(pq_mq_handle);
+		pq_mq_handle = NULL;
 		return EOF;
 	}
+
+	/*
+	 * If the message queue is already gone, just ignore the message. This
+	 * doesn't necessarily indicate a problem; for example, DEBUG messages can
+	 * be generated late in the shutdown sequence, after all DSMs have already
+	 * been detached.
+	 */
+	if (pq_mq_handle == NULL)
+		return 0;
 
 	pq_mq_busy = true;
 
@@ -147,9 +168,10 @@ mq_putmessage(char msgtype, const char *s, size_t len)
 		if (result != SHM_MQ_WOULD_BLOCK)
 			break;
 
-		WaitLatch(&MyProc->procLatch, WL_LATCH_SET, 0);
+		(void) WaitLatch(MyLatch, WL_LATCH_SET | WL_EXIT_ON_PM_DEATH, 0,
+						 WAIT_EVENT_MQ_PUT_MESSAGE);
+		ResetLatch(MyLatch);
 		CHECK_FOR_INTERRUPTS();
-		ResetLatch(&MyProc->procLatch);
 	}
 
 	pq_mq_busy = false;
@@ -208,15 +230,31 @@ pq_parse_errornotice(StringInfo msg, ErrorData *edata)
 			pq_getmsgend(msg);
 			break;
 		}
-		value = pq_getmsgstring(msg);
+		value = pq_getmsgrawstring(msg);
 
 		switch (code)
 		{
 			case PG_DIAG_SEVERITY:
+				/* ignore, trusting we'll get a nonlocalized version */
+				break;
+			case PG_DIAG_SEVERITY_NONLOCALIZED:
 				if (strcmp(value, "DEBUG") == 0)
-					edata->elevel = DEBUG1;		/* or some other DEBUG level */
+				{
+					/*
+					 * We can't reconstruct the exact DEBUG level, but
+					 * presumably it was >= client_min_messages, so select
+					 * DEBUG1 to ensure we'll pass it on to the client.
+					 */
+					edata->elevel = DEBUG1;
+				}
 				else if (strcmp(value, "LOG") == 0)
-					edata->elevel = LOG;		/* can't be COMMERROR */
+				{
+					/*
+					 * It can't be LOG_SERVER_ONLY, or the worker wouldn't
+					 * have sent it to us; so LOG is the correct value.
+					 */
+					edata->elevel = LOG;
+				}
 				else if (strcmp(value, "INFO") == 0)
 					edata->elevel = INFO;
 				else if (strcmp(value, "NOTICE") == 0)
@@ -230,11 +268,11 @@ pq_parse_errornotice(StringInfo msg, ErrorData *edata)
 				else if (strcmp(value, "PANIC") == 0)
 					edata->elevel = PANIC;
 				else
-					elog(ERROR, "unknown error severity");
+					elog(ERROR, "unrecognized error severity: \"%s\"", value);
 				break;
 			case PG_DIAG_SQLSTATE:
 				if (strlen(value) != 5)
-					elog(ERROR, "malformed sql state");
+					elog(ERROR, "invalid SQLSTATE: \"%s\"", value);
 				edata->sqlerrcode = MAKE_SQLSTATE(value[0], value[1], value[2],
 												  value[3], value[4]);
 				break;
@@ -248,10 +286,10 @@ pq_parse_errornotice(StringInfo msg, ErrorData *edata)
 				edata->hint = pstrdup(value);
 				break;
 			case PG_DIAG_STATEMENT_POSITION:
-				edata->cursorpos = pg_atoi(value, sizeof(int), '\0');
+				edata->cursorpos = pg_strtoint32(value);
 				break;
 			case PG_DIAG_INTERNAL_POSITION:
-				edata->internalpos = pg_atoi(value, sizeof(int), '\0');
+				edata->internalpos = pg_strtoint32(value);
 				break;
 			case PG_DIAG_INTERNAL_QUERY:
 				edata->internalquery = pstrdup(value);
@@ -278,13 +316,13 @@ pq_parse_errornotice(StringInfo msg, ErrorData *edata)
 				edata->filename = pstrdup(value);
 				break;
 			case PG_DIAG_SOURCE_LINE:
-				edata->lineno = pg_atoi(value, sizeof(int), '\0');
+				edata->lineno = pg_strtoint32(value);
 				break;
 			case PG_DIAG_SOURCE_FUNCTION:
 				edata->funcname = pstrdup(value);
 				break;
 			default:
-				elog(ERROR, "unknown error field: %d", (int) code);
+				elog(ERROR, "unrecognized error field code: %d", (int) code);
 				break;
 		}
 	}

@@ -188,7 +188,7 @@ seg_upper(PG_FUNCTION_ARGS)
 /*
 ** The GiST Consistent method for segments
 ** Should return false if for all data items x below entry,
-** the predicate x op query == FALSE, where op is the oper
+** the predicate x op query == false, where op is the oper
 ** corresponding to strategy in the pg_amop table.
 */
 Datum
@@ -413,9 +413,9 @@ gseg_same(PG_FUNCTION_ARGS)
 	bool	   *result = (bool *) PG_GETARG_POINTER(2);
 
 	if (DirectFunctionCall2(seg_same, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)))
-		*result = TRUE;
+		*result = true;
 	else
-		*result = FALSE;
+		*result = false;
 
 #ifdef GIST_DEBUG
 	fprintf(stderr, "same: %s\n", (*result ? "TRUE" : "FALSE"));
@@ -465,7 +465,7 @@ gseg_leaf_consistent(Datum key, Datum query, StrategyNumber strategy)
 			retval = DirectFunctionCall2(seg_contained, key, query);
 			break;
 		default:
-			retval = FALSE;
+			retval = false;
 	}
 
 	PG_RETURN_DATUM(retval);
@@ -514,7 +514,7 @@ gseg_internal_consistent(Datum key, Datum query, StrategyNumber strategy)
 				DatumGetBool(DirectFunctionCall2(seg_overlap, key, query));
 			break;
 		default:
-			retval = FALSE;
+			retval = false;
 	}
 
 	PG_RETURN_BOOL(retval);
@@ -528,7 +528,7 @@ gseg_binary_union(Datum r1, Datum r2, int *sizep)
 	retval = DirectFunctionCall2(seg_union, r1, r2);
 	*sizep = sizeof(SEG);
 
-	return (retval);
+	return retval;
 }
 
 
@@ -558,7 +558,7 @@ Datum
 seg_same(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp == 0);
 }
@@ -848,7 +848,7 @@ Datum
 seg_lt(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp < 0);
 }
@@ -857,7 +857,7 @@ Datum
 seg_le(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp <= 0);
 }
@@ -866,7 +866,7 @@ Datum
 seg_gt(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp > 0);
 }
@@ -875,7 +875,7 @@ Datum
 seg_ge(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp >= 0);
 }
@@ -885,7 +885,7 @@ Datum
 seg_different(PG_FUNCTION_ARGS)
 {
 	int			cmp = DatumGetInt32(
-	   DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
+									DirectFunctionCall2(seg_cmp, PG_GETARG_DATUM(0), PG_GETARG_DATUM(1)));
 
 	PG_RETURN_BOOL(cmp != 0);
 }
@@ -896,15 +896,18 @@ seg_different(PG_FUNCTION_ARGS)
  *				   Auxiliary functions
  *****************************************************************************/
 
-/* The purpose of this routine is to print the floating point
- * value with exact number of significant digits. Its behaviour
+/*
+ * The purpose of this routine is to print the given floating point
+ * value with exactly n significant digits.  Its behaviour
  * is similar to %.ng except it prints 8.00 where %.ng would
- * print 8
+ * print 8.  Returns the length of the string written at "result".
+ *
+ * Caller must provide a sufficiently large result buffer; 16 bytes
+ * should be enough for all known float implementations.
  */
 static int
 restore(char *result, float val, int n)
 {
-	static char efmt[8] = {'%', '-', '1', '5', '.', '#', 'e', 0};
 	char		buf[25] = {
 		'0', '0', '0', '0', '0',
 		'0', '0', '0', '0', '0',
@@ -919,32 +922,29 @@ restore(char *result, float val, int n)
 				sign;
 
 	/*
-	 * put a cap on the number of siugnificant digits to avoid nonsense in the
-	 * output
+	 * Put a cap on the number of significant digits to avoid garbage in the
+	 * output and ensure we don't overrun the result buffer.
 	 */
 	n = Min(n, FLT_DIG);
 
 	/* remember the sign */
 	sign = (val < 0 ? 1 : 0);
 
-	efmt[5] = '0' + (n - 1) % 10;		/* makes %-15.(n-1)e -- this format
-										 * guarantees that the exponent is
-										 * always present */
+	/* print, in %e style to start with */
+	sprintf(result, "%.*e", n - 1, val);
 
-	sprintf(result, efmt, val);
+	/* find the exponent */
+	p = strchr(result, 'e');
 
-	/* trim the spaces left by the %e */
-	for (p = result; *p != ' '; p++);
-	*p = '\0';
+	/* punt if we have 'inf' or similar */
+	if (p == NULL)
+		return strlen(result);
 
-	/* get the exponent */
-	strtok(pstrdup(result), "e");
-	exp = atoi(strtok(NULL, "e"));
-
+	exp = atoi(p + 1);
 	if (exp == 0)
 	{
-		/* use the supplied mantyssa with sign */
-		strcpy((char *) strchr(result, 'e'), "");
+		/* just truncate off the 'e+00' */
+		*p = '\0';
 	}
 	else
 	{
@@ -1040,7 +1040,7 @@ restore(char *result, float val, int n)
 
 		/* ... this is not done yet. */
 	}
-	return (strlen(result));
+	return strlen(result);
 }
 
 
@@ -1052,9 +1052,9 @@ restore(char *result, float val, int n)
  * a floating point number
  */
 int
-significant_digits(char *s)
+significant_digits(const char *s)
 {
-	char	   *p = s;
+	const char *p = s;
 	int			n,
 				c,
 				zeroes;
@@ -1080,7 +1080,7 @@ significant_digits(char *s)
 	}
 
 	if (!n)
-		return (zeroes);
+		return zeroes;
 
-	return (n);
+	return n;
 }

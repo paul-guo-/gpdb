@@ -1,5 +1,10 @@
 CREATE EXTENSION ltree;
 
+-- Check whether any of our opclasses fail amvalidate
+SELECT amname, opcname
+FROM pg_opclass opc LEFT JOIN pg_am am ON am.oid = opcmethod
+WHERE opc.oid >= 16384 AND NOT amvalidate(opc.oid);
+
 SELECT ''::ltree;
 SELECT '1'::ltree;
 SELECT '1.2'::ltree;
@@ -288,3 +293,6 @@ SELECT count(*) FROM _ltreetest WHERE t ~ '23.*{1}.1' ;
 SELECT count(*) FROM _ltreetest WHERE t ~ '23.*.1' ;
 SELECT count(*) FROM _ltreetest WHERE t ~ '23.*.2' ;
 SELECT count(*) FROM _ltreetest WHERE t ? '{23.*.1,23.*.2}' ;
+
+-- Test that has all opclasses
+select opcname,amname from pg_opclass opc,  pg_am am  where am.oid=opc.opcmethod and opcintype='ltree'::regtype;

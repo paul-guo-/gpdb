@@ -38,11 +38,9 @@
             <p>The SQL script will be written to the standard output. Use the
               <codeph>[-f | --file]</codeph> option or shell operators
                 to redirect it into a file.</p>
-            <p><codeph>pg_dumpall</codeph> needs to connect several times to the Greenplum Database master server (once per database). If you use password
+            <p><codeph>pg_dumpall</codeph> needs to connect several times to the Greenplum Database coordinator server (once per database). If you use password
                 authentication it is likely to ask for a password each time. It is convenient to
                 have a <codeph>~/.pgpass</codeph> file in such cases.</p>
-            <note>The <codeph>--ignore-version</codeph> option is deprecated and will be removed in
-                a future release.</note>
         </section>
         <section id="section4">
             <title>Options</title>
@@ -72,16 +70,6 @@
                     <plentry>
                         <pt>-g | --globals-only</pt>
                         <pd>Dump only global objects (roles and tablespaces), no databases.</pd>
-                    </plentry>
-                    <plentry>
-                        <pt>-i | --ignore-version</pt>
-                        <pd><note>This option is deprecated and will be removed in a future
-                                release.</note>Ignore version mismatch between <codeph><xref
-                                    href="pg_dump.xml#topic1" type="topic" format="dita"/></codeph>
-                            and the database server. <codeph>pg_dump</codeph> can dump from servers
-                            running previous releases of Greenplum Database (or
-                            PostgreSQL), but very old versions may not be supported anymore. Use
-                            this option if you need to override the version check.</pd>
                     </plentry>
                     <plentry>
                         <pt>-o | --oids</pt>
@@ -284,7 +272,7 @@
                     </plentry>
                     <plentry>
                         <pt>-h <varname>host</varname> | --host=<varname>host</varname></pt>
-                        <pd>The host name of the machine on which the Greenplum master database server is running. If
+                        <pd>The host name of the machine on which the Greenplum coordinator database server is running. If
                             not specified, reads from the environment variable
                                 <codeph>PGHOST</codeph> or defaults to
                             <codeph>localhost</codeph>.</pd>
@@ -295,7 +283,7 @@
                     </plentry>
                     <plentry>
                         <pt>-p <varname>port</varname> | --port=<varname>port</varname></pt>
-                        <pd>The TCP port on which the Greenplum master
+                        <pd>The TCP port on which the Greenplum coordinator
                             database server is listening for connections. If not specified, reads
                             from the environment variable <codeph>PGPORT</codeph> or defaults to
                             5432.</pd>
@@ -341,7 +329,7 @@
                 will refer to <codeph>pg_dump</codeph>. </p>
             <p>Once restored, it is wise to run <codeph>ANALYZE</codeph> on each database so the
                 query planner has useful statistics. You can also run <codeph>vacuumdb -a
-                    -z</codeph> to analyze all databases. </p>
+                    -z</codeph> to vacuum and analyze all databases. </p>
             <p><codeph>pg_dumpall</codeph> requires all needed tablespace directories to
                 exist before the restore; otherwise, database creation will fail for
                 databases in non-default locations.</p>

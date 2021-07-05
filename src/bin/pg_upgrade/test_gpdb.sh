@@ -147,7 +147,7 @@ check_vacuum_worked()
 
 	# Query for the xmin ages.
 	local xmin_ages=$( \
-		PGOPTIONS='-c gp_session_role=utility' \
+		PGOPTIONS='-c gp_role=utility' \
 		"${NEW_BINDIR}/psql" -c 'SELECT age(xmin) FROM pg_catalog.gp_segment_configuration GROUP BY age(xmin);' \
 			 -p 18432 -t -A template1 \
 	)
@@ -255,7 +255,7 @@ diff_and_exit() {
 	if (( $smoketest )) ; then
 		# After a smoke test, we only have the master available to query.
 		args='-m'
-		pgopts='-c gp_session_role=utility'
+		pgopts='-c gp_role=utility'
 	fi
 
 	# Start the new cluster, dump it and stop it again when done. We need to bump
@@ -263,7 +263,7 @@ diff_and_exit() {
 	# when done. Set the same variables as gpdemo-env.sh exports. Since creation
 	# of that file can collide between the gpdemo clusters, perform it manually
 	export PGPORT=17432
-	export MASTER_DATA_DIRECTORY="${NEW_DATADIR}/qddir/demoDataDir-1"
+	export COORDINATOR_DATA_DIRECTORY="${NEW_DATADIR}/qddir/demoDataDir-1"
 	${NEW_BINDIR}/gpstart -a ${args}
 
 	echo -n 'Dumping database schema after upgrade... '
@@ -271,10 +271,9 @@ diff_and_exit() {
 	echo done
 
 	${NEW_BINDIR}/gpstop -a ${args}
+	COORDINATOR_DATA_DIRECTORY=""; unset COORDINATOR_DATA_DIRECTORY
+	PGPORT=""; unset PGPORT
 	
-	export PGPORT=15432
-	export MASTER_DATA_DIRECTORY="${OLD_DATADIR}/qddir/demoDataDir-1"
-
 	# Since we've used the same pg_dumpall binary to create both dumps, whitespace
 	# shouldn't be a cause of difference in the files but it is. Partitioning info
 	# is generated via backend functionality in the cluster being dumped, and not
@@ -389,15 +388,13 @@ main() {
 	########################## START: OLD cluster checks
 	
 	. ${OLD_BINDIR}/../greenplum_path.sh
-	export MASTER_DATA_DIRECTORY="${OLD_DATADIR}/qddir/demoDataDir-1"
-	export PGPORT=15432
 
 	# The cluster should be running by now, but in case it isn't, issue a restart.
 	# Since we expect the testcluster to be a stock standard gpdemo, we test for
 	# the presence of it. Worst case we powercycle once for no reason, but it's
 	# better than failing due to not having a cluster to work with.
-	if [ -f "/tmp/.s.PGSQL.15432.lock" ]; then
-		ps aux | grep  `head -1 /tmp/.s.PGSQL.15432.lock` | grep -q postgres
+	if [ -f "/tmp/.s.PGSQL.${PGPORT}.lock" ]; then
+		ps aux | grep  `head -1 /tmp/.s.PGSQL.${PGPORT}.lock` | grep -q postgres
 		if (( $? )) ; then
 			${OLD_BINDIR}/gpstart -a
 		fi
@@ -433,7 +430,7 @@ main() {
 	
 	${OLD_BINDIR}/gpstop -a
 	
-	MASTER_DATA_DIRECTORY=""; unset MASTER_DATA_DIRECTORY
+	COORDINATOR_DATA_DIRECTORY=""; unset COORDINATOR_DATA_DIRECTORY
 	PGPORT=""; unset PGPORT
 	
 	########################## END: OLD cluster checks
@@ -446,20 +443,19 @@ main() {
 	# Create a new gpdemo cluster in the NEW_DATADIR. Using the new datadir for the
 	# path to demo_cluster.sh is a bit of a hack, but since this test relies on
 	# using a demo cluster anyway, this is acceptable.
-	export MASTER_DEMO_PORT=17432
-	export DEMO_PORT_BASE=27432
+	export DEMO_PORT_BASE=17432
 	export NUM_PRIMARY_MIRROR_PAIRS=3
-	export MASTER_DATADIR=${temp_root}
+	export COORDINATOR_DATADIR=${temp_root}
 	cp ${OLD_DATADIR}/../lalshell .
 	
-	BLDWRAP_POSTGRES_CONF_ADDONS=fsync=off ${temp_root}/../../../../gpAux/gpdemo/demo_cluster.sh ${DEMOCLUSTER_OPTS}
+	LANG=en_US.utf8 BLDWRAP_POSTGRES_CONF_ADDONS=fsync=off ${temp_root}/../../../../gpAux/gpdemo/demo_cluster.sh ${DEMOCLUSTER_OPTS}
 
-	export MASTER_DATA_DIRECTORY="${NEW_DATADIR}/qddir/demoDataDir-1"
+	export COORDINATOR_DATA_DIRECTORY="${NEW_DATADIR}/qddir/demoDataDir-1"
 	export PGPORT=17432
 	
 	${NEW_BINDIR}/gpstop -a
 	
-	MASTER_DATA_DIRECTORY=""; unset MASTER_DATA_DIRECTORY
+	COORDINATOR_DATA_DIRECTORY=""; unset COORDINATOR_DATA_DIRECTORY
 	PGPORT=""; unset PGPORT
 	PGOPTIONS=""; unset PGOPTIONS
 
@@ -500,7 +496,6 @@ main() {
 		cp "${NEW_DATADIR}/dbfast$i/demoDataDir$j.old/internal.auto.conf" "${NEW_DATADIR}/dbfast$i/demoDataDir$j/internal.auto.conf"
 		# Remove QD only files
 		rm -f "${NEW_DATADIR}/dbfast$i/demoDataDir$j/gpssh.conf"
-		rm -rf "${NEW_DATADIR}/dbfast$i/demoDataDir$j/gpperfmon"
 		# Upgrade the segment data files without dump/restore of the schema
 	
 		local epoch_for_perf_QEstart=`date +%s`

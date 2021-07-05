@@ -8,13 +8,13 @@
 # HAVE_INT_TIMEZONE.
 AC_DEFUN([PGAC_VAR_INT_TIMEZONE],
 [AC_CACHE_CHECK(for int timezone, pgac_cv_var_int_timezone,
-[AC_TRY_LINK([#include <time.h>
+[AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <time.h>
 int res;],
   [#ifndef __CYGWIN__
 res = timezone / 60;
 #else
 res = _timezone / 60;
-#endif],
+#endif])],
   [pgac_cv_var_int_timezone=yes],
   [pgac_cv_var_int_timezone=no])])
 if test x"$pgac_cv_var_int_timezone" = xyes ; then
@@ -41,13 +41,14 @@ if test "$ac_cv_member_struct_tm_tm_zone" = yes; then
              `HAVE_STRUCT_TM_TM_ZONE' instead.])
 fi
 AC_CACHE_CHECK(for tzname, ac_cv_var_tzname,
-[AC_TRY_LINK(
-[#include <time.h>
+[AC_LINK_IFELSE([AC_LANG_PROGRAM(
+[[#include <stdlib.h>
+#include <time.h>
 #ifndef tzname /* For SGI.  */
 extern char *tzname[]; /* RS6000 and others reject char **tzname.  */
 #endif
-],
-[atoi(*tzname);], ac_cv_var_tzname=yes, ac_cv_var_tzname=no)])
+]],
+[atoi(*tzname);])], ac_cv_var_tzname=yes, ac_cv_var_tzname=no)])
 if test $ac_cv_var_tzname = yes; then
     AC_DEFINE(HAVE_TZNAME, 1,
               [Define to 1 if you have the external array `tzname'.])
@@ -62,10 +63,10 @@ fi
 AC_DEFUN([PGAC_FUNC_GETTIMEOFDAY_1ARG],
 [AC_CACHE_CHECK(whether gettimeofday takes only one argument,
 pgac_cv_func_gettimeofday_1arg,
-[AC_TRY_COMPILE([#include <sys/time.h>],
+[AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <sys/time.h>],
 [struct timeval *tp = 0;
 struct timezone *tzp = 0;
-gettimeofday(tp,tzp);],
+gettimeofday(tp,tzp);])],
 [pgac_cv_func_gettimeofday_1arg=no],
 [pgac_cv_func_gettimeofday_1arg=yes])])
 if test x"$pgac_cv_func_gettimeofday_1arg" = xyes ; then
@@ -88,11 +89,11 @@ AH_VERBATIM(GETTIMEOFDAY_1ARG_,
 AC_DEFUN([PGAC_FUNC_STRERROR_R_INT],
 [AC_CACHE_CHECK(whether strerror_r returns int,
 pgac_cv_func_strerror_r_int,
-[AC_TRY_COMPILE([#include <string.h>],
-[char buf[100];
+[AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <string.h>],
+[[char buf[100];
   switch (strerror_r(1, buf, sizeof(buf)))
   { case 0: break; default: break; }
-],
+]])],
 [pgac_cv_func_strerror_r_int=yes],
 [pgac_cv_func_strerror_r_int=no])])
 if test x"$pgac_cv_func_strerror_r_int" = xyes ; then
@@ -110,8 +111,12 @@ fi
 AC_DEFUN([PGAC_UNION_SEMUN],
 [AC_CHECK_TYPES([union semun], [], [],
 [#include <sys/types.h>
+#ifdef HAVE_SYS_IPC_H
 #include <sys/ipc.h>
-#include <sys/sem.h>])])# PGAC_UNION_SEMUN
+#endif
+#ifdef HAVE_SYS_SEM_H
+#include <sys/sem.h>
+#endif])])# PGAC_UNION_SEMUN
 
 
 # PGAC_STRUCT_SOCKADDR_UN
@@ -134,9 +139,7 @@ AC_DEFUN([PGAC_STRUCT_SOCKADDR_UN],
 AC_DEFUN([PGAC_STRUCT_SOCKADDR_STORAGE],
 [AC_CHECK_TYPES([struct sockaddr_storage], [], [],
 [#include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
-#endif
 ])])# PGAC_STRUCT_SOCKADDR_STORAGE
 
 # PGAC_STRUCT_SOCKADDR_STORAGE_MEMBERS
@@ -153,9 +156,7 @@ AC_DEFUN([PGAC_STRUCT_SOCKADDR_STORAGE_MEMBERS],
 		   struct sockaddr_storage.__ss_len,
 		   struct sockaddr.sa_len], [], [],
 [#include <sys/types.h>
-#ifdef HAVE_SYS_SOCKET_H
 #include <sys/socket.h>
-#endif
 ])])# PGAC_STRUCT_SOCKADDR_STORAGE_MEMBERS
 
 
@@ -170,157 +171,10 @@ AC_DEFUN([PGAC_STRUCT_ADDRINFO],
 ])])# PGAC_STRUCT_ADDRINFO
 
 
-# PGAC_FUNC_POSIX_SIGNALS
-# -----------------------
-# Check to see if the machine has the POSIX signal interface. Define
-# HAVE_POSIX_SIGNALS if so. Also set the output variable HAVE_POSIX_SIGNALS
-# to yes or no.
-#
-# Note that this test only compiles a test program, it doesn't check
-# whether the routines actually work. If that becomes a problem, make
-# a fancier check.
-AC_DEFUN([PGAC_FUNC_POSIX_SIGNALS],
-[AC_CACHE_CHECK(for POSIX signal interface, pgac_cv_func_posix_signals,
-[AC_TRY_LINK([#include <signal.h>
-],
-[struct sigaction act, oact;
-sigemptyset(&act.sa_mask);
-act.sa_flags = SA_RESTART;
-sigaction(0, &act, &oact);],
-[pgac_cv_func_posix_signals=yes],
-[pgac_cv_func_posix_signals=no])])
-if test x"$pgac_cv_func_posix_signals" = xyes ; then
-  AC_DEFINE(HAVE_POSIX_SIGNALS, 1,
-            [Define to 1 if you have the POSIX signal interface.])
-fi
-HAVE_POSIX_SIGNALS=$pgac_cv_func_posix_signals
-AC_SUBST(HAVE_POSIX_SIGNALS)])# PGAC_FUNC_POSIX_SIGNALS
-
-
-# PGAC_FUNC_SNPRINTF_LONG_LONG_INT_MODIFIER
-# ---------------------------------------
-# Determine which length modifier snprintf uses for long long int.  We
-# handle ll, q, and I64.  The result is in shell variable
-# LONG_LONG_INT_MODIFIER.
-#
-# MinGW uses '%I64d', though gcc throws an warning with -Wall,
-# while '%lld' doesn't generate a warning, but doesn't work.
-#
-AC_DEFUN([PGAC_FUNC_SNPRINTF_LONG_LONG_INT_MODIFIER],
-[AC_MSG_CHECKING([snprintf length modifier for long long int])
-AC_CACHE_VAL(pgac_cv_snprintf_long_long_int_modifier,
-[for pgac_modifier in 'll' 'q' 'I64'; do
-AC_TRY_RUN([#include <stdio.h>
-typedef long long int ac_int64;
-#define INT64_FORMAT "%${pgac_modifier}d"
-
-ac_int64 a = 20000001;
-ac_int64 b = 40000005;
-
-int does_int64_snprintf_work()
-{
-  ac_int64 c;
-  char buf[100];
-
-  if (sizeof(ac_int64) != 8)
-    return 0;			/* doesn't look like the right size */
-
-  c = a * b;
-  snprintf(buf, 100, INT64_FORMAT, c);
-  if (strcmp(buf, "800000140000005") != 0)
-    return 0;			/* either multiply or snprintf is busted */
-  return 1;
-}
-main() {
-  exit(! does_int64_snprintf_work());
-}],
-[pgac_cv_snprintf_long_long_int_modifier=$pgac_modifier; break],
-[],
-[pgac_cv_snprintf_long_long_int_modifier=cross; break])
-done])dnl AC_CACHE_VAL
-
-LONG_LONG_INT_MODIFIER=''
-
-case $pgac_cv_snprintf_long_long_int_modifier in
-  cross) AC_MSG_RESULT([cannot test (not on host machine)]);;
-  ?*)    AC_MSG_RESULT([$pgac_cv_snprintf_long_long_int_modifier])
-         LONG_LONG_INT_MODIFIER=$pgac_cv_snprintf_long_long_int_modifier;;
-  *)     AC_MSG_RESULT(none);;
-esac])# PGAC_FUNC_SNPRINTF_LONG_LONG_INT_MODIFIER
-
-
-# PGAC_FUNC_SNPRINTF_ARG_CONTROL
-# ---------------------------------------
-# Determine if snprintf supports %1$ argument selection, e.g. %5$ selects
-# the fifth argument after the printf format string.
-# This is not in the C99 standard, but in the Single Unix Specification (SUS).
-# It is used in our language translation strings.
-#
-AC_DEFUN([PGAC_FUNC_SNPRINTF_ARG_CONTROL],
-[AC_MSG_CHECKING([whether snprintf supports argument control])
-AC_CACHE_VAL(pgac_cv_snprintf_arg_control,
-[AC_TRY_RUN([#include <stdio.h>
-#include <string.h>
-
-int main()
-{
-  char buf[100];
-
-  /* can it swap arguments? */
-  snprintf(buf, 100, "%2\$d %1\$d", 3, 4);
-  if (strcmp(buf, "4 3") != 0)
-    return 1;
-  return 0;
-}],
-[pgac_cv_snprintf_arg_control=yes],
-[pgac_cv_snprintf_arg_control=no],
-[pgac_cv_snprintf_arg_control=cross])
-])dnl AC_CACHE_VAL
-AC_MSG_RESULT([$pgac_cv_snprintf_arg_control])
-])# PGAC_FUNC_SNPRINTF_ARG_CONTROL
-
-# PGAC_FUNC_SNPRINTF_SIZE_T_SUPPORT
-# ---------------------------------------
-# Determine if snprintf supports the z length modifier for printing
-# size_t-sized variables. That's supported by C99 and POSIX but not
-# all platforms play ball, so we must test whether it's working.
-#
-AC_DEFUN([PGAC_FUNC_SNPRINTF_SIZE_T_SUPPORT],
-[AC_MSG_CHECKING([whether snprintf supports the %z modifier])
-AC_CACHE_VAL(pgac_cv_snprintf_size_t_support,
-[AC_TRY_RUN([#include <stdio.h>
-#include <string.h>
-
-int main()
-{
-  char bufz[100];
-  char buf64[100];
-
-  /*
-   * Print the largest unsigned number fitting in a size_t using both %zu
-   * and the previously-determined format for 64-bit integers.  Note that
-   * we don't run this code unless we know snprintf handles 64-bit ints.
-   */
-  bufz[0] = '\0';  /* in case snprintf fails to emit anything */
-  snprintf(bufz, sizeof(bufz), "%zu", ~((size_t) 0));
-  snprintf(buf64, sizeof(buf64), "%" INT64_MODIFIER "u",
-    (unsigned PG_INT64_TYPE) ~((size_t) 0));
-  if (strcmp(bufz, buf64) != 0)
-    return 1;
-  return 0;
-}],
-[pgac_cv_snprintf_size_t_support=yes],
-[pgac_cv_snprintf_size_t_support=no],
-[pgac_cv_snprintf_size_t_support=cross])
-])dnl AC_CACHE_VAL
-AC_MSG_RESULT([$pgac_cv_snprintf_size_t_support])
-])# PGAC_FUNC_SNPRINTF_SIZE_T_SUPPORT
-
-
 # PGAC_TYPE_LOCALE_T
 # ------------------
-# Check for the locale_t type and find the right header file.  Mac OS
-# X needs xlocale.h; standard is locale.h, but glibc also has an
+# Check for the locale_t type and find the right header file.  macOS
+# needs xlocale.h; standard is locale.h, but glibc also has an
 # xlocale.h file that we should not use.
 #
 AC_DEFUN([PGAC_TYPE_LOCALE_T],

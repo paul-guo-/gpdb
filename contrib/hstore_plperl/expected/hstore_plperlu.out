@@ -1,6 +1,6 @@
-CREATE EXTENSION hstore;
-CREATE EXTENSION plperlu;
-CREATE EXTENSION hstore_plperlu;
+CREATE EXTENSION hstore_plperlu CASCADE;
+NOTICE:  installing required extension "hstore"
+NOTICE:  installing required extension "plperlu"
 SELECT transforms.udt_schema, transforms.udt_name,
        routine_schema, routine_name,
        group_name, transform_type
@@ -20,16 +20,12 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
 SELECT test1('aa=>bb, cc=>NULL'::hstore);
-INFO:  $VAR1 = {
-          'aa' => 'bb',
-          'cc' => undef
-        };
-
-CONTEXT:  PL/Perl function "test1"
+INFO:  $VAR1 = {'aa' => 'bb','cc' => undef};
  test1 
 -------
      2
@@ -40,13 +36,12 @@ LANGUAGE plperlu
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
 SELECT test1none('aa=>bb, cc=>NULL'::hstore);
 INFO:  $VAR1 = '"aa"=>"bb", "cc"=>NULL';
-
-CONTEXT:  PL/Perl function "test1none"
  test1none 
 -----------
          0
@@ -58,16 +53,12 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]));
 return scalar(keys %{$_[0]});
 $$;
 SELECT test1list('aa=>bb, cc=>NULL'::hstore);
-INFO:  $VAR1 = {
-          'aa' => 'bb',
-          'cc' => undef
-        };
-
-CONTEXT:  PL/Perl function "test1list"
+INFO:  $VAR1 = {'aa' => 'bb','cc' => undef};
  test1list 
 -----------
          2
@@ -80,19 +71,12 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_[0]->[0], $_[0]->[1]));
 return scalar(keys %{$_[0]});
 $$;
 SELECT test1arr(array['aa=>bb, cc=>NULL'::hstore, 'dd=>ee']);
-INFO:  $VAR1 = {
-          'aa' => 'bb',
-          'cc' => undef
-        };
-$VAR2 = {
-          'dd' => 'ee'
-        };
-
-CONTEXT:  PL/Perl function "test1arr"
+INFO:  $VAR1 = {'aa' => 'bb','cc' => undef};$VAR2 = {'dd' => 'ee'};
  test1arr 
 ----------
         2
@@ -105,6 +89,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 
 $rv = spi_exec_query(q{SELECT 'aa=>bb, cc=>NULL'::hstore AS col1});
 elog(INFO, Dumper($rv->{rows}[0]->{col1}));
@@ -115,15 +100,8 @@ $rv = spi_exec_prepared($plan, {}, $val);
 elog(INFO, Dumper($rv->{rows}[0]->{col1}));
 $$;
 SELECT test3();
-INFO:  $VAR1 = {
-          'aa' => 'bb',
-          'cc' => undef
-        };
-
-CONTEXT:  PL/Perl function "test3"
+INFO:  $VAR1 = {'aa' => 'bb','cc' => undef};
 INFO:  $VAR1 = '"a"=>"1", "b"=>"boo", "c"=>NULL';
-
-CONTEXT:  PL/Perl function "test3"
  test3 
 -------
  
@@ -144,6 +122,7 @@ TRANSFORM FOR TYPE hstore
 AS $$
 use Data::Dumper;
 $Data::Dumper::Sortkeys = 1;
+$Data::Dumper::Indent = 0;
 elog(INFO, Dumper($_TD->{new}));
 if ($_TD->{new}{a} == 1) {
     $_TD->{new}{b} = {a => 1, b => 'boo', c => undef};
@@ -153,15 +132,7 @@ return "MODIFY";
 $$;
 CREATE TRIGGER test4 BEFORE UPDATE ON test1 FOR EACH ROW EXECUTE PROCEDURE test4();
 UPDATE test1 SET a = a;
-INFO:  $VAR1 = {
-          'a' => '1',
-          'b' => {
-                 'aa' => 'bb',
-                 'cc' => undef
-               }
-        };
-
-CONTEXT:  PL/Perl function "test4"
+INFO:  $VAR1 = {'a' => '1','b' => {'aa' => 'bb','cc' => undef}};
 SELECT * FROM test1;
  a |                b                
 ---+---------------------------------

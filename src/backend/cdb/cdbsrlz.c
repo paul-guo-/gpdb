@@ -4,7 +4,7 @@
  *	  Serialize a PostgreSQL sequential plan tree.
  *
  * Portions Copyright (c) 2004-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -17,10 +17,9 @@
 
 #include "cdb/cdbsrlz.h"
 #include "nodes/nodes.h"
-#include "utils/memaccounting.h"
 #include "utils/memutils.h"
 
-#ifdef HAVE_LIBZSTD
+#ifdef USE_ZSTD
 /* Zstandard library is provided */
 
 #include <zstd.h>
@@ -31,7 +30,7 @@ static char *uncompress_string(const char *src, int size, int *uncompressed_size
 /* zstandard compression level to use. */
 #define COMPRESS_LEVEL 3
 
-#endif			/* HAVE_LIBZSTD */
+#endif			/* USE_ZSTD */
 
 /*
  * This is used by dispatcher to serialize Plan and Query Trees for
@@ -47,21 +46,18 @@ serializeNode(Node *node, int *size, int *uncompressed_size_out)
 
 	Assert(node != NULL);
 	Assert(size != NULL);
-	START_MEMORY_ACCOUNT(MemoryAccounting_CreateAccount(0, MEMORY_OWNER_TYPE_Serializer));
-	{
-		pszNode = nodeToBinaryStringFast(node, &uncompressed_size);
-		Assert(pszNode != NULL);
 
-		/* If we have been compiled with libzstd, use it to compress it */
-#ifdef HAVE_LIBZSTD
-		sNode = compress_string(pszNode, uncompressed_size, size);
-		pfree(pszNode);
+	pszNode = nodeToBinaryStringFast(node, &uncompressed_size);
+	Assert(pszNode != NULL);
+
+	/* If we have been compiled with libzstd, use it to compress it */
+#ifdef USE_ZSTD
+	sNode = compress_string(pszNode, uncompressed_size, size);
+	pfree(pszNode);
 #else
-		sNode = pszNode;
-		*size = uncompressed_size;
+	sNode = pszNode;
+	*size = uncompressed_size;
 #endif
-	}
-	END_MEMORY_ACCOUNT();
 
 	if (NULL != uncompressed_size_out)
 		*uncompressed_size_out = uncompressed_size;
@@ -77,31 +73,27 @@ Node *
 deserializeNode(const char *strNode, int size)
 {
 	Node	   *node;
+#ifdef USE_ZSTD
+	char	   *sNode;
+	int			uncompressed_len;
+#endif
 
 	Assert(strNode != NULL);
 
-	START_MEMORY_ACCOUNT(MemoryAccounting_CreateAccount(0, MEMORY_OWNER_TYPE_Deserializer));
-	{
-		/* If we have been compiled with libzstd, decompress */
-#ifdef HAVE_LIBZSTD
-		char	   *sNode;
-		int			uncompressed_len;
-
-		sNode = uncompress_string(strNode, size, &uncompressed_len);
-		Assert(sNode != NULL);
-		node = readNodeFromBinaryString(sNode, uncompressed_len);
-		pfree(sNode);
+	/* If we have been compiled with libzstd, decompress */
+#ifdef USE_ZSTD
+	sNode = uncompress_string(strNode, size, &uncompressed_len);
+	Assert(sNode != NULL);
+	node = readNodeFromBinaryString(sNode, uncompressed_len);
+	pfree(sNode);
 #else
-		node = readNodeFromBinaryString(strNode, size);
-#endif			/* HAVE_LIBZSTD */
-
-	}
-	END_MEMORY_ACCOUNT();
+	node = readNodeFromBinaryString(strNode, size);
+#endif
 
 	return node;
 }
 
-#ifdef HAVE_LIBZSTD
+#ifdef USE_ZSTD
 /*
  * Compress a (binary) string using libzstd
  *
@@ -185,4 +177,4 @@ uncompress_string(const char *src, int size, int *uncompressed_size_p)
 
 	return (char *) result;
 }
-#endif			/* HAVE_LIBZSTD */
+#endif			/* USE_ZSTD */

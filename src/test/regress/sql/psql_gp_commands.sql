@@ -1,12 +1,9 @@
 --
 -- Test \dx and \dx+, to display extensions.
 --
--- We just use gp_inject_fault as an example of an extension here. We don't
--- inject any faults.
-
-\dx gp_inject*
-\dx+ gp_inject*
-
+-- We just use plpgsql as an example of an extension here.
+\dx plpgsql
+\dx+ plpgsql
 
 --
 -- Test extended \du flags
@@ -124,6 +121,17 @@ comment on constraint dd_ichk on d_heap is 'this is a constraint';
 create operator family dd_opfamily using btree;
 comment on operator family dd_opfamily using btree is 'this is an operator family';
 \dd
+
+-- \df+ should list all exec locations
+CREATE FUNCTION foofunc_exec_on_any() RETURNS int AS 'SELECT 1' LANGUAGE SQL EXECUTE ON ANY;
+ALTER FUNCTION foofunc_exec_on_any() OWNER TO test_psql_de_role;
+CREATE FUNCTION foofunc_exec_on_coordinator() RETURNS int AS 'SELECT 1' LANGUAGE SQL EXECUTE ON COORDINATOR;
+ALTER FUNCTION foofunc_exec_on_coordinator() OWNER TO test_psql_de_role;
+CREATE FUNCTION foofunc_exec_on_all_segments() RETURNS int AS 'SELECT 1' LANGUAGE SQL EXECUTE ON ALL SEGMENTS;
+ALTER FUNCTION foofunc_exec_on_all_segments() OWNER TO test_psql_de_role;
+CREATE FUNCTION foofunc_exec_on_initplan() RETURNS int AS 'SELECT 1' LANGUAGE SQL EXECUTE ON INITPLAN;
+ALTER FUNCTION foofunc_exec_on_initplan() OWNER TO test_psql_de_role;
+\df+ foofunc_exec_on_*
 
 -- Clean up
 DROP OWNED BY test_psql_de_role;

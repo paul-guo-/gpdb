@@ -5,7 +5,7 @@
  * to the qExec processes.
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -17,6 +17,7 @@
 #define CDBDISP_H
 
 #include "cdb/cdbtm.h"
+#include "utils/resowner.h"
 
 #define CDB_MOTION_LOST_CONTACT_STRING "Interconnect error master lost contact with segment."
 
@@ -38,12 +39,16 @@ typedef enum DispatchWaitMode
 
 typedef struct CdbDispatcherState
 {
-	bool isExtendedQuery;
 	List *allocatedGangs;
-	bool destroyGang;
 	struct CdbDispatchResults *primaryResults;
 	void *dispatchParams;
 	int	largestGangSize;
+	bool forceDestroyGang;
+	bool isExtendedQuery;
+#ifdef USE_ASSERT_CHECKING
+	bool isGangDestroying;
+#endif
+	bool destroyIdleReaderGang;
 } CdbDispatcherState;
 
 typedef struct DispatcherInternalFuncs
@@ -56,6 +61,17 @@ typedef struct DispatcherInternalFuncs
 	void (*waitDispatchFinish)(struct CdbDispatcherState *ds);
 
 }DispatcherInternalFuncs;
+
+typedef struct dispatcher_handle_t
+{
+	struct CdbDispatcherState *dispatcherState;
+
+	ResourceOwner owner;	/* owner of this handle */
+	struct dispatcher_handle_t *next;
+	struct dispatcher_handle_t *prev;
+} dispatcher_handle_t;
+
+extern dispatcher_handle_t *open_dispatcher_handles;
 
 /*--------------------------------------------------------------------*/
 /*
@@ -166,8 +182,6 @@ cdbdisp_makeDispatchParams(CdbDispatcherState *ds,
 
 bool cdbdisp_checkForCancel(CdbDispatcherState * ds);
 int cdbdisp_getWaitSocketFd(CdbDispatcherState *ds);
-
-void cdbdisp_markNamedPortalGangsDestroyed(void);
 
 void cdbdisp_cleanupDispatcherHandle(const struct ResourceOwnerData * owner);
 

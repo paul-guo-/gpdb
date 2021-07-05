@@ -20,12 +20,12 @@ our (@ISA, @EXPORT_OK);
 my $insttype;
 my @client_contribs = ('oid2name', 'pgbench', 'vacuumlo');
 my @client_program_files = (
-	'clusterdb',     'createdb',       'createlang', 'createuser',
-	'dropdb',        'droplang',       'dropuser',   'ecpg',
-	'libecpg',       'libecpg_compat', 'libpgtypes', 'libpq',
-	'pg_basebackup', 'pg_config',      'pg_dump',    'pg_dumpall',
-	'pg_isready',    'pg_receivexlog', 'pg_recvlogical', 'pg_restore',
-	'psql', 'reindexdb',     'vacuumdb',       @client_contribs);
+	'clusterdb',      'createdb',   'createuser',    'dropdb',
+	'dropuser',       'ecpg',       'libecpg',       'libecpg_compat',
+	'libpgtypes',     'libpq',      'pg_basebackup', 'pg_config',
+	'pg_dump',        'pg_dumpall', 'pg_isready',    'pg_receivewal',
+	'pg_recvlogical', 'pg_restore', 'psql',          'reindexdb',
+	'vacuumdb',       @client_contribs);
 
 sub lcopy
 {
@@ -37,9 +37,10 @@ sub lcopy
 		unlink $target || confess "Could not delete $target\n";
 	}
 
-	copy($src, $target)
+	(my $retval = copy($src, $target))
 	  || confess "Could not copy $src to $target\n";
 
+	return $retval;
 }
 
 sub Install
@@ -58,8 +59,8 @@ sub Install
 
 		# suppress warning about harmless redeclaration of $config
 		no warnings 'misc';
-		require "config_default.pl";
-		require "config.pl" if (-f "config.pl");
+		do "./config_default.pl";
+		do "./config.pl" if (-f "config.pl");
 	}
 
 	chdir("../../..")    if (-f "../../../configure");
@@ -95,10 +96,14 @@ sub Install
 	my @top_dir      = ("src");
 	@top_dir = ("src\\bin", "src\\interfaces") if ($insttype eq "client");
 	File::Find::find(
-		{   wanted => sub {
+		{
+			wanted => sub {
 				/^.*\.sample\z/s
 				  && push(@$sample_files, $File::Find::name);
-			  }
+
+				# Don't find files of in-tree temporary installations.
+				$_ eq 'share' and $File::Find::prune = 1;
+			}
 		},
 		@top_dir);
 	CopySetOfFiles('config files', $sample_files, $target . '/share/');
@@ -144,7 +149,9 @@ sub Install
 		CopyFiles(
 			'Information schema data', $target . '/share/',
 			'src/backend/catalog/',    'sql_features.txt');
-		GenerateConversionScript($target);
+		CopyFiles(
+			'Error code data',    $target . '/share/',
+			'src/backend/utils/', 'errcodes.txt');
 		GenerateTimezoneFiles($target, $conf);
 		GenerateTsearchFiles($target);
 		CopySetOfFiles(
@@ -153,7 +160,7 @@ sub Install
 			$target . '/share/tsearch_data/');
 		CopySetOfFiles(
 			'Dictionaries sample files',
-			[ glob("src\\backend\\tsearch\\*_sample.*") ],
+			[ glob("src\\backend\\tsearch\\dicts\\*_sample*") ],
 			$target . '/share/tsearch_data/');
 
 		my $pl_extension_files = [];
@@ -162,10 +169,14 @@ sub Install
 		push @pldirs, "src/pl/plpython" if $config->{python};
 		push @pldirs, "src/pl/tcl"      if $config->{tcl};
 		File::Find::find(
-			{   wanted => sub {
+			{
+				wanted => sub {
 					/^(.*--.*\.sql|.*\.control)\z/s
 					  && push(@$pl_extension_files, $File::Find::name);
-				  }
+
+					# Don't find files of in-tree temporary installations.
+					$_ eq 'share' and $File::Find::prune = 1;
+				}
 			},
 			@pldirs);
 		CopySetOfFiles('PL Extension files',
@@ -175,6 +186,7 @@ sub Install
 	GenerateNLSFiles($target, $config->{nls}, $majorver) if ($config->{nls});
 
 	print "Installation complete.\n";
+	return;
 }
 
 sub EnsureDirectories
@@ -185,6 +197,7 @@ sub EnsureDirectories
 	{
 		mkdir $target . '/' . $d unless -d ($target . '/' . $d);
 	}
+	return;
 }
 
 sub CopyFiles
@@ -199,9 +212,10 @@ sub CopyFiles
 		print ".";
 		$f = $basedir . $f;
 		die "No file $f\n" if (!-f $f);
-		lcopy($f, $target . basename($f));
+		lcopy($f, $target . basename($f)) || croak "Could not copy $f: $!\n";
 	}
 	print "\n";
+	return;
 }
 
 sub CopySetOfFiles
@@ -212,13 +226,12 @@ sub CopySetOfFiles
 	print "Copying $what" if $what;
 	foreach (@$flist)
 	{
-		next if /regress/;      # Skip temporary install in regression subdir
-		next if /ecpg.test/;    # Skip temporary install in regression subdir
 		my $tgt = $target . basename($_);
 		print ".";
 		lcopy($_, $tgt) || croak "Could not copy $_: $!\n";
 	}
 	print "\n";
+	return;
 }
 
 sub CopySolutionOutput
@@ -344,43 +357,7 @@ sub CopySolutionOutput
 		print ".";
 	}
 	print "\n";
-}
-
-sub GenerateConversionScript
-{
-	my $target = shift;
-	my $sql    = "";
-	my $F;
-
-	print "Generating conversion proc script...";
-	my $mf = read_file('src/backend/utils/mb/conversion_procs/Makefile');
-	$mf =~ s{\\\r?\n}{}g;
-	$mf =~ /^CONVERSIONS\s*=\s*(.*)$/m
-	  || die "Could not find CONVERSIONS line in conversions Makefile\n";
-	my @pieces = split /\s+/, $1;
-	while ($#pieces > 0)
-	{
-		my $name = shift @pieces;
-		my $se   = shift @pieces;
-		my $de   = shift @pieces;
-		my $func = shift @pieces;
-		my $obj  = shift @pieces;
-		$sql .= "-- $se --> $de\n";
-		$sql .=
-"CREATE OR REPLACE FUNCTION $func (INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) RETURNS VOID AS '\$libdir/$obj', '$func' LANGUAGE C STRICT;\n";
-		$sql .=
-"COMMENT ON FUNCTION $func(INTEGER, INTEGER, CSTRING, INTERNAL, INTEGER) IS 'internal conversion function for $se to $de';\n";
-		$sql .= "DROP CONVERSION pg_catalog.$name;\n";
-		$sql .=
-"CREATE DEFAULT CONVERSION pg_catalog.$name FOR '$se' TO '$de' FROM $func;\n";
-		$sql .=
-"COMMENT ON CONVERSION pg_catalog.$name IS 'conversion for $se to $de';\n";
-	}
-	open($F, ">$target/share/conversion_create.sql")
-	  || die "Could not write to conversion_create.sql\n";
-	print $F $sql;
-	close($F);
-	print "\n";
+	return;
 }
 
 sub GenerateTimezoneFiles
@@ -401,8 +378,8 @@ sub GenerateTimezoneFiles
 
 	print "Generating timezone files...";
 
-	my @args = ("$conf/zic/zic", '-d', "$target/share/timezone",
-				'-p', "$posixrules");
+	my @args =
+	  ("$conf/zic/zic", '-d', "$target/share/timezone", '-p', "$posixrules");
 	foreach (@tzfiles)
 	{
 		my $tzfile = $_;
@@ -412,6 +389,7 @@ sub GenerateTimezoneFiles
 
 	system(@args);
 	print "\n";
+	return;
 }
 
 sub GenerateTsearchFiles
@@ -426,7 +404,7 @@ sub GenerateTsearchFiles
 	$mf =~ /^LANGUAGES\s*=\s*(.*)$/m
 	  || die "Could not find LANGUAGES line in snowball Makefile\n";
 	my @pieces = split /\s+/, $1;
-	open($F, ">$target/share/snowball_create.sql")
+	open($F, '>', "$target/share/snowball_create.sql")
 	  || die "Could not write snowball_create.sql";
 	print $F read_file('src/backend/snowball/snowball_func.sql.in');
 
@@ -453,6 +431,7 @@ sub GenerateTsearchFiles
 	}
 	close($F);
 	print "\n";
+	return;
 }
 
 sub CopyContribFiles
@@ -467,20 +446,19 @@ sub CopyContribFiles
 		opendir($D, $subdir) || croak "Could not opendir on $subdir!\n";
 		while (my $d = readdir($D))
 		{
-
 			# These configuration-based exclusions must match vcregress.pl
-			next if ($d eq "uuid-ossp"       && !defined($config->{uuid}));
-			next if ($d eq "sslinfo"         && !defined($config->{openssl}));
-			next if ($d eq "xml2"            && !defined($config->{xml}));
-			next if ($d eq "hstore_plperl"   && !defined($config->{perl}));
-			next if ($d eq "hstore_plpython" && !defined($config->{python}));
-			next if ($d eq "ltree_plpython"  && !defined($config->{python}));
+			next if ($d eq "uuid-ossp"  && !defined($config->{uuid}));
+			next if ($d eq "sslinfo"    && !defined($config->{openssl}));
+			next if ($d eq "xml2"       && !defined($config->{xml}));
+			next if ($d =~ /_plperl$/   && !defined($config->{perl}));
+			next if ($d =~ /_plpython$/ && !defined($config->{python}));
 			next if ($d eq "sepgsql");
 
 			CopySubdirFiles($subdir, $d, $config, $target);
 		}
 	}
 	print "\n";
+	return;
 }
 
 sub CopySubdirFiles
@@ -550,6 +528,51 @@ sub CopySubdirFiles
 		}
 	}
 
+	{
+		$flist = '';
+		if ($mf =~ /^HEADERS\s*=\s*(.*)$/m) { $flist .= $1 }
+		my @modlist  = ();
+		my %fmodlist = ();
+		while ($mf =~ /^HEADERS_([^\s=]+)\s*=\s*(.*)$/mg)
+		{
+			$fmodlist{$1} .= $2;
+		}
+
+		if ($mf =~ /^MODULE_big\s*=\s*(.*)$/m)
+		{
+			push @modlist, $1;
+			if ($flist ne '')
+			{
+				$fmodlist{$1} = $flist;
+				$flist = '';
+			}
+		}
+		elsif ($mf =~ /^MODULES\s*=\s*(.*)$/m)
+		{
+			push @modlist, split /\s+/, $1;
+		}
+
+		croak "HEADERS requires MODULE_big in $subdir $module"
+		  if $flist ne '';
+
+		foreach my $mod (keys %fmodlist)
+		{
+			croak "HEADERS_$mod for unknown module in $subdir $module"
+			  unless grep { $_ eq $mod } @modlist;
+			$flist = ParseAndCleanRule($fmodlist{$mod}, $mf);
+			EnsureDirectories($target, "include", "include/server",
+				"include/server/$moduledir",
+				"include/server/$moduledir/$mod");
+			foreach my $f (split /\s+/, $flist)
+			{
+				lcopy("$subdir/$module/$f",
+					"$target/include/server/$moduledir/$mod/" . basename($f))
+				  || croak("Could not copy file $f in $subdir $module");
+				print '.';
+			}
+		}
+	}
+
 	$flist = '';
 	if ($mf =~ /^DOCS\s*=\s*(.*)$/mg) { $flist .= $1 }
 	if ($flist ne '')
@@ -558,7 +581,7 @@ sub CopySubdirFiles
 
 		# Special case for contrib/spi
 		$flist =
-"autoinc.example insert_username.example moddatetime.example refint.example timetravel.example"
+		  "autoinc.example insert_username.example moddatetime.example refint.example"
 		  if ($module eq 'spi');
 		foreach my $f (split /\s+/, $flist)
 		{
@@ -567,6 +590,7 @@ sub CopySubdirFiles
 			print '.';
 		}
 	}
+	return;
 }
 
 sub ParseAndCleanRule
@@ -606,7 +630,7 @@ sub CopyIncludeFiles
 		'Public headers', $target . '/include/',
 		'src/include/',   'postgres_ext.h',
 		'pg_config.h',    'pg_config_ext.h',
-		'pg_config_os.h', 'dynloader.h', 'pg_config_manual.h');
+		'pg_config_os.h', 'pg_config_manual.h');
 	lcopy('src/include/libpq/libpq-fs.h', $target . '/include/libpq/')
 	  || croak 'Could not copy libpq-fs.h';
 
@@ -631,8 +655,7 @@ sub CopyIncludeFiles
 	CopyFiles(
 		'Server headers',
 		$target . '/include/server/',
-		'src/include/', 'pg_config.h', 'pg_config_ext.h', 'pg_config_os.h',
-		'dynloader.h');
+		'src/include/', 'pg_config.h', 'pg_config_ext.h', 'pg_config_os.h');
 	CopyFiles(
 		'Grammar header',
 		$target . '/include/server/parser/',
@@ -659,9 +682,9 @@ sub CopyIncludeFiles
 		next unless (-d "src/include/$d");
 
 		EnsureDirectories("$target/include/server/$d");
-		my @args = ('xcopy', '/s', '/i', '/q', '/r', '/y',
-				 "src\\include\\$d\\*.h",
-				 "$ctarget\\include\\server\\$d\\");
+		my @args = (
+			'xcopy', '/s', '/i', '/q', '/r', '/y', "src\\include\\$d\\*.h",
+			"$ctarget\\include\\server\\$d\\");
 		system(@args) && croak("Failed to copy include directory $d\n");
 	}
 	closedir($D);
@@ -684,6 +707,7 @@ sub CopyIncludeFiles
 		'src/interfaces/ecpg/include/',
 		split /\s+/, $1);
 	}
+	return;
 }
 
 sub GenerateNLSFiles
@@ -696,10 +720,11 @@ sub GenerateNLSFiles
 	EnsureDirectories($target, "share/locale");
 	my @flist;
 	File::Find::find(
-		{   wanted => sub {
+		{
+			wanted => sub {
 				/^nls\.mk\z/s
 				  && !push(@flist, $File::Find::name);
-			  }
+			}
 		},
 		"src");
 	foreach (@flist)
@@ -716,15 +741,17 @@ sub GenerateNLSFiles
 
 			EnsureDirectories($target, "share/locale/$lang",
 				"share/locale/$lang/LC_MESSAGES");
-			my @args = ("$nlspath\\bin\\msgfmt",
-			   '-o',
-			   "$target\\share\\locale\\$lang\\LC_MESSAGES\\$prgm-$majorver.mo",
-			   $_);
+			my @args = (
+				"$nlspath\\bin\\msgfmt",
+				'-o',
+				"$target\\share\\locale\\$lang\\LC_MESSAGES\\$prgm-$majorver.mo",
+				$_);
 			system(@args) && croak("Could not run msgfmt on $dir\\$_");
 			print ".";
 		}
 	}
 	print "\n";
+	return;
 }
 
 sub DetermineMajorVersion
@@ -753,7 +780,7 @@ sub read_file
 	my $t = $/;
 
 	undef $/;
-	open($F, $filename) || die "Could not open file $filename\n";
+	open($F, '<', $filename) || die "Could not open file $filename\n";
 	my $txt = <$F>;
 	close($F);
 	$/ = $t;

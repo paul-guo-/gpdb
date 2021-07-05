@@ -6,7 +6,7 @@
  *	  message integrity and endpoint authentication.
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -18,12 +18,10 @@
 
 #include "postgres.h"
 
-#include <sys/stat.h>
 #include <signal.h>
 #include <fcntl.h>
 #include <ctype.h>
 #include <sys/socket.h>
-#include <unistd.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #ifdef HAVE_NETINET_TCP_H
@@ -33,15 +31,21 @@
 
 #include "libpq/libpq.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "tcop/tcopprot.h"
 #include "utils/memutils.h"
+#include "storage/ipc.h"
 #include "storage/proc.h"
 
 
+char	   *ssl_library;
 char	   *ssl_cert_file;
 char	   *ssl_key_file;
 char	   *ssl_ca_file;
 char	   *ssl_crl_file;
+char	   *ssl_dh_params_file;
+char	   *ssl_passphrase_command;
+bool		ssl_passphrase_command_supports_reload;
 
 #ifdef USE_SSL
 bool		ssl_loaded_verify_locations = false;
@@ -56,21 +60,39 @@ char	   *SSLECDHCurve;
 /* GUC variable: if false, prefer client ciphers */
 bool		SSLPreferServerCiphers;
 
+int			ssl_min_protocol_version;
+int			ssl_max_protocol_version;
+
 /* ------------------------------------------------------------ */
 /*			 Procedures common to all secure sessions			*/
 /* ------------------------------------------------------------ */
 
 /*
- *	Initialize global context
+ *	Initialize global context.
+ *
+ * If isServerStart is true, report any errors as FATAL (so we don't return).
+ * Otherwise, log errors at LOG level and return -1 to indicate trouble,
+ * preserving the old SSL state if any.  Returns 0 if OK.
  */
 int
-secure_initialize(void)
+secure_initialize(bool isServerStart)
 {
 #ifdef USE_SSL
-	be_tls_init();
-#endif
-
+	return be_tls_init(isServerStart);
+#else
 	return 0;
+#endif
+}
+
+/*
+ *	Destroy global context, if any.
+ */
+void
+secure_destroy(void)
+{
+#ifdef USE_SSL
+	be_tls_destroy();
+#endif
 }
 
 /*
@@ -96,6 +118,10 @@ secure_open_server(Port *port)
 
 #ifdef USE_SSL
 	r = be_tls_open_server(port);
+
+	ereport(DEBUG2,
+			(errmsg("SSL connection from \"%s\"",
+					port->peer_cn ? port->peer_cn : "(anonymous)")));
 #endif
 
 	return r;
@@ -122,12 +148,23 @@ secure_read(Port *port, void *ptr, size_t len)
 	ssize_t		n;
 	int			waitfor;
 
+	/* Deal with any already-pending interrupt condition. */
+	ProcessClientReadInterrupt(false);
+
 retry:
 #ifdef USE_SSL
 	waitfor = 0;
 	if (port->ssl_in_use)
 	{
 		n = be_tls_read(port, ptr, len, &waitfor);
+	}
+	else
+#endif
+#ifdef ENABLE_GSS
+	if (port->gss->enc)
+	{
+		n = be_gssapi_read(port, ptr, len);
+		waitfor = WL_SOCKET_READABLE;
 	}
 	else
 #endif
@@ -139,16 +176,39 @@ retry:
 	/* In blocking mode, wait until the socket is ready */
 	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
 	{
-		int			w;
+		WaitEvent	event;
 
 		Assert(waitfor);
 
-		w = WaitLatchOrSocket(MyLatch,
-							  WL_LATCH_SET | waitfor,
-							  port->sock, 0);
+		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+
+		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
+						 WAIT_EVENT_CLIENT_READ);
+
+		/*
+		 * If the postmaster has died, it's not safe to continue running,
+		 * because it is the postmaster's job to kill us if some other backend
+		 * exits uncleanly.  Moreover, we won't run very well in this state;
+		 * helper processes like walwriter and the bgwriter will exit, so
+		 * performance may be poor.  Finally, if we don't exit, pg_ctl will be
+		 * unable to restart the postmaster without manual intervention, so no
+		 * new connections can be accepted.  Exiting clears the deck for a
+		 * postmaster restart.
+		 *
+		 * (Note that we only make this check when we would otherwise sleep on
+		 * our latch.  We might still continue running for a while if the
+		 * postmaster is killed in mid-query, or even through multiple queries
+		 * if we never have to wait for read.  We don't want to burn too many
+		 * cycles checking for this very rare condition, and this should cause
+		 * us to exit quickly in most cases.)
+		 */
+		if (event.events & WL_POSTMASTER_DEATH)
+			ereport(FATAL,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("terminating connection due to unexpected postmaster exit")));
 
 		/* Handle interrupt. */
-		if (w & WL_LATCH_SET)
+		if (event.events & WL_LATCH_SET)
 		{
 			ResetLatch(MyLatch);
 			ProcessClientReadInterrupt(true);
@@ -163,9 +223,8 @@ retry:
 	}
 
 	/*
-	 * Process interrupts that happened while (or before) receiving. Note that
-	 * we signal that we're not blocking, which will prevent some types of
-	 * interrupts from being processed.
+	 * Process interrupts that happened during a successful (or non-blocking,
+	 * or hard-failed) read.
 	 */
 	ProcessClientReadInterrupt(false);
 
@@ -206,12 +265,23 @@ secure_write(Port *port, void *ptr, size_t len)
 	ssize_t		n;
 	int			waitfor;
 
+	/* Deal with any already-pending interrupt condition. */
+	ProcessClientWriteInterrupt(false);
+
 retry:
 	waitfor = 0;
 #ifdef USE_SSL
 	if (port->ssl_in_use)
 	{
 		n = be_tls_write(port, ptr, len, &waitfor);
+	}
+	else
+#endif
+#ifdef ENABLE_GSS
+	if (port->gss->enc)
+	{
+		n = be_gssapi_write(port, ptr, len);
+		waitfor = WL_SOCKET_WRITEABLE;
 	}
 	else
 #endif
@@ -222,33 +292,39 @@ retry:
 
 	if (n < 0 && !port->noblock && (errno == EWOULDBLOCK || errno == EAGAIN))
 	{
-		int			w;
+		WaitEvent	event;
 
 		Assert(waitfor);
 
-		w = WaitLatchOrSocket(MyLatch,
-							  WL_LATCH_SET | waitfor,
-							  port->sock, 0);
+		ModifyWaitEvent(FeBeWaitSet, 0, waitfor, NULL);
+
+		WaitEventSetWait(FeBeWaitSet, -1 /* no timeout */ , &event, 1,
+						 WAIT_EVENT_CLIENT_WRITE);
+
+		/* See comments in secure_read. */
+		if (event.events & WL_POSTMASTER_DEATH)
+			ereport(FATAL,
+					(errcode(ERRCODE_ADMIN_SHUTDOWN),
+					 errmsg("terminating connection due to unexpected postmaster exit")));
 
 		/* Handle interrupt. */
-		if (w & WL_LATCH_SET)
+		if (event.events & WL_LATCH_SET)
 		{
 			ResetLatch(MyLatch);
 			ProcessClientWriteInterrupt(true);
 
 			/*
 			 * We'll retry the write. Most likely it will return immediately
-			 * because there's still no data available, and we'll wait for the
-			 * socket to become ready again.
+			 * because there's still no buffer space available, and we'll wait
+			 * for the socket to become ready again.
 			 */
 		}
 		goto retry;
 	}
 
 	/*
-	 * Process interrupts that happened while (or before) sending. Note that
-	 * we signal that we're not blocking, which will prevent some types of
-	 * interrupts from being processed.
+	 * Process interrupts that happened during a successful (or non-blocking,
+	 * or hard-failed) write.
 	 */
 	ProcessClientWriteInterrupt(false);
 

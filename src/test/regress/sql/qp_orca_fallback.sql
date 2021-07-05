@@ -92,6 +92,7 @@ set optimizer_enable_dml=on;
 
 create table foo(a int, b int);
 insert into foo select i%100, i%100 from generate_series(1,10000)i;
+analyze foo;
 set optimizer_enable_hashagg = on;
 set optimizer_enable_groupagg = on;
 explain select count(*) from foo group by a;
@@ -101,3 +102,15 @@ explain select count(*) from foo group by a;
 set optimizer_enable_hashagg = off;
 set optimizer_enable_groupagg = off;
 explain select count(*) from foo group by a;
+
+create table ext_part(a int) partition by list(a);
+create table p1(a int);
+create external web table p2_ext (like p1) EXECUTE 'cat something.txt' FORMAT 'TEXT';
+alter table ext_part attach partition p1 for values in (1);
+alter table ext_part attach partition p2_ext for values in (2);
+explain select * from ext_part;
+-- start_ignore
+-- FIXME: gpcheckcat fails due to mismatching distribution policy if this table isn't dropped
+-- Keep this table around once this is fixed
+drop table ext_part;
+-- end_ignore

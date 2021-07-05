@@ -456,7 +456,6 @@ format 'csv';
 select count(*) from bad_location2;
 drop external table bad_location2;
 
-
 --
 -- WET tests
 --
@@ -466,8 +465,11 @@ drop external table bad_location2;
 --
 -- positive
 create writable external table wet_pos1(a text, b text) location('gpfdist://@hostname@:7070/wet.out') format 'text';
+\d wet_pos1
 create writable external table wet_pos2(a text, b text) location('gpfdist://@hostname@:7070/wet.out') format 'text' distributed by(b);
+\d wet_pos2
 create writable external table wet_pos3(like wet_pos2) location('gpfdist://@hostname@:7070/wet.out') format 'text' distributed by(a,b);
+\d wet_pos3
 create writable external table wet_region(like reg_region) location('gpfdist://@hostname@:7070/wet_region.out') format 'text';
 create readable external table ret_region(like wet_region) location('gpfdist://@hostname@:7070/wet_region.out') format 'text';
 
@@ -515,10 +517,82 @@ DROP EXTERNAL TABLE IF EXISTS ext_table_multi_locations;
 select * from exttab1_gpfdist_stop;
 -- end_ignore
 
+-- Test GUC gpfdist_retry_timeout. gpfdist is stopped, insert will retry until timeout
+
+CREATE TABLE test_guc (a int, b text) DISTRIBUTED BY (a);
+INSERT INTO  test_guc VALUES (generate_series(1,256), 'test_guc');
+
+CREATE WRITABLE EXTERNAL TABLE wext_test_guc (a int, b text) LOCATION ('gpfdist://127.0.0.1:7070/test_guc.tbl') FORMAT 'TEXT' (DELIMITER AS '|' NULL AS 'null');
+
+-- retry interval 1, 2, 4, 8, 16, then timeout. total 6 tries
+set gpfdist_retry_timeout = 20;
+INSERT INTO wext_test_guc SELECT * FROM test_guc;
+
+DROP TABLE IF EXISTS test_guc;
+DROP EXTERNAL TABLE IF EXISTS wext_test_guc;
+
+--
+-- Test transform
+--
+CREATE EXTERNAL TABLE ext_transform (a text)
+location('gpfdist://localhost:7070/*#transform=catfile', 'gpfdist://localhost:7080/*#transform=catfile') format 'text';
+
+CREATE EXTERNAL WEB TABLE gpfdist1_transform_start (x text)
+execute E'((@bindir@/gpfdist -p 7070 -d @abs_srcdir@/data/transform -c @abs_srcdir@/data/catfile.yml </dev/null >/dev/null 2>&1 &); for i in `seq 1 30`; do curl 127.0.0.1:7070 >/dev/null 2>&1 && break; sleep 1; done; echo "starting...") '
+on SEGMENT 0
+FORMAT 'text' (delimiter '|');
+
+CREATE EXTERNAL WEB TABLE gpfdist2_transform_start (x text)
+execute E'((@bindir@/gpfdist -p 7080 -d @abs_srcdir@/data/transform -c @abs_srcdir@/data/catfile.yml </dev/null >/dev/null 2>&1 &); for i in `seq 1 30`; do curl 127.0.0.1:7070 >/dev/null 2>&1 && break; sleep 1; done; echo "starting...") '
+on SEGMENT 0
+FORMAT 'text' (delimiter '|');
+
+-- start_ignore
+select * from exttab1_gpfdist_stop;
+select * from gpfdist1_transform_start;
+select * from gpfdist2_transform_start;
+-- end_ignore
+
+select count(*) from ext_transform;
+
+-- start_ignore
+select * from exttab1_gpfdist_stop;
+-- end_ignore
+
+-- drop tables
+DROP EXTERNAL TABLE ext_transform;
+
 --
 -- get an error for missing gpfdist
 --
 select count(*) from ext_whois;
+
+
+-- Test external table sreh output in gp_read_error_log() print rawbytes with \0 in it.
+-- start_ignore
+select * from exttab1_gpfdist_stop;
+select * from exttab1_gpfdist_start;
+-- end_ignore
+-- sreh 1 text format with bad data.
+
+drop external table if exists external_sreh_bad_data_text;
+create external table external_sreh_bad_data_text(name text) location('gpfdist://@hostname@:7070/exttab1/bad_data.tbl') format 'text' log errors segment reject limit 3;
+select * from external_sreh_bad_data_text;
+select rawbytes from gp_read_error_log('external_sreh_bad_data_text');
+drop external table external_sreh_bad_data_text;
+
+-- sreh 2 custom format with bad data.
+drop external table if exists external_sreh_bad_data;
+create external table external_sreh_bad_data(name text) location('gpfdist://@hostname@:7070/exttab1/bad_data.tbl') format 'custom' (formatter='fixedwidth_in', name='5') log errors segment reject limit 3;
+select * from external_sreh_bad_data;
+select rawbytes from gp_read_error_log('external_sreh_bad_data');
+drop external table external_sreh_bad_data;
+
+
+-- start_ignore
+select * from exttab1_gpfdist_stop;
+-- end_ignore
+-- End Test external table sreh output in gp_read_error_log() print rawbytes with \0 in it.
 
 drop external table ext_whois;
 drop external table exttab1_gpfdist_start;

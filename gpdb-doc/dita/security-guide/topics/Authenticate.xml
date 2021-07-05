@@ -179,7 +179,7 @@ hostnossl  <varname>database</varname>  <varname>user</varname>  <varname>IP-add
         receives a SIGHUP signal. If you edit the file on an active system, you must reload the file
         using this command:<codeblock>$ gpstop -u</codeblock></p>
       <note type="caution">For a more secure system, remove records for remote connections that use
-        <codeph>trust</codeph> authentication from the <codeph>pg_hba.conf</codeph> file. <codeph>rust</codeph> authentication grants
+        <codeph>trust</codeph> authentication from the <codeph>pg_hba.conf</codeph> file. <codeph>trust</codeph> authentication grants
         any user who can connect to the server access to the database using any role they specify.
         You can safely replace <codeph>trust</codeph> authentication with <codeph>ident</codeph> authentication for local UNIX-socket
         connections. You can also use <codeph>ident</codeph> authentication for local and remote TCP clients, but the
@@ -258,6 +258,25 @@ host    all   dba   192.168.0.0/32  md5</codeblock></li>
         <p>
           <parml id="ul_zsk_kwd_jr">
             <plentry>
+              <pt>Trust</pt>
+              <pd>Allows the connection unconditionally, without the need for a password or any
+                other authentication. This entry is required for the <codeph>gpadmin</codeph> role,
+                and for Greenplum utilities (for example <codeph>gpinitsystem</codeph>,
+                  <codeph>gpstop</codeph>, or <codeph>gpstart</codeph> amongst others) that need to
+                connect between nodes without prompting for input or a password. </pd>
+              <pd>
+                <note type="important">For a more secure system, remove records for remote
+                  connections that use <codeph>trust</codeph> authentication from
+                    the <codeph>pg_hba.conf</codeph> file. <codeph>trust</codeph> authentication
+                  grants any user who can connect to the server access to the database using any
+                  role they specify. You can safely replace <codeph>trust</codeph> authentication
+                  with <codeph>ident</codeph> authentication for local UNIX-socket connections. You
+                  can also use <codeph>ident</codeph> authentication for local and remote TCP
+                  clients, but the client host must be running an ident service and you must
+                    <codeph>trust</codeph> the integrity of that machine.</note>
+              </pd>
+            </plentry>
+            <plentry>
               <pt>Reject</pt>
               <pd>Reject the connections with the matching parameters. You should typically use this
                 to restrict access from specific hosts or insecure connections.</pd>
@@ -295,6 +314,14 @@ host    all   dba   192.168.0.0/32  md5</codeblock></li>
 hostssl      all   testuser   0.0.0.0/0 md5
 local        all   gpuser               ident</codeblock></p>
       </section>
+      <p>Or:</p>
+      <codeblock>
+local    all           gpadmin         ident 
+host     all           gpadmin         localhost      trust 
+host     all           gpadmin         mdw            trust 
+local    replication   gpadmin         ident 
+host     replication   gpadmin         samenet       trust 
+host     all           all             0.0.0.0/0     md5</codeblock>
       <section id="kerberos_auth">
         <title>GSSAPI Authentication</title>
         <p>GSSAPI is an industry-standard protocol for secure authentication defined in RFC 2743.
@@ -491,12 +518,12 @@ Hostssl testdb all 192.168.0.0/16 cert map=gpuser
 </codeblock></p></li>
           </ul></p>
       </section>
-      <section id="openssl_config">
+      <section>
         <title>OpenSSL Configuration</title>
-        <p>Greenplum Database reads the OpenSSL configuration file specified in
-            <codeph>$GP_HOME/etc/openssl.cnf</codeph> by default. You can make changes to the
-          default configuration for OpenSSL by modifying or updating this file and restarting the
-          server.</p>
+        <p>You can make changes to the OpenSSL configuration by updating the
+            <codeph>openssl.cnf</codeph> file under your OpenSSL installation directory, or the file
+          referenced by <codeph>$OPENSSL_CONF</codeph>, if present, and then restarting the
+          Greenplum Database server.</p>
       </section>
       <section id="create_a_cert">
         <title>Creating a Self-Signed Certificate</title>
@@ -512,7 +539,9 @@ Hostssl testdb all 192.168.0.0/16 cert map=gpuser
             <li>The program generates a key that is passphrase-protected; it does not accept a
               passphrase that is less than four characters long. To remove the passphrase (and you
               must if you want automatic start-up of the server), run the following
-              command:<codeblock>openssl rsa -in privkey.pem -out server.key rm privkey.pem</codeblock></li>
+              command:
+              <codeblock>openssl rsa -in privkey.pem -out server.key
+rm privkey.pem</codeblock></li>
             <li>Enter the old passphrase to unlock the existing key. Then run the following
                 command:<codeblock>openssl req -x509 -in server.req -text -key server.key -out server.crt</codeblock><p>This
                 turns the certificate into a self-signed certificate and copies the key and
@@ -532,95 +561,147 @@ Hostssl testdb all 192.168.0.0/16 cert map=gpuser
             <li><codeph>ssl_renegotiation_limit</codeph>
               <i>integer</i>. Specifies the data limit before key renegotiation.</li>
             <li><codeph>ssl_ciphers</codeph>
-              <i>string</i>. Lists SSL ciphers that are allowed.</li>
+              <i>string</i>. Configures the list SSL ciphers that are allowed.
+                <codeph>ssl_ciphers</codeph>
+              <i>overrides</i> any ciphers string specified in <codeph>/etc/openssl.cnf</codeph>.
+              The default value <codeph>ALL:!ADH:!LOW:!EXP:!MD5:@STRENGTH</codeph> enables all
+              ciphers except for ADH, LOW, EXP, and MD5 ciphers, and prioritizes ciphers by their
+              strength.
+              <note>With TLS 1.2 some ciphers in MEDIUM and HIGH strength still use NULL encryption
+                (no encryption for transport), which the default <codeph>ssl_ciphers</codeph> string
+                allows. To bypass NULL ciphers with TLS 1.2 use a string such as
+                  <codeph>TLSv1.2:!eNULL:!aNULL</codeph>.<p>It is possible to have authentication
+                  without encryption overhead by using <codeph>NULL-SHA</codeph> or
+                    <codeph>NULL-MD5</codeph> ciphers. However, a man-in-the-middle could read and
+                  pass communications between client and server. Also, encryption overhead is
+                  minimal compared to the overhead of authentication. For these reasons, NULL
+                  ciphers should not be used.</p></note></li>
           </ul></p>
-        <p>The following SSL server files can be found in the Master Data Directory: <ul
-            id="ul_gzs_b22_jr">
-            <li><codeph>server.crt</codeph>. Server certificate.</li>
-            <li><codeph>server.key</codeph>. Server private key.</li>
-            <li><codeph>root.crt</codeph>. Trusted certificate authorities.</li>
-            <li><codeph>root.crl</codeph>. Certificates revoked by certificate authorities.</li>
+        <p>The default location for the following SSL server files is the Greenplum Database master
+          data directory (<codeph>$MASTER_DATA_DIRECTORY</codeph>): <ul id="ul_gzs_b22_jr">
+            <li><codeph>server.crt</codeph> - Server certificate.</li>
+            <li><codeph>server.key</codeph> - Server private key.</li>
+            <li><codeph>root.crt</codeph> - Trusted certificate authorities.</li>
+            <li><codeph>root.crl</codeph> - Certificates revoked by certificate authorities.</li>
           </ul></p>
+        <p>If Greenplum Database master mirroring is enabled with SSL client authentication, the SSL
+          server files <i>should not be placed</i> in the default directory
+            <codeph>$MASTER_DATA_DIRECTORY</codeph>. If a <codeph>gpinitstandby</codeph> operation
+          is performed, the contents of <codeph>$MASTER_DATA_DIRECTORY</codeph> is copied from the
+          master to the standby master and the incorrect SSL key, and cert files (the master files,
+          and not the standby master files) will prevent standby master start up. </p>
+        <p>You can specify a different directory for the location of the SSL server files with the
+            <codeph>postgresql.conf</codeph> parameters <codeph>sslcert</codeph>,
+            <codeph>sslkey</codeph>, <codeph>sslrootcert</codeph>, and <codeph>sslcrl</codeph>.</p>
       </section>
       <section id="config_ssl_client_conn">
         <title>Configuring the SSL Client Connection</title>
       </section>
       <p>SSL options:<parml>
           <plentry>
-            <pt>
-              <codeph>require</codeph>
-            </pt>
-            <pd>Only use SSL connection. If a root CA file is present, verify the certificate in the
-              same way as if <codeph>verify-ca</codeph> was specified.</pd>
-          </plentry>
-          <plentry>
-            <pt>
-              <codeph>verify-ca</codeph>
-            </pt>
-            <pd>Only use an SSL connection. Verify that the server certificate is issued by a
-              trusted CA.</pd>
-          </plentry>
-          <plentry>
-            <pt>
-              <codeph>verify-full</codeph>
-            </pt>
-            <pd>Only use an SSL connection. Verify that the server certificate is issued by a
-              trusted CA and that the server host name matches that in the certificate.</pd>
+            <pt>sslmode</pt>
+            <pd>Specifies the level of protection.<parml>
+                <plentry>
+                  <pt>
+                    <codeph>require</codeph>
+                  </pt>
+                  <pd>Only use an SSL connection. If a root CA file is present, verify the
+                    certificate in the same way as if <codeph>verify-ca</codeph> was specified.</pd>
+                </plentry>
+                <plentry>
+                  <pt>
+                    <codeph>verify-ca</codeph>
+                  </pt>
+                  <pd>Only use an SSL connection. Verify that the server certificate is issued by a
+                    trusted CA.</pd>
+                </plentry>
+                <plentry>
+                  <pt>
+                    <codeph>verify-full</codeph>
+                  </pt>
+                  <pd>Only use an SSL connection. Verify that the server certificate is issued by a
+                    trusted CA and that the server host name matches that in the certificate.</pd>
+                </plentry>
+              </parml></pd>
           </plentry>
           <plentry>
             <pt>sslcert</pt>
             <pd>The file name of the client SSL certificate. The default is
-                <codeph>~/.postgresql/postgresql.crt</codeph>. </pd>
+                <codeph>$MASTER_DATA_DIRECTORY/postgresql.crt</codeph>. </pd>
           </plentry>
           <plentry>
             <pt>sslkey</pt>
             <pd>The secret key used for the client certificate. The default is
-                <codeph>~/.postgresql/postgresql.key</codeph>.</pd>
+                <codeph>$MASTER_DATA_DIRECTORY/postgresql.key</codeph>.</pd>
           </plentry>
           <plentry>
             <pt>sslrootcert</pt>
             <pd>The name of a file containing SSL Certificate Authority certificate(s). The default
-              is <codeph>~/.postgresql/root.crt</codeph>.</pd>
+              is <codeph>$MASTER_DATA_DIRECTORY/root.crt</codeph>.</pd>
           </plentry>
           <plentry>
             <pt>sslcrl</pt>
             <pd>The name of the SSL certificate revocation list. The default is
-                <codeph>~/.postgresql/root.crl</codeph>.</pd>
+                <codeph>$MASTER_DATA_DIRECTORY/root.crl</codeph>.</pd>
           </plentry>
         </parml></p>
       <p>The client connection parameters can be set using the following environment variables:<ul
           id="ul_yph_5g2_jr">
           <li><codeph>sslmode</codeph> – <codeph>PGSSLMODE</codeph></li>
+          <li><codeph>sslcert</codeph> – <codeph>PGSSLCERT</codeph></li>
           <li><codeph>sslkey</codeph> – <codeph>PGSSLKEY</codeph></li>
           <li><codeph>sslrootcert</codeph> – <codeph>PGSSLROOTCERT</codeph></li>
-          <li><codeph>sslcert</codeph> – <codeph>PGSSLCERT</codeph></li>
           <li><codeph>sslcrl</codeph> – <codeph>PGSSLCRL</codeph> </li>
         </ul></p>
+      <p>For example, run the following command to connect to the <codeph>postgres</codeph> database
+        from <codeph>localhost</codeph> and verify the certificate present in the default location
+        under <codeph>$MASTER_DATA_DIRECTORY</codeph>:
+        <codeblock>psql "sslmode=verify-ca host=localhost dbname=postgres"</codeblock></p>
     </body>
   </topic>
   <topic id="topic_yxp_5h2_jr">
-    <title>PAM Based Authentication</title>
+    <title>PAM-Based Authentication</title>
     <body>
-      <p>"PAM" (Pluggable Authentication Modules) is used to validate username/password pairs,
-        similar to basic authentication. PAM authentication only works if the users already exist in
-        the database. </p>
-      <section>
-        <title>Parameters</title>
-        <p>
-          <parml>
-            <plentry>
-              <pt>
-                <codeph>pamservice</codeph>
-              </pt>
-              <pd>The default PAM service is <codeph>postgresql</codeph>. Note that if PAM is set up
-                to read <codeph>/etc/shadow</codeph>, authentication will fail because the
-                PostgreSQL server is started by a non-root user.</pd>
-            </plentry>
-          </parml>
-        </p>
-        <p>Following are sample <codeph>pg_hba.conf</codeph> entries for PAM client
-          authentication:<codeblock>local    all gpuser am pamservice=postgresql</codeblock></p>
-      </section>
+      <p>The "PAM" (Pluggable Authentication Modules) authentication method validates
+        username/password pairs, similar to basic authentication. To use PAM
+        authentication, the user must already exist as a Greenplum Database role name.</p>
+      <p>Greenplum uses the <codeph>pamservice</codeph> authentication parameter
+        to identify the service from which to obtain the PAM configuration.</p>
+      <note>If PAM is set up to read <codeph>/etc/shadow</codeph>, authentication will
+        fail because the PostgreSQL server is started by a non-root user. This is not
+        an issue when PAM is configured to use LDAP or another authentication method.</note>
+      <p>Greenplum Database does not install a PAM configuration file. If you choose
+        to use PAM authentication with Greenplum, you must identify the PAM service
+        name for Greenplum and create the associated PAM service configuration file
+        and configure Greenplum Database to use PAM authentication as described below:</p>
+      <ol>
+        <li>Log in to the Greenplum Database master host and set up your environment.
+          For example:<codeblock>$ ssh gpadmin@&lt;gpmaster&gt;
+gpadmin@gpmaster$ . /usr/local/greenplum-db/greenplum_path.sh</codeblock></li>
+        <li>Identify the <codeph>pamservice</codeph> name for Greenplum Database. In
+          this procedure, we choose the name <codeph>greenplum</codeph>.</li>
+        <li>Create the PAM service configuration file, <codeph>/etc/pam.d/greenplum</codeph>,
+          and add the text below. You must have operating system superuser
+          privileges to create the <codeph>/etc/pam.d</codeph> directory (if
+          necessary) and the <codeph>greenplum</codeph> PAM configuration file.
+<codeblock>#%PAM-1.0
+auth		include		password-auth
+account		include		password-auth
+</codeblock>
+          <p>This configuration instructs PAM to authenticate the local operating
+            system user.</p></li>
+        <li>Ensure that the <codeph>/etc/pam.d/greenplum</codeph> file is readable
+          by all users: <codeblock>sudo chmod 644 /etc/pam.d/greenplum</codeblock></li>
+        <li>Add one or more entries to the <codeph>pg_hba.conf</codeph> configuration
+          file to enable PAM authentication in Greenplum Database. These entries must
+          specify the <codeph>pam</codeph> <i>auth-method</i>. You must also specify
+          the <codeph>pamservice=greenplum</codeph> <i>auth-option</i>. For example:
+<codeblock>
+host     &lt;user-name>     &lt;db-name>     &lt;address>     pam     pamservice=greenplum
+</codeblock></li>
+        <li>Reload the Greenplum Database configuration:
+          <codeblock>$ gpstop -u</codeblock></li>
+      </ol>
     </body>
   </topic>
   <topic id="topic_ed4_d32_jr">

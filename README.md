@@ -1,5 +1,6 @@
 **Concourse Pipeline** [![Concourse Build Status](https://prod.ci.gpdb.pivotal.io/api/v1/teams/main/pipelines/gpdb_master/badge)](https://prod.ci.gpdb.pivotal.io/teams/main/pipelines/gpdb_master) |
-**Travis Build** [![Travis Build Status](https://travis-ci.org/greenplum-db/gpdb.svg?branch=master)](https://travis-ci.org/greenplum-db/gpdb)
+**Travis Build** [![Travis Build Status](https://travis-ci.org/greenplum-db/gpdb.svg?branch=master)](https://travis-ci.org/greenplum-db/gpdb) |
+**Zuul Regression Test On Arm** [![Zuul Regression Test Status](http://openlabtesting.org:15000/badge?project=greenplum-db%2Fgpdb)](https://status.openlabtesting.org/builds/builds?project=greenplum-db%2Fgpdb&job_name=gpdb-installcheck-world-tests-on-arm64)
 
 ----------------------------------------------------------------------
 
@@ -20,47 +21,27 @@ no contribution is too small, we encourage all types of contributions.
 
 ## Overview
 
-A Greenplum cluster consists of a __master__ server, and multiple
-__segment__ servers. All user data resides in the segments, the master
-contains only metadata. The master server, and all the segments, share
+A Greenplum cluster consists of a __coordinator__ server, and multiple
+__segment__ servers. All user data resides in the segments, the coordinator
+contains only metadata. The coordinator server, and all the segments, share
 the same schema.
 
-Users always connect to the master server, which divides up the query
+Users always connect to the coordinator server, which divides up the query
 into fragments that are executed in the segments, and collects the results.
 
 More information can be found on the [project website](https://greenplum.org/).
 
 ## Building Greenplum Database with GPORCA
 GPORCA is a cost-based optimizer which is used by Greenplum Database in
-conjunction with the PostgreSQL planner.  It is also known as just ORCA,
-and Pivotal Optimizer. The code for GPORCA resides in a
-separate repository, below are steps outlining how to build Greenplum with
-GPORCA enabled.
+conjunction with the PostgreSQL planner.  It is also known as just ORCA, and
+Pivotal Optimizer. The code for GPORCA resides src/backend/gporca. It is built
+automatically by default.
 
 ### Installing dependencies (for macOS developers)
 Follow [these macOS steps](README.macOS.md) for getting your system ready for GPDB
 
 ### Installing dependencies (for Linux developers)
-Follow [appropriate linux steps](README.linux.md) for getting your system ready for GPDB
-
-<a name="buildOrca"></a>
-### Build the optimizer
-#### Automatically with Conan dependency manager
-
-```bash
-cd depends
-./configure
-make
-make install_local
-cd ..
-```
-
-#### Manually
-Follow the directions in the [GPORCA README](https://github.com/greenplum-db/gporca).
-
-**Note**: Get the latest GPORCA `git pull --ff-only` if you see an error message like below:
-
-    checking Checking ORCA version... configure: error: Your ORCA version is expected to be 2.33.XXX
+Follow [appropriate linux steps](README.Linux.md) for getting your system ready for GPDB
 
 ### Build the database
 
@@ -85,19 +66,13 @@ The directory and the TCP ports for the demo cluster can be changed on the fly.
 Instead of `make cluster`, consider:
 
 ```
-DATADIRS=/tmp/gpdb-cluster MASTER_PORT=15432 PORT_BASE=25432 make cluster
+DATADIRS=/tmp/gpdb-cluster PORT_BASE=5555 make cluster
 ```
 
 The TCP port for the regression test can be changed on the fly:
 
 ```
-PGPORT=15432 make installcheck-world
-```
-
-Once build and started, run `psql` and check the GPOPT (e.g. GPORCA) version:
-
-```
-select gp_opt_version();
+PGPORT=5555 make installcheck-world
 ```
 
 To turn GPORCA off and use Postgres planner for query optimization:
@@ -143,10 +118,8 @@ make installcheck-world
 
 ### Building GPDB without GPORCA
 
-Currently, GPDB is built with GPORCA by default so latest GPORCA libraries and headers need
-to be available in the environment. [Build and Install](#buildOrca) the latest GPORCA.
-
-If you want to build GPDB without GPORCA, configure requires `--disable-orca` flag to be set.
+Currently, GPDB is built with GPORCA by default. If you want to build GPDB
+without GPORCA, configure requires `--disable-orca` flag to be set.
 ```
 # Clean environment
 make distclean
@@ -164,16 +137,6 @@ Currently, GPDB is built with PXF by default (--enable-pxf is on).
 In order to build GPDB without pxf, simply invoke `./configure` with additional option `--disable-pxf`.
 PXF requires curl, so `--enable-pxf` is not compatible with the `--without-libcurl` option.
 
-### Building GPDB with gpperfmon enabled
-
-gpperfmon tracks a variety of queries, statistics, system properties, and metrics.
-To build with it enabled, change your `configure` to have an additional option
-`--enable-gpperfmon`
-
-See [more information about gpperfmon here](gpAux/gpperfmon/README.md)
-
-gpperfmon is dependent on several libraries like apr, apu, and libsigar
-
 ### Building GPDB with Python3 enabled
 
 GPDB supports Python3 with plpython3u UDF
@@ -183,11 +146,11 @@ See [how to enable Python3](src/pl/plpython/README.md) for details.
 
 ### Building GPDB client tools on Windows
 
-See [Building GPDB client tools on Windows](README.windows.md) for details.
+See [Building GPDB client tools on Windows](README.Windows.md) for details.
 
 ## Development with Docker
 
-See [README.docker.md](README.docker.md).
+See [README.Docker.md](README.Docker.md).
 
 We provide a docker image with all dependencies required to compile and test
 GPDB [(See Usage)](src/tools/docker/README.md). You can view the dependency dockerfile at `./src/tools/docker/centos6-admin/Dockerfile`.
@@ -255,9 +218,14 @@ throughout the codebase, but a few larger additions worth noting:
   between the DXL format used by GPORCA, and the PostgreSQL internal
   representation.
 
+* __src/backend/gporca/__
+
+  Contains the GPORCA optimizer code and tests. This is written in C++. See
+  [README.md](src/backend/gporca/README.md) for more information and how to
+  unit-test GPORCA.
 * __src/backend/fts/__
 
-  FTS is a process that runs in the master node, and periodically
+  FTS is a process that runs in the coordinator node, and periodically
   polls the segments to maintain the status of each segment.
 
 ## Contributing

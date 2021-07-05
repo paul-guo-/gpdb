@@ -5,7 +5,7 @@
  *
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -70,8 +70,7 @@ CdbDispatchDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 							  char *gid,
 							  ErrorData **qeError,
 							  int *numresults,
-							  bool *badGangs,
-							  List *twophaseSegments,
+							  List *dtxSegments,
 							  char *serializedDtxContextInfo,
 							  int serializedDtxContextInfoLen)
 {
@@ -102,7 +101,7 @@ CdbDispatchDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 
 	queryText = buildGpDtxProtocolCommand(&dtxProtocolParms, &queryTextLen);
 
-	primaryGang = AllocateGang(ds, GANGTYPE_PRIMARY_WRITER, twophaseSegments);
+	primaryGang = AllocateGang(ds, GANGTYPE_PRIMARY_WRITER, dtxSegments);
 
 	Assert(primaryGang);
 
@@ -110,7 +109,7 @@ CdbDispatchDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 	cdbdisp_makeDispatchParams(ds, 1, queryText, queryTextLen);
 
 	cdbdisp_dispatchToGang(ds, primaryGang, -1);
-	addToGxactTwophaseSegments(primaryGang);
+	addToGxactDtxSegments(primaryGang);
 
 	cdbdisp_waitDispatchFinish(ds);
 
@@ -120,14 +119,6 @@ CdbDispatchDtxProtocolCommand(DtxProtocolCommand dtxProtocolCommand,
 
 	if (!pr)
 	{
-		if (!GangOK(primaryGang) && badGangs != NULL)
-		{
-			*badGangs = true;
-			elog((Debug_print_full_dtm ? LOG : DEBUG5),
-				 "CdbDispatchDtxProtocolCommand: Bad gang from dispatch of %s for gid = %s",
-				 dtxProtocolCommandLoggingStr, gid);
-		}
-
 		cdbdisp_destroyDispatcherState(ds);
 		return NULL;
 	}
@@ -168,10 +159,8 @@ qdSerializeDtxContextInfo(int *size, bool wantSnapshot, bool inCursor,
 	{
 		case DTX_CONTEXT_QD_DISTRIBUTED_CAPABLE:
 		case DTX_CONTEXT_LOCAL_ONLY:
-			DtxContextInfo_CreateOnMaster(&TempQDDtxContextInfo,
+			DtxContextInfo_CreateOnMaster(&TempQDDtxContextInfo, inCursor,
 										  txnOptions, snapshot);
-
-			TempQDDtxContextInfo.cursorContext = inCursor;
 
 			if (DistributedTransactionContext ==
 				DTX_CONTEXT_QD_DISTRIBUTED_CAPABLE && snapshot != NULL)
@@ -196,6 +185,7 @@ qdSerializeDtxContextInfo(int *size, bool wantSnapshot, bool inCursor,
 		case DTX_CONTEXT_QE_FINISH_PREPARED:
 			elog(FATAL, "Unexpected distribute transaction context: '%s'",
 				 DtxContextToString(DistributedTransactionContext));
+			break;
 
 		default:
 			elog(FATAL, "Unrecognized DTX transaction context: %d",

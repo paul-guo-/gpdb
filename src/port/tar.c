@@ -16,7 +16,7 @@
  * support only non-negative numbers, so we don't worry about the GNU rules
  * for handling negative numbers.)
  */
-static void
+void
 print_tar_number(char *s, int len, uint64 val)
 {
 	if (val < (((uint64) 1) << ((len - 1) * 3)))
@@ -110,7 +110,7 @@ tarChecksum(char *header)
  */
 enum tarError
 tarCreateHeader(char *h, const char *filename, const char *linktarget,
-				size_t size, mode_t mode, uid_t uid, gid_t gid, time_t mtime)
+				pgoff_t size, mode_t mode, uid_t uid, gid_t gid, time_t mtime)
 {
 	if (strlen(filename) > 99)
 		return TAR_NAME_TOO_LONG;

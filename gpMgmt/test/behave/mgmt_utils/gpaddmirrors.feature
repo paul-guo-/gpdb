@@ -14,8 +14,42 @@ Feature: Tests for gpaddmirrors
           And user can start transactions
          Then the tablespace is valid
 
+    Scenario Outline: limits number of parallel processes correctly
+        Given the cluster is generated with "3" primaries only
+        And a tablespace is created with data
+        When gpaddmirrors adds 3 mirrors with additional args "<args>"
+        Then gpaddmirrors should only spawn up to <coordinator_workers> workers in WorkerPool
+        And check if gpaddmirrors ran "$GPHOME/bin/lib/gpconfigurenewsegment" 2 times with args "-b <segHost_workers>"
+        And check if gpaddmirrors ran "$GPHOME/sbin/gpsegstart.py" 1 times with args "-b <segHost_workers>"
+        And an FTS probe is triggered
+        And the segments are synchronized
+        And verify the database has mirrors
+        And the tablespace is valid
+        And user stops all primary processes
+        And user can start transactions
+        And the tablespace is valid
+
+    Examples:
+        | args      | coordinator_workers | segHost_workers |
+        | -B 1 -b 1 |  1                  |  1              |
+        | -B 2 -b 1 |  2                  |  1              |
+        | -B 1 -b 2 |  1                  |  2              |
+
 ########################### @concourse_cluster tests ###########################
 # The @concourse_cluster tag denotes the scenario that requires a remote cluster
+
+    @concourse_cluster
+    Scenario: spread mirroring configuration
+        Given a working directory of the test as '/tmp/gpaddmirrors'
+        And the database is not running
+        And a cluster is created with "spread" segment mirroring on "mdw" and "sdw1, sdw2, sdw3"
+        Then verify that mirror segments are in "spread" configuration
+        Given a preferred primary has failed
+        When the user runs "gprecoverseg -a"
+        Then gprecoverseg should return a return code of 0
+        And all the segments are running
+        And the segments are synchronized
+        And the user runs "gpstop -aqM fast"
 
     @concourse_cluster
     Scenario: gprecoverseg works correctly on a newly added mirror with HBA_HOSTNAMES=0
@@ -25,7 +59,8 @@ Feature: Tests for gpaddmirrors
         And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains only cidr addresses
         And gpaddmirrors adds mirrors
         And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains only cidr addresses
-        And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains entries for "samenet"
+        And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains entries for "samehost"
+        And verify that the file "pg_hba.conf" in each segment data directory has "no" line starting with "host.*replication.*\(127.0.0\|::1\).*trust"
         Then verify the database has mirrors
         And the information of a "mirror" segment on a remote host is saved
         When user kills a "mirror" process with the saved information
@@ -52,7 +87,7 @@ Feature: Tests for gpaddmirrors
         And with HBA_HOSTNAMES "1" a cluster is created with no mirrors on "mdw" and "sdw1, sdw2"
         And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains entries for "mdw, sdw1"
         And gpaddmirrors adds mirrors with options "--hba-hostnames"
-        And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains entries for "mdw, sdw1, sdw2, samenet"
+        And pg_hba file "/tmp/gpaddmirrors/data/primary/gpseg0/pg_hba.conf" on host "sdw1" contains entries for "mdw, sdw1, sdw2, samehost"
         Then verify the database has mirrors
         And the information of a "mirror" segment on a remote host is saved
         When user kills a "mirror" process with the saved information
@@ -99,7 +134,7 @@ Feature: Tests for gpaddmirrors
 
     @concourse_cluster
 
-    Scenario: gpaddmirrors with a default master data directory
+    Scenario: gpaddmirrors with a default coordinator data directory
         Given a working directory of the test as '/tmp/gpaddmirrors'
         And the database is not running
         And a cluster is created with no mirrors on "mdw" and "sdw1"
@@ -108,7 +143,7 @@ Feature: Tests for gpaddmirrors
         And the user runs "gpstop -aqM fast"
 
     @concourse_cluster
-    Scenario: gpaddmirrors with a given master data directory [-d <master datadir>]
+    Scenario: gpaddmirrors with a given coordinator data directory [-d <coordinator datadir>]
         Given a working directory of the test as '/tmp/gpaddmirrors'
         And the database is not running
         And a cluster is created with no mirrors on "mdw" and "sdw1"
@@ -146,9 +181,9 @@ Feature: Tests for gpaddmirrors
         And the segments are synchronized
         When user stops all primary processes
         And user can start transactions
-        Then verify that there is a "heap" table "public.heap_table" in "gptest" with "100" rows
-        Then verify that there is a "ao" table "public.ao_table" in "gptest" with "100" rows
-        Then verify that there is a "co" table "public.co_table" in "gptest" with "100" rows
+        Then verify that there is a "heap" table "public.heap_table" in "gptest" with "202" rows
+        Then verify that there is a "ao" table "public.ao_table" in "gptest" with "202" rows
+        Then verify that there is a "co" table "public.co_table" in "gptest" with "202" rows
         And the user runs "gpstop -aqM fast"
 
     @concourse_cluster

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE map PUBLIC "-//OASIS//DTD DITA Map//EN" "map.dtd">
 <map>
-    <topicref href="../../6-0/homenav.html" scope="external"
-        navtitle="Pivotal Greenplum® 6.0 Documentation" format="html" otherprops="op-help"/>
+    <topicref href="../../7-0/homenav.html" scope="external"
+        navtitle="Tanzu Greenplum® 7.0 Beta Documentation" format="html" otherprops="op-help"/>
     <topicref href="install_guide.xml" navtitle="Installation Guide">
         <topicref href="platform-requirements.xml"/>
         <topicref href="preinstall_concepts.xml">
@@ -35,9 +35,12 @@
         <topicref href="data_sci_pkgs.ditamap" format="ditamap" otherprops="pivotal"/>
         <topicref href="install_modules.xml" navtitle="Installing Additional Supplied Modules"/>
         <topicref href="localization.xml" navtitle="Configuring Localization Settings"/>
-        <!-- hidden for 6.0 beta releases -->
-        <topicref otherprops="op-hidden" href="upgrading.xml"/>
-        <topicref href="migrate.xml"/>
+        <topicref href="upgrade_intro.xml" navtitle="Upgrading to Greenplum 6.x">
+          <topicref href="upgrading.xml"/>
+          <topicref href="../pxf/pxf_upgrade_migration.html"
+                format="html" scope="peer" navtitle="PXF Upgrade and Migration"/>
+          <topicref href="migrate.xml"/>
+        </topicref>
         <topicref href="enable_iptables.xml" navtitle="Enabling iptables"/>
         <topicref href="apx_mgmt_utils.xml" navtitle="Installation Management Utilities"/>
         <topicref href="env_var_ref.xml" navtitle="Greenplum Environment Variables">

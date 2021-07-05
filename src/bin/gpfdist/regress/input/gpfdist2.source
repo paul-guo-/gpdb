@@ -47,6 +47,7 @@ select * from gpfdist2_start;
 -- start_ignore
 drop table if exists lineitem;
 drop external table if exists ext_lineitem;
+drop external table if exists ext_simple;
 -- end_ignore
 
 -- test 1 using a .gz file
@@ -569,7 +570,7 @@ CREATE INDEX index ON ext_lineitem (L_ORDERKEY);
 TRUNCATE ext_lineitem;
 DELETE FROM ext_lineitem where L_ORDERKEY > 10;
 UPDATE ext_lineitem SET L_ORDERKEY = 10 where L_ORDERKEY > 10;
-INSERT INTO ext_lineitem VALUES (1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1);
+INSERT INTO ext_lineitem VALUES (1,1,1,1,1,1,1,1,1,1,null,null,null,1,1,1);
 DROP EXTERNAL TABLE ext_lineitem;
 
 -- test 17 different delimiter
@@ -983,6 +984,192 @@ DROP EXTERNAL TABLE ext_crlf_with_lf_column;
 CREATE EXTERNAL TABLE ext_crlf_with_lf_column(c1 int, c2 text) LOCATION ('gpfdist://@hostname@:7070/gpfdist2/crlf_with_lf_column.csv') FORMAT 'text' (DELIMITER ',' NEWLINE 'CRLF');
 SELECT count(*) FROM ext_crlf_with_lf_column;
 DROP EXTERNAL TABLE ext_crlf_with_lf_column;
+
+-- test 26 correct combination of command-id, transaction-id and scan-number defines a gpfdist-session
+
+CREATE EXTERNAL TABLE ext_simple(id INTEGER)
+LOCATION
+(
+        'gpfdist://@hostname@:7070/gpfdist2/simple.tbl'
+)
+FORMAT 'text'
+(
+        DELIMITER AS '|'
+        ESCAPE 'OFF'
+);
+
+-- command-id is incremented for select statements
+SELECT count(*) FROM ext_simple;
+set optimizer=off;
+BEGIN;
+SELECT count(*) FROM ext_simple;
+SELECT count(*) FROM ext_simple;
+ROLLBACK;
+set optimizer=on;
+BEGIN;
+SELECT count(*) FROM ext_simple;
+SELECT count(*) FROM ext_simple;
+ROLLBACK;
+
+-- command-id is incremented when executing same prepared statement multiple times.
+-- See plancache.c: if (plansource->num_custom_plans < 5)
+set optimizer=off;
+PREPARE ext_simple_foo(int) AS SELECT count(*) from ext_simple;
+BEGIN;
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+ROLLBACK;
+DEALLOCATE ext_simple_foo;
+
+set optimizer=on;
+PREPARE ext_simple_foo(int) AS SELECT count(*) from ext_simple;
+BEGIN;
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+EXECUTE ext_simple_foo(1);
+ROLLBACK;
+DEALLOCATE ext_simple_foo;
+
+-- Two scans on the same external table within the same query.
+set optimizer=off;
+SELECT count(*) FROM ext_simple AS e1, ext_simple AS e2 WHERE e1.id = e2.id;
+set optimizer=on;
+SELECT count(*) FROM ext_simple AS e1, ext_simple AS e2 WHERE e1.id = e2.id;
+
+-- PREPARE & EXECUTE two scans on the same external table within the same query.
+set optimizer=off;
+PREPARE ext_simple_bar(int) AS SELECT count(*) FROM ext_simple AS e1, ext_simple AS e2 WHERE e1.id = e2.id;
+BEGIN;
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+ROLLBACK;
+DEALLOCATE ext_simple_bar;
+
+set optimizer=on;
+PREPARE ext_simple_bar(int) AS SELECT count(*) FROM ext_simple AS e1, ext_simple AS e2 WHERE e1.id = e2.id;
+BEGIN;
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+EXECUTE ext_simple_bar(1);
+ROLLBACK;
+DEALLOCATE ext_simple_bar;
+
+
+DROP EXTERNAL TABLE ext_simple;
+
+-- test 27 using a .zst file
+
+CREATE EXTERNAL TABLE ext_lineitem (
+                L_ORDERKEY INT8,
+                L_PARTKEY INTEGER,
+                L_SUPPKEY INTEGER,
+                L_LINENUMBER integer,
+                L_QUANTITY decimal,
+                L_EXTENDEDPRICE decimal,
+                L_DISCOUNT decimal,
+                L_TAX decimal,
+                L_RETURNFLAG CHAR(1),
+                L_LINESTATUS CHAR(1),
+                L_SHIPDATE date,
+                L_COMMITDATE date,
+                L_RECEIPTDATE date,
+                L_SHIPINSTRUCT CHAR(25),
+                L_SHIPMODE CHAR(10),
+                L_COMMENT VARCHAR(44)
+                )
+LOCATION
+(
+      'gpfdist://@hostname@:7070/gpfdist2/lineitem.tbl.zst'
+)
+FORMAT 'text'
+(
+        DELIMITER AS '|'
+)
+;
+SELECT count(*) FROM ext_lineitem;
+CREATE WRITABLE EXTERNAL TABLE ext_lineitem_out (
+                L_ORDERKEY INT8,
+                L_PARTKEY INTEGER,
+                L_SUPPKEY INTEGER,
+                L_LINENUMBER integer,
+                L_QUANTITY decimal,
+                L_EXTENDEDPRICE decimal,
+                L_DISCOUNT decimal,
+                L_TAX decimal,
+                L_RETURNFLAG CHAR(1),
+                L_LINESTATUS CHAR(1),
+                L_SHIPDATE date,
+                L_COMMITDATE date,
+                L_RECEIPTDATE date,
+                L_SHIPINSTRUCT CHAR(25),
+                L_SHIPMODE CHAR(10),
+                L_COMMENT VARCHAR(44)
+                )
+LOCATION
+(
+      'gpfdist://@hostname@:7070/gpfdist2/lineitem.tbl.out.zst'
+)
+FORMAT 'text'
+(
+        DELIMITER AS '|'
+)
+;
+INSERT INTO ext_lineitem_out select * from ext_lineitem;
+
+CREATE EXTERNAL TABLE ext_lineitem_in (
+                L_ORDERKEY INT8,
+                L_PARTKEY INTEGER,
+                L_SUPPKEY INTEGER,
+                L_LINENUMBER integer,
+                L_QUANTITY decimal,
+                L_EXTENDEDPRICE decimal,
+                L_DISCOUNT decimal,
+                L_TAX decimal,
+                L_RETURNFLAG CHAR(1),
+                L_LINESTATUS CHAR(1),
+                L_SHIPDATE date,
+                L_COMMITDATE date,
+                L_RECEIPTDATE date,
+                L_SHIPINSTRUCT CHAR(25),
+                L_SHIPMODE CHAR(10),
+                L_COMMENT VARCHAR(44)
+                )
+LOCATION
+(
+      'gpfdist://@hostname@:7070/gpfdist2/lineitem.tbl.out.zst'
+)
+FORMAT 'text'
+(
+        DELIMITER AS '|'
+)
+;
+select count(*) from ext_lineitem_in;
+
+DROP EXTERNAL TABLE ext_lineitem_in;
+DROP EXTERNAL TABLE ext_lineitem_out;
+DROP EXTERNAL TABLE ext_lineitem;
 
 -- start_ignore
 select * from gpfdist2_stop;

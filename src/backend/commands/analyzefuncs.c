@@ -1,20 +1,21 @@
 #include "postgres.h"
 
 #include "access/aocssegfiles.h"
+#include "access/table.h"
 #include "access/tuptoaster.h"
-#include "catalog/pg_appendonly_fn.h"
+#include "catalog/pg_appendonly.h"
 #include "catalog/pg_type.h"
 #include "cdb/cdbappendonlyam.h"
 #include "cdb/cdbaocsam.h"
 #include "cdb/cdbvars.h"
 #include "commands/vacuum.h"
+#include "nodes/makefuncs.h"
 #include "storage/bufmgr.h"
 #include "utils/acl.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/rel.h"
 #include "utils/snapmgr.h"
-#include "utils/varbit.h"
 #include "foreign/fdwapi.h"
 #include "miscadmin.h"
 #include "funcapi.h"
@@ -23,22 +24,9 @@
  * Statistics related parameters.
  */
 
-bool			gp_statistics_pullup_from_child_partition = FALSE;
-bool			gp_statistics_use_fkeys = FALSE;
+bool			gp_statistics_pullup_from_child_partition = false;
+bool			gp_statistics_use_fkeys = false;
 
-typedef struct
-{
-	Relation	onerel;
-	HeapTuple  *rows;
-	double		totalrows;
-	double		totaldeadrows;
-	TupleDesc	outDesc;
-	int			natts;
-
-	int			numrows;
-	int			index;
-	bool		summary_sent;
-} gp_acquire_sample_rows_context;
 
 /*
  * gp_acquire_sample_rows - Acquire a sample set of rows from table.
@@ -86,9 +74,9 @@ typedef struct
  *          1 |             0 |                       |     | 
  * (7 rows)
  *
- * The first four columns form the actual sample. One of the columns contained
- * an oversized text datum. The function is marked as EXECUTE ON SEGMENTS in the catalog
- * so you get one summary row *for each segment*.
+ * The first four rows form the actual sample. One of the columns contained
+ * an oversized text datum. The function is marked as EXECUTE ON SEGMENTS in
+ * the catalog so you get one summary row *for each segment*.
  */
 Datum
 gp_acquire_sample_rows(PG_FUNCTION_ARGS)
@@ -98,23 +86,21 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 	MemoryContext oldcontext;
 	Oid			relOid = PG_GETARG_OID(0);
 	int32		targrows = PG_GETARG_INT32(1);
-	bool		inherited = PG_GETARG_BOOL(2);
-	HeapTuple  *rows;
+	bool        inherited = PG_GETARG_BOOL(2);
 	TupleDesc	relDesc;
 	TupleDesc	outDesc;
-	int			natts;
+	int			live_natts;
 
 	if (targrows < 1)
 		elog(ERROR, "invalid targrows argument");
 
 	if (SRF_IS_FIRSTCALL())
 	{
-		double		totalrows;
-		double		totaldeadrows;
 		Relation	onerel;
 		int			attno;
-		int			numrows;
 		int			outattno;
+		VacuumParams	params;
+		RangeVar	   *this_rangevar;
 
 		funcctx = SRF_FIRSTCALL_INIT();
 
@@ -124,29 +110,51 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 		 */
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
+		/* Construct the context to keep across calls. */
+		ctx = (gp_acquire_sample_rows_context *) palloc0(sizeof(gp_acquire_sample_rows_context));
+		ctx->targrows = targrows;
+		ctx->inherited = inherited;
+
 		if (!pg_class_ownercheck(relOid, GetUserId()))
-			aclcheck_error(ACLCHECK_NOT_OWNER, ACL_KIND_CLASS,
+			aclcheck_error(ACLCHECK_NOT_OWNER, OBJECT_TABLE,
 						   get_rel_name(relOid));
 
-		onerel = relation_open(relOid, AccessShareLock);
+		onerel = table_open(relOid, AccessShareLock);
 		relDesc = RelationGetDescr(onerel);
 
+		MemSet(&params, 0, sizeof(VacuumParams));
+		params.options |= VACOPT_ANALYZE;
+		params.freeze_min_age = -1;
+		params.freeze_table_age = -1;
+		params.multixact_freeze_min_age = -1;
+		params.multixact_freeze_table_age = -1;
+		params.is_wraparound = false;
+		params.log_min_duration = -1;
+		params.index_cleanup = VACOPT_TERNARY_DEFAULT;
+		params.truncate = VACOPT_TERNARY_DEFAULT;
+
+		this_rangevar = makeRangeVar(get_namespace_name(onerel->rd_rel->relnamespace),
+									 pstrdup(RelationGetRelationName(onerel)),
+									 -1);
+		analyze_rel(relOid, this_rangevar, &params, NULL,
+					true, GetAccessStrategy(BAS_VACUUM), ctx);
+
 		/* Count the number of non-dropped cols */
-		natts = 0;
+		live_natts = 0;
 		for (attno = 1; attno <= relDesc->natts; attno++)
 		{
-			Form_pg_attribute relatt = (Form_pg_attribute) relDesc->attrs[attno - 1];
+			Form_pg_attribute relatt = TupleDescAttr(relDesc, attno - 1);
 
 			if (relatt->attisdropped)
 				continue;
-			natts++;
+			live_natts++;
 		}
 
-		outDesc = CreateTemplateTupleDesc(3 + natts, false);
+		outDesc = CreateTemplateTupleDesc(NUM_SAMPLE_FIXED_COLS + live_natts);
 
 		/* First, some special cols: */
 
-		/* These are only set in the last, summary row */
+		/* These two are only set in the last, summary row */
 		TupleDescInitEntry(outDesc,
 						   1,
 						   "totalrows",
@@ -168,10 +176,10 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 						   -1,
 						   0);
 
-		outattno = 4;
+		outattno = NUM_SAMPLE_FIXED_COLS + 1;
 		for (attno = 1; attno <= relDesc->natts; attno++)
 		{
-			Form_pg_attribute relatt = (Form_pg_attribute) relDesc->attrs[attno - 1];
+			Form_pg_attribute relatt = TupleDescAttr(relDesc, attno - 1);
 			Oid			typid;
 
 			if (relatt->attisdropped)
@@ -190,46 +198,9 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 		BlessTupleDesc(outDesc);
 		funcctx->tuple_desc = outDesc;
 
-		/*
-		 * Collect the actual sample. (We do this only after blessing the output
-		 * tuple, to avoid the very expensive work of scanning the table, if we're
-		 * going to error out because of incorrect column definition, anyway.
-		 * ANALYZE should always get this right, but makes testing manually a bit
-		 * more comfortable.)
-		 */
-		rows = (HeapTuple *) palloc0(targrows * sizeof(HeapTuple));
-
-		if(RelationIsForeign(onerel))
-		{
-			FdwRoutine *fdwroutine;
-			fdwroutine = GetFdwRoutineForRelation(onerel, false);
-			numrows = fdwroutine->AcquireSampleRows(onerel, DEBUG1,
-													rows, targrows,
-													&totalrows, &totaldeadrows);
-
-		}
-		else if (inherited)
-		{
-			numrows = acquire_inherited_sample_rows(onerel, DEBUG1,
-													rows, targrows,
-													&totalrows, &totaldeadrows);
-		}
-		else
-		{
-			numrows = acquire_sample_rows(onerel, DEBUG1, rows, targrows,
-										  &totalrows, &totaldeadrows);
-		}
-
-		/* Construct the context to keep across calls. */
-		ctx = (gp_acquire_sample_rows_context *) palloc(sizeof(gp_acquire_sample_rows_context));
 		ctx->onerel = onerel;
-		ctx->natts = natts;
 		funcctx->user_fctx = ctx;
 		ctx->outDesc = outDesc;
-		ctx->numrows = numrows;
-		ctx->rows = rows;
-		ctx->totalrows = totalrows;
-		ctx->totaldeadrows = totaldeadrows;
 
 		ctx->index = 0;
 		ctx->summary_sent = false;
@@ -243,15 +214,15 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 	ctx = funcctx->user_fctx;
 	relDesc = RelationGetDescr(ctx->onerel);
 	outDesc = ctx->outDesc;
-	natts = ctx->natts;
 
 	Datum	   *outvalues = (Datum *) palloc(outDesc->natts * sizeof(Datum));
 	bool	   *outnulls = (bool *) palloc(outDesc->natts * sizeof(bool));
 	HeapTuple	res;
 
-	if (ctx->index < ctx->numrows)
+	/* First return all the sample rows */
+	if (ctx->index < ctx->num_sample_rows)
 	{
-		HeapTuple	relTuple = ctx->rows[ctx->index];
+		HeapTuple	relTuple = ctx->sample_rows[ctx->index];
 		int			attno;
 		int			outattno;
 		Bitmapset  *toolarge = NULL;
@@ -260,10 +231,10 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 
 		heap_deform_tuple(relTuple, relDesc, relvalues, relnulls);
 
-		outattno = 4;
+		outattno = NUM_SAMPLE_FIXED_COLS + 1;
 		for (attno = 1; attno <= relDesc->natts; attno++)
 		{
-			Form_pg_attribute relatt = (Form_pg_attribute) relDesc->attrs[attno - 1];
+			Form_pg_attribute relatt = TupleDescAttr(relDesc, attno - 1);
 			bool		is_toolarge = false;
 			Datum		relvalue;
 			bool		relnull;
@@ -274,13 +245,13 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 			relnull = relnulls[attno - 1];
 
 			/* Is this attribute "too large" to return? */
-			if (relDesc->attrs[attno - 1]->attlen == -1 && !relnull)
+			if (relatt->attlen == -1 && !relnull)
 			{
 				Size		toasted_size = toast_datum_size(relvalue);
 
 				if (toasted_size > WIDTH_THRESHOLD)
 				{
-					toolarge = bms_add_member(toolarge, outattno - 3);
+					toolarge = bms_add_member(toolarge, outattno - NUM_SAMPLE_FIXED_COLS);
 					is_toolarge = true;
 					relvalue = (Datum) 0;
 					relnull = true;
@@ -292,25 +263,18 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 		}
 
 		/*
-		 * If any of the attributes were oversized, construct the varbit datum
+		 * If any of the attributes were oversized, construct the text datum
 		 * to represent the bitmap.
 		 */
 		if (toolarge)
 		{
 			char	   *toolarge_str;
 			int			i;
+			int			live_natts = outDesc->natts - NUM_SAMPLE_FIXED_COLS;
 
-			toolarge_str = palloc((natts + 1) * sizeof(char));
-			i = 0;
-			for (attno = 1; attno <= natts; attno++)
-			{
-				Form_pg_attribute relatt = (Form_pg_attribute) relDesc->attrs[attno - 1];
-
-				if (relatt->attisdropped)
-					continue;
-
-				toolarge_str[i++] = bms_is_member(attno, toolarge) ? '1' : '0';
-			}
+			toolarge_str = palloc((live_natts + 1) * sizeof(char));
+			for (i = 0; i < live_natts; i++)
+				toolarge_str[i] = bms_is_member(i + 1, toolarge) ? '1' : '0';
 			toolarge_str[i] = '\0';
 
 			outvalues[2] = CStringGetTextDatum(toolarge_str);
@@ -337,12 +301,6 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 		/* Done returning the sample. Return the summary row, and we're done. */
 		int			outattno;
 
-		for (outattno = 1; outattno <= natts; outattno++)
-		{
-			outvalues[3 + outattno - 1] = (Datum) 0;
-			outnulls[3 + outattno - 1] = true;
-		}
-
 		outvalues[0] = Float8GetDatum(ctx->totalrows);
 		outnulls[0] = false;
 		outvalues[1] = Float8GetDatum(ctx->totaldeadrows);
@@ -350,10 +308,10 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 
 		outvalues[2] = (Datum) 0;
 		outnulls[2] = true;
-		for (outattno = 3; outattno < outDesc->natts; outattno++)
+		for (outattno = NUM_SAMPLE_FIXED_COLS + 1; outattno <= outDesc->natts; outattno++)
 		{
-			outvalues[outattno] = (Datum) 0;
-			outnulls[outattno] = true;
+			outvalues[outattno - 1] = (Datum) 0;
+			outnulls[outattno - 1] = true;
 		}
 
 		res = heap_form_tuple(outDesc, outvalues, outnulls);
@@ -363,7 +321,7 @@ gp_acquire_sample_rows(PG_FUNCTION_ARGS)
 		SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(res));
 	}
 
-	relation_close(ctx->onerel, AccessShareLock);
+	table_close(ctx->onerel, AccessShareLock);
 
 	pfree(ctx);
 	funcctx->user_fctx = NULL;

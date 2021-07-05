@@ -19,8 +19,8 @@
  *
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/utils/palloc.h
@@ -46,9 +46,7 @@
  * debugging info preceding the first byte of the area.  The added
  * header fields identify the allocation call site (source file name
  * and line number).  Also each context keeps a linked list of all
- * of its allocated areas.  The dump_memory_allocation() and
- * dump_memory_allocation_ctxt() functions in aset.c may be called 
- * from a debugger to write the area headers to a file.
+ * of its allocated areas.
  */
 
 /*
@@ -70,8 +68,6 @@
 #if defined(CDB_PALLOC_TAGS) && !defined(CDB_PALLOC_CALLER_ID)
 #define CDB_PALLOC_CALLER_ID
 #endif
-
-#include "utils/memaccounting.h"
 
 /*
  * We track last OOM time to identify culprit processes that
@@ -135,7 +131,7 @@ extern void *MemoryContextAlloc(MemoryContext context, Size size);
 extern void *MemoryContextAllocZero(MemoryContext context, Size size);
 extern void *MemoryContextAllocZeroAligned(MemoryContext context, Size size);
 extern void *MemoryContextAllocExtended(MemoryContext context,
-						   Size size, int flags);
+										Size size, int flags);
 
 extern void *palloc(Size size);
 extern void *palloc0(Size size);
@@ -161,10 +157,6 @@ extern void *MemoryContextAllocHuge(MemoryContext context, Size size);
 extern void *repalloc_huge(void *pointer, Size size);
 
 /*
- * MemoryContextSwitchTo can't be a macro in standard C compilers.
- * But we can make it an inline function if the compiler supports it.
- * See STATIC_IF_INLINE in c.h.
- *
  * Although this header file is nominally backend-only, certain frontend
  * programs like pg_controldata include it via postgres.h.  For some compilers
  * it's necessary to hide the inline definition of MemoryContextSwitchTo in
@@ -172,11 +164,7 @@ extern void *repalloc_huge(void *pointer, Size size);
  */
 
 #ifndef FRONTEND
-#ifndef PG_USE_INLINE
-extern MemoryContext MemoryContextSwitchTo(MemoryContext context);
-#endif   /* !PG_USE_INLINE */
-#if defined(PG_USE_INLINE) || defined(MCXT_INCLUDE_DEFINITIONS)
-STATIC_IF_INLINE MemoryContext
+static inline MemoryContext
 MemoryContextSwitchTo(MemoryContext context)
 {
 	MemoryContext old = CurrentMemoryContext;
@@ -184,12 +172,11 @@ MemoryContextSwitchTo(MemoryContext context)
 	CurrentMemoryContext = context;
 	return old;
 }
-#endif   /* PG_USE_INLINE || MCXT_INCLUDE_DEFINITIONS */
-#endif   /* FRONTEND */
+#endif							/* FRONTEND */
 
 /* Registration of memory context reset/delete callbacks */
 extern void MemoryContextRegisterResetCallback(MemoryContext context,
-								   MemoryContextCallback *cb);
+											   MemoryContextCallback *cb);
 
 /*
  * These are like standard strdup() except the copied string is
@@ -198,6 +185,8 @@ extern void MemoryContextRegisterResetCallback(MemoryContext context,
 extern char *MemoryContextStrdup(MemoryContext context, const char *string);
 extern char *pstrdup(const char *in);
 extern char *pnstrdup(const char *in, Size len);
+
+extern char *pchomp(const char *in);
 
 /* sprintf into a palloc'd buffer --- these are in psprintf.c */
 extern char *psprintf(const char *fmt,...) pg_attribute_printf(1, 2);
@@ -220,6 +209,7 @@ extern void InitPerProcessOOMTracking(void);
 extern void GPMemoryProtect_ShmemInit(void);
 extern void GPMemoryProtect_Init(void);
 extern void GPMemoryProtect_Shutdown(void);
+extern void GPMemoryProtect_TrackStartupMemory(void);
 extern void UpdateTimeAtomically(volatile OOMTimeType* time_var);
 
 /*
@@ -242,9 +232,8 @@ extern void MemoryContextStats(MemoryContext context);
 		Assert(MemoryProtection_IsOwnerThread());\
 		UpdateTimeAtomically(&alreadyReportedOOMTime);\
 		write_stderr("One or more query execution processes ran out of memory on this segment. Logging memory usage.");\
-		MemoryAccounting_SaveToLog();\
 		MemoryContextStats(TopMemoryContext);\
 	}\
 }
 
-#endif   /* PALLOC_H */
+#endif							/* PALLOC_H */

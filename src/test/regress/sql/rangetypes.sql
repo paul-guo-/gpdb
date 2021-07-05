@@ -320,8 +320,6 @@ drop table test_range_elem;
 -- portion of the constraint.
 --
 
--- start_ignore
--- GPDB does not support exclusion constraints, so no need to run this test
 create table test_range_excl(
   id int4,
   room int4range,
@@ -329,7 +327,7 @@ create table test_range_excl(
   during tsrange,
   exclude using gist (room with =, during with &&),
   exclude using gist (speaker with =, during with &&)
-) DISTRIBUTED BY (id);
+) DISTRIBUTED REPLICATED;
 
 insert into test_range_excl
   values(1, int4range(123, 123, '[]'), int4range(1, 1, '[]'), '[2010-01-02 10:00, 2010-01-02 11:00)');
@@ -341,7 +339,6 @@ insert into test_range_excl
   values(1, int4range(124, 124, '[]'), int4range(3, 3, '[]'), '[2010-01-02 10:10, 2010-01-02 11:10)');
 insert into test_range_excl
   values(1, int4range(125, 125, '[]'), int4range(1, 1, '[]'), '[2010-01-02 10:10, 2010-01-02 11:00)');
--- end_ignore
 
 -- test bigint ranges
 select int8range(10000000000::int8, 20000000000::int8,'(]');
@@ -473,6 +470,20 @@ select '(2,5)'::cashrange except select '(5,6)'::cashrange;
 reset enable_sort;
 
 -- end_ignore
+
+--
+-- Ranges of composites
+--
+
+create type two_ints as (a int, b int);
+create type two_ints_range as range (subtype = two_ints);
+
+-- with force_parallel_mode on, this exercises tqueue.c's range remapping
+select *, row_to_json(upper(t)) as u from
+  (values (two_ints_range(row(1,2), row(3,4))),
+          (two_ints_range(row(5,6), row(7,8)))) v(t);
+
+drop type two_ints cascade;
 
 --
 -- OUT/INOUT/TABLE functions

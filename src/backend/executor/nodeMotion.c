@@ -4,7 +4,7 @@
  *	  Routines to handle moving tuples around in Greenplum Database.
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -27,7 +27,6 @@
 #include "executor/nodeMotion.h"
 #include "lib/binaryheap.h"
 #include "utils/tuplesort.h"
-#include "utils/tuplesort_mk_details.h"
 #include "miscadmin.h"
 #include "utils/memutils.h"
 
@@ -41,60 +40,9 @@
 /* #define CDB_MOTION_DEBUG */
 
 #ifdef CDB_MOTION_DEBUG
+#include "utils/lsyscache.h"	/* getTypeOutputInfo */
 #include "lib/stringinfo.h"		/* StringInfo */
 #endif
-
-/*
- * CdbTupleHeapInfo
- *
- * A priority queue element holding the next tuple of the
- * sorted tuple stream received from a particular sender.
- * Used by sorted receiver (Merge Receive).
- */
-typedef struct CdbTupleHeapInfo
-{
-	/* Next tuple from this sender */
-	GenericTuple tuple;
-	Datum		datum1;			/* value of first key column */
-	bool		isnull1;		/* is first key column NULL? */
-}			CdbTupleHeapInfo;
-
-/*
- * CdbMergeComparatorContext
- *
- * This contains the information necessary to compare
- * two tuples (other than the tuples themselves).
- * It includes :
- *		1) the number and array of indexes into the tuples columns
- *			that are the basis for the ordering
- *			(numSortCols, sortColIdx)
- *		2) the FmgrInfo and flags of the compare function
- *			for each column being ordered
- *			(sortFunctions, cmpFlags)
- *		3) the tuple desc
- *			(tupDesc)
- * Used by sorted receiver (Merge Receive).  It is passed as the
- * context argument to the key comparator.
- */
-typedef struct CdbMergeComparatorContext
-{
-	int			numSortCols;
-	SortSupport sortKeys;
-	TupleDesc	tupDesc;
-	MemTupleBinding *mt_bind;
-
-	CdbTupleHeapInfo *tupleheap_entries;
-} CdbMergeComparatorContext;
-
-static CdbMergeComparatorContext *CdbMergeComparator_CreateContext(CdbTupleHeapInfo *tupleheap_entries,
-								 TupleDesc tupDesc,
-								 int numSortCols,
-								 AttrNumber *sortColIdx,
-								 Oid *sortOperators,
-								 Oid *sortCollations,
-								 bool *nullsFirstFlags);
-
-static void CdbMergeComparator_DestroyContext(CdbMergeComparatorContext *ctx);
 
 
 /*=========================================================================
@@ -103,9 +51,6 @@ static void CdbMergeComparator_DestroyContext(CdbMergeComparatorContext *ctx);
 static TupleTableSlot *execMotionSender(MotionState *node);
 static TupleTableSlot *execMotionUnsortedReceiver(MotionState *node);
 static TupleTableSlot *execMotionSortedReceiver(MotionState *node);
-static TupleTableSlot *execMotionSortedReceiver_mk(MotionState *node);
-
-static void execMotionSortedReceiverFirstTime(MotionState *node);
 
 static int	CdbMergeComparator(Datum lhs, Datum rhs, void *context);
 static uint32 evalHashKey(ExprContext *econtext, List *hashkeys, CdbHash *h);
@@ -119,20 +64,20 @@ static void doSendTuple(Motion *motion, MotionState *node, TupleTableSlot *outer
 
 #ifdef CDB_MOTION_DEBUG
 static void
-formatTuple(StringInfo buf, HeapTuple tup, TupleDesc tupdesc, Oid *outputFunArray)
+formatTuple(StringInfo buf, TupleTableSlot *slot, Oid *outputFunArray)
 {
+	TupleDesc tupdesc = slot->tts_tupleDescriptor;
 	int			i;
 
 	for (i = 0; i < tupdesc->natts; i++)
 	{
 		bool		isnull;
-		Datum		d = heap_getattr(tup, i + 1, tupdesc, &isnull);
+		Datum		d = slot_getattr(slot, i + 1, &isnull);
 
 		if (d && !isnull)
 		{
-			Datum		ds = OidFunctionCall1(outputFunArray[i], d);
-			char	   *s = DatumGetCString(ds);
-			char	   *name = NameStr(tupdesc->attrs[i]->attname);
+			char	   *s = OidOutputFunctionCall(outputFunArray[i], d);
+			char	   *name = NameStr(tupdesc->attrs[i].attname);
 
 			if (name && *name)
 				appendStringInfo(buf, "  %s=\"%.30s\"", name, s);
@@ -149,9 +94,10 @@ formatTuple(StringInfo buf, HeapTuple tup, TupleDesc tupdesc, Oid *outputFunArra
  *		ExecMotion
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecMotion(MotionState *node)
+static TupleTableSlot *
+ExecMotion(PlanState *pstate)
 {
+	MotionState *node = castNode(MotionState, pstate);
 	Motion	   *motion = (Motion *) node->ps.plan;
 
 	/* sanity check */
@@ -193,12 +139,7 @@ ExecMotion(MotionState *node)
 			node->ps.state->active_recv_id = motion->motionID;
 
 		if (motion->sendSorted)
-		{
-			if (gp_enable_motion_mk_sort)
-				tuple = execMotionSortedReceiver_mk(node);
-			else
-				tuple = execMotionSortedReceiver(node);
-		}
+			tuple = execMotionSortedReceiver(node);
 		else
 			tuple = execMotionUnsortedReceiver(node);
 
@@ -256,15 +197,6 @@ execMotionSender(MotionState *node)
 	PlanState  *outerNode;
 	Motion	   *motion = (Motion *) node->ps.plan;
 	bool		done = false;
-	int			numsegments = 0;
-
-	/* need refactor */
-	if (node->isExplictGatherMotion)
-	{
-		numsegments = motion->plan.flow->numsegments;
-	}
-
-
 
 #ifdef MEASURE_MOTION_TIME
 	struct timeval time1;
@@ -274,6 +206,7 @@ execMotionSender(MotionState *node)
 #endif
 
 	AssertState(motion->motionType == MOTIONTYPE_GATHER ||
+				motion->motionType == MOTIONTYPE_GATHER_SINGLE ||
 				motion->motionType == MOTIONTYPE_HASH ||
 				motion->motionType == MOTIONTYPE_BROADCAST ||
 				(motion->motionType == MOTIONTYPE_EXPLICIT && motion->segidColIdx > 0));
@@ -309,12 +242,13 @@ execMotionSender(MotionState *node)
 			doSendEndOfStream(motion, node);
 			done = true;
 		}
-		else if (node->isExplictGatherMotion &&
-				 GpIdentity.segindex != (gp_session_id % numsegments))
+		else if (motion->motionType == MOTIONTYPE_GATHER_SINGLE &&
+				 GpIdentity.segindex != (gp_session_id % node->numInputSegs))
 		{
 			/*
-			 * For explicit gather motion, receiver get data from the
-			 * singleton segment explictly.
+			 * For explicit gather motion, receiver gets data from one
+			 * segment only. The others execute the subplan normally, but
+			 * throw away the resulting tuples.
 			 */
 		}
 		else
@@ -362,10 +296,11 @@ execMotionUnsortedReceiver(MotionState *node)
 {
 	/* RECEIVER LOGIC */
 	TupleTableSlot *slot;
-	GenericTuple tuple;
+	MinimalTuple tuple;
 	Motion	   *motion = (Motion *) node->ps.plan;
 
 	AssertState(motion->motionType == MOTIONTYPE_GATHER ||
+				motion->motionType == MOTIONTYPE_GATHER_SINGLE ||
 				motion->motionType == MOTIONTYPE_HASH ||
 				motion->motionType == MOTIONTYPE_BROADCAST ||
 				(motion->motionType == MOTIONTYPE_EXPLICIT && motion->segidColIdx > 0));
@@ -402,7 +337,8 @@ execMotionUnsortedReceiver(MotionState *node)
 
 	/* store it in our result slot and return this. */
 	slot = node->ps.ps_ResultTupleSlot;
-	slot = ExecStoreGenericTuple(tuple, slot, true /* shouldFree */ );
+
+	slot = ExecStoreMinimalTuple(tuple, slot, true /* shouldFree */ );
 
 #ifdef CDB_MOTION_DEBUG
 	if (node->numTuplesToParent <= 20)
@@ -413,9 +349,8 @@ execMotionUnsortedReceiver(MotionState *node)
 		appendStringInfo(&buf, "   motion%-3d rcv      %5d.",
 						 motion->motionID,
 						 node->numTuplesToParent);
-		formatTuple(&buf, tuple, ExecGetResultType(&node->ps),
-					node->outputFunArray);
-		elog(DEBUG3, buf.data);
+		formatTuple(&buf, slot, node->outputFunArray);
+		elog(DEBUG3, "%s", buf.data);
 		pfree(buf.data);
 	}
 #endif
@@ -444,10 +379,9 @@ execMotionUnsortedReceiver(MotionState *node)
  * --------------------
  *
  * The 1st time we execute, we need to pull a tuple from each of our source
- * and store them in our tupleheap, this is what execMotionSortedFirstTime()
- * does.  Once that is done, we can pick the lowest (or whatever the
- * criterion is) value from amongst all the sources.  This works since each
- * stream is sorted itself.
+ * and store them in our tupleheap.  Once that is done, we can pick the lowest
+ * (or whatever the criterion is) value from amongst all the sources.  This
+ * works since each stream is sorted itself.
  *
  * We keep track of which one was selected, this will be slot we will need
  * to fill during the next call.
@@ -455,181 +389,7 @@ execMotionUnsortedReceiver(MotionState *node)
  * Subsequent calls to this function (after the 1st time) will start by
  * trying to receive a tuple for the slot that was emptied the previous call.
  * Then we again select the lowest value and return that tuple.
- *
  */
-
-/* Sorted receiver using mk heap */
-typedef struct MotionMKHeapReaderContext
-{
-	MotionState *node;
-	int			srcRoute;
-} MotionMKHeapReaderContext;
-
-typedef struct MotionMKHeapContext
-{
-	MKHeapReader *readers;		/* Readers, one per sender */
-	MKHeap	   *heap;			/* The mkheap */
-	MKContext	mkctxt;			/* compare context */
-} MotionMKHeapContext;
-
-static bool
-motion_mkhp_read(void *vpctxt, MKEntry *a)
-{
-	MotionMKHeapReaderContext *ctxt = (MotionMKHeapReaderContext *) vpctxt;
-	MotionState *node = ctxt->node;
-
-	GenericTuple inputTuple = NULL;
-	Motion	   *motion = (Motion *) node->ps.plan;
-
-	if (ctxt->srcRoute < 0)
-	{
-		/* routes have not been set yet so set them */
-		ListCell   *lcProcess;
-		int			routeIndex,
-					readerIndex;
-		MotionMKHeapContext *ctxt = node->tupleheap_mk;
-		Slice	   *sendSlice = (Slice *) list_nth(node->ps.state->es_sliceTable->slices, motion->motionID);
-
-		Assert(sendSlice->sliceIndex == motion->motionID);
-
-		readerIndex = 0;
-		foreach_with_count(lcProcess, sendSlice->primaryProcesses, routeIndex)
-		{
-			if (lfirst(lcProcess) != NULL)
-			{
-				MotionMKHeapReaderContext *readerContext;
-
-				Assert(readerIndex < node->numInputSegs);
-
-				readerContext = (MotionMKHeapReaderContext *) ctxt->readers[readerIndex].mkhr_ctxt;
-				readerContext->srcRoute = routeIndex;
-				readerIndex++;
-			}
-		}
-		Assert(readerIndex == node->numInputSegs);
-	}
-
-	MemSet(a, 0, sizeof(MKEntry));
-
-	/* Receive the successor of the tuple that we returned last time. */
-	inputTuple = RecvTupleFrom(node->ps.state->motionlayer_context,
-							   node->ps.state->interconnect_context,
-							   motion->motionID,
-							   ctxt->srcRoute);
-
-	if (inputTuple)
-	{
-		a->ptr = inputTuple;
-		return true;
-	}
-
-	return false;
-}
-
-static Datum
-tupsort_fetch_datum_motion(MKEntry *a, MKContext *mkctxt, MKLvContext *lvctxt, bool *isNullOut)
-{
-	Datum		d;
-
-	if (is_memtuple(a->ptr))
-		d = memtuple_getattr((MemTuple) a->ptr, mkctxt->mt_bind, lvctxt->attno, isNullOut);
-	else
-		d = heap_getattr((HeapTuple) a->ptr, lvctxt->attno, mkctxt->tupdesc, isNullOut);
-	return d;
-}
-
-static void
-tupsort_free_datum_motion(MKEntry *e)
-{
-	pfree(e->ptr);
-	e->ptr = NULL;
-}
-
-static void
-create_motion_mk_heap(MotionState *node)
-{
-	MotionMKHeapContext *ctxt = palloc0(sizeof(MotionMKHeapContext));
-	Motion	   *motion = (Motion *) node->ps.plan;
-	int			nreader = node->numInputSegs;
-	int			i = 0;
-
-	Assert(nreader >= 1);
-
-	create_mksort_context(
-						  &ctxt->mkctxt,
-						  motion->numSortCols, motion->sortColIdx,
-						  motion->sortOperators,
-						  motion->collations,
-						  motion->nullsFirst,
-						  NULL,
-						  tupsort_fetch_datum_motion,
-						  tupsort_free_datum_motion,
-						  ExecGetResultType(&node->ps), false, 0 /* dummy does not matter */ );
-
-	ctxt->readers = palloc0(sizeof(MKHeapReader) * nreader);
-
-	for (i = 0; i < nreader; ++i)
-	{
-		MotionMKHeapReaderContext *hrctxt = palloc(sizeof(MotionMKHeapContext));
-
-		hrctxt->node = node;
-		hrctxt->srcRoute = -1;	/* set to a negative to indicate that we need
-								 * to update it to the real value */
-		ctxt->readers[i].reader = motion_mkhp_read;
-		ctxt->readers[i].mkhr_ctxt = hrctxt;
-	}
-
-	node->tupleheap_mk = ctxt;
-}
-
-static void
-destroy_motion_mk_heap(MotionState *node)
-{
-	/*
-	 * Don't need to do anything.  Memory is allocated from query execution
-	 * context.  By calling this, we are at the end of the life of a query.
-	 */
-}
-
-static TupleTableSlot *
-execMotionSortedReceiver_mk(MotionState *node)
-{
-	TupleTableSlot *slot = NULL;
-	MKEntry		e;
-
-	Motion	   *motion = (Motion *) node->ps.plan;
-	MotionMKHeapContext *ctxt = node->tupleheap_mk;
-
-	Assert(motion->motionType == MOTIONTYPE_GATHER &&
-		   motion->sendSorted &&
-		   ctxt
-		);
-
-	if (node->stopRequested)
-	{
-		SendStopMessage(node->ps.state->motionlayer_context,
-						node->ps.state->interconnect_context,
-						motion->motionID);
-		return NULL;
-	}
-
-	if (!node->tupleheapReady)
-	{
-		Assert(ctxt->readers);
-		Assert(!ctxt->heap);
-		ctxt->heap = mkheap_from_reader(ctxt->readers, node->numInputSegs, &ctxt->mkctxt);
-		node->tupleheapReady = true;
-	}
-
-	mke_set_empty(&e);
-	mkheap_putAndGet(ctxt->heap, &e);
-	if (mke_is_empty(&e))
-		return NULL;
-
-	slot = node->ps.ps_ResultTupleSlot;
-	slot = ExecStoreGenericTuple(e.ptr, slot, true);
-	return slot;
-}
 
 /* Sorted receiver using binary heap */
 static TupleTableSlot *
@@ -637,10 +397,9 @@ execMotionSortedReceiver(MotionState *node)
 {
 	TupleTableSlot *slot;
 	binaryheap *hp = node->tupleheap;
-	GenericTuple tuple,
-				inputTuple;
+	MinimalTuple inputTuple;
 	Motion	   *motion = (Motion *) node->ps.plan;
-	CdbTupleHeapInfo *tupHeapInfo;
+	EState	   *estate = node->ps.state;
 
 	AssertState(motion->motionType == MOTIONTYPE_GATHER &&
 				motion->sendSorted &&
@@ -656,10 +415,85 @@ execMotionSortedReceiver(MotionState *node)
 		return NULL;
 	}
 
-	/* On first call, fill the priority queue with each sender's first tuple. */
+	/*
+	 * On first call, fill the priority queue with each sender's first tuple.
+	 */
 	if (!node->tupleheapReady)
 	{
-		execMotionSortedReceiverFirstTime(node);
+		MinimalTuple inputTuple;
+		binaryheap *hp = node->tupleheap;
+		Motion	   *motion = (Motion *) node->ps.plan;
+		int			iSegIdx;
+		ListCell   *lcProcess;
+		ExecSlice  *sendSlice = &node->ps.state->es_sliceTable->slices[motion->motionID];
+
+		Assert(sendSlice->sliceIndex == motion->motionID);
+
+		foreach_with_count(lcProcess, sendSlice->primaryProcesses, iSegIdx)
+		{
+			MemoryContext oldcxt;
+
+			if (lfirst(lcProcess) == NULL)
+				continue;			/* skip this one: we are not receiving from it */
+
+			inputTuple = RecvTupleFrom(node->ps.state->motionlayer_context,
+									   node->ps.state->interconnect_context,
+									   motion->motionID, iSegIdx);
+
+			if (!inputTuple)
+				continue;			/* skip this one: received nothing */
+
+			/*
+			 * Make a slot to hold this tuple. We will reuse it to hold any
+			 * future tuples from the same sender. We initialized the result
+			 * tuple slot with the correct type earlier, so make the new slot
+			 * have the same type.
+			 */
+			oldcxt = MemoryContextSwitchTo(estate->es_query_cxt);
+			node->slots[iSegIdx] = MakeTupleTableSlot(node->ps.ps_ResultTupleSlot->tts_tupleDescriptor,
+													  &TTSOpsMinimalTuple);
+			MemoryContextSwitchTo(oldcxt);
+
+			/*
+			 * Store the tuple in the slot, and add it to the heap.
+			 *
+			 * Use slot_getsomeattrs() to materialize the columns we need for
+			 * the comparisons in the tts_values/isnull arrays. The comparator
+			 * can then peek directly into the arrays, which is cheaper than
+			 * calling slot_getattr() all the time.
+			 */
+			ExecStoreMinimalTuple(inputTuple, node->slots[iSegIdx], true);
+			slot_getsomeattrs(node->slots[iSegIdx], node->lastSortColIdx);
+			binaryheap_add_unordered(hp, iSegIdx);
+
+			node->numTuplesFromAMS++;
+
+#ifdef CDB_MOTION_DEBUG
+			if (node->numTuplesFromAMS <= 20)
+			{
+				StringInfoData buf;
+
+				initStringInfo(&buf);
+				appendStringInfo(&buf, "   motion%-3d rcv<-%-3d %5d.",
+								 motion->motionID,
+								 iSegIdx,
+								 node->numTuplesFromAMS);
+				formatTuple(&buf, node->slots[iSegIdx], node->outputFunArray);
+				elog(DEBUG3, "%s", buf.data);
+				pfree(buf.data);
+			}
+#endif
+		}
+		Assert(iSegIdx == node->numInputSegs);
+
+		/*
+		 * Done adding the elements, now arrange the heap to satisfy the heap
+		 * property. This is quicker than inserting the initial elements one by
+		 * one.
+		 */
+		binaryheap_build(hp);
+
+		node->tupleheapReady = true;
 	}
 
 	/*
@@ -668,6 +502,10 @@ execMotionSortedReceiver(MotionState *node)
 	 */
 	else
 	{
+		/* sanity check */
+		if (binaryheap_empty(hp))
+			elog(ERROR, "sorted Gather Motion called again after already receiving all data");
+
 		/* Old element is still at the head of the pq. */
 		Assert(DatumGetInt32(binaryheap_first(hp)) == node->routeIdNext);
 
@@ -680,22 +518,8 @@ execMotionSortedReceiver(MotionState *node)
 		/* Substitute it in the pq for its predecessor. */
 		if (inputTuple)
 		{
-			CdbTupleHeapInfo *info = &node->tupleheap_entries[node->routeIdNext];
-			AttrNumber key1_attno = node->tupleheap_cxt->sortKeys[0].ssup_attno;
-
-			info->tuple = inputTuple;
-
-			if (is_memtuple(inputTuple))
-				info->datum1 = memtuple_getattr((MemTuple) inputTuple,
-												node->tupleheap_cxt->mt_bind,
-												key1_attno,
-												&info->isnull1);
-			else
-				info->datum1 = heap_getattr((HeapTuple) inputTuple,
-											key1_attno,
-											node->tupleheap_cxt->tupDesc,
-											&info->isnull1);
-
+			ExecStoreMinimalTuple(inputTuple, node->slots[node->routeIdNext], true);
+			slot_getsomeattrs(node->slots[node->routeIdNext], node->lastSortColIdx);
 			binaryheap_replace_first(hp, Int32GetDatum(node->routeIdNext));
 
 			node->numTuplesFromAMS++;
@@ -710,17 +534,17 @@ execMotionSortedReceiver(MotionState *node)
 								 motion->motionID,
 								 node->routeIdNext,
 								 node->numTuplesFromAMS);
-				formatTuple(&buf, inputTuple, ExecGetResultType(&node->ps),
-							node->outputFunArray);
-				elog(DEBUG3, buf.data);
+				formatTuple(&buf, node->slots[node->routeIdNext], node->outputFunArray);
+				elog(DEBUG3, "%s", buf.data);
 				pfree(buf.data);
 			}
 #endif
 		}
-
-		/* At EOS, drop this sender from the priority queue. */
-		else if (!binaryheap_empty(hp))
+		else
+		{
+			/* At EOS, drop this sender from the priority queue. */
 			binaryheap_remove_first(hp);
+		}
 	}
 
 	/* Finished if all senders have returned EOS. */
@@ -742,18 +566,10 @@ execMotionSortedReceiver(MotionState *node)
 	 * queue.
 	 */
 	node->routeIdNext = binaryheap_first(hp);
-	tupHeapInfo = &node->tupleheap_entries[node->routeIdNext];
-	tuple = tupHeapInfo->tuple;
-
-	/* Zap dangling tuple ptr for safety. PQ element doesn't own it anymore. */
-	tupHeapInfo->tuple = NULL;
+	slot = node->slots[node->routeIdNext];
 
 	/* Update counters. */
 	node->numTuplesToParent++;
-
-	/* Store tuple in our result slot. */
-	slot = node->ps.ps_ResultTupleSlot;
-	slot = ExecStoreGenericTuple(tuple, slot, true /* shouldFree */ );
 
 #ifdef CDB_MOTION_DEBUG
 	if (node->numTuplesToParent <= 20)
@@ -765,9 +581,8 @@ execMotionSortedReceiver(MotionState *node)
 						 motion->motionID,
 						 node->routeIdNext,
 						 node->numTuplesToParent);
-		formatTuple(&buf, tuple, ExecGetResultType(&node->ps),
-					node->outputFunArray);
-		elog(DEBUG3, buf.data);
+		formatTuple(&buf, slot, node->outputFunArray);
+		elog(DEBUG3, "%s", buf.data);
 		pfree(buf.data);
 	}
 #endif
@@ -775,89 +590,6 @@ execMotionSortedReceiver(MotionState *node)
 	/* Return result slot. */
 	return slot;
 }								/* execMotionSortedReceiver */
-
-
-void
-execMotionSortedReceiverFirstTime(MotionState *node)
-{
-	GenericTuple inputTuple;
-	binaryheap *hp = node->tupleheap;
-	Motion	   *motion = (Motion *) node->ps.plan;
-	int			iSegIdx;
-	ListCell   *lcProcess;
-	CdbMergeComparatorContext *comparatorContext = node->tupleheap_cxt;
-	AttrNumber	key1_attno = motion->sortColIdx[0];
-	Slice	   *sendSlice = (Slice *) list_nth(node->ps.state->es_sliceTable->slices, motion->motionID);
-
-	Assert(sendSlice->sliceIndex == motion->motionID);
-
-	/*
-	 * Get the first tuple from every sender, and stick it into the heap.
-	 */
-	foreach_with_count(lcProcess, sendSlice->primaryProcesses, iSegIdx)
-	{
-		if (lfirst(lcProcess) == NULL)
-			continue;			/* skip this one: we are not receiving from it */
-
-		/*
-		 * another place where we are mapping segid space to routeid space. so
-		 * route[x] = inputSegIdx[x] now.
-		 */
-		inputTuple = RecvTupleFrom(node->ps.state->motionlayer_context,
-								   node->ps.state->interconnect_context,
-								   motion->motionID, iSegIdx);
-
-		if (inputTuple)
-		{
-			CdbTupleHeapInfo *info = &node->tupleheap_entries[iSegIdx];
-
-			info->tuple = inputTuple;
-
-			binaryheap_add_unordered(hp, iSegIdx);
-
-			if (is_memtuple(inputTuple))
-				info->datum1 = memtuple_getattr((MemTuple) inputTuple,
-												comparatorContext->mt_bind,
-												key1_attno,
-												&info->isnull1);
-			else
-				info->datum1 = heap_getattr((HeapTuple) inputTuple,
-											key1_attno,
-											comparatorContext->tupDesc,
-											&info->isnull1);
-
-			node->numTuplesFromAMS++;
-
-#ifdef CDB_MOTION_DEBUG
-			if (node->numTuplesFromAMS <= 20)
-			{
-				StringInfoData buf;
-
-				initStringInfo(&buf);
-				appendStringInfo(&buf, "   motion%-3d rcv<-%-3d %5d.",
-								 motion->motionID,
-								 iSegIdx,
-								 node->numTuplesFromAMS);
-				formatTuple(&buf, inputTuple, ExecGetResultType(&node->ps),
-							node->outputFunArray);
-				elog(DEBUG3, buf.data);
-				pfree(buf.data);
-			}
-#endif
-		}
-	}
-	Assert(iSegIdx == node->numInputSegs);
-
-	/*
-	 * Done adding the elements, now arrange the heap to satisfy the heap
-	 * property. This is quicker than inserting the initial elements one by
-	 * one.
-	 */
-	binaryheap_build(hp);
-
-	node->tupleheapReady = true;
-}								/* execMotionSortedReceiverFirstTime */
-
 
 /* ----------------------------------------------------------------
  *		ExecInitMotion
@@ -874,14 +606,11 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 {
 	MotionState *motionstate = NULL;
 	TupleDesc	tupDesc;
-	Slice	   *sendSlice = NULL;
-	Slice	   *recvSlice = NULL;
+	ExecSlice  *sendSlice;
+	ExecSlice  *recvSlice;
 	SliceTable *sliceTable = estate->es_sliceTable;
 	PlanState  *outerPlan;
-
-#ifdef CDB_MOTION_DEBUG
-	int			i;
-#endif
+	int			parentIndex;
 
 	/*
 	 * If GDD is enabled, the lock of table may downgrade to RowExclusiveLock,
@@ -890,16 +619,17 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	 * but there are no slice tables in the new EState and we can not AssignGangs
 	 * on the QE. In this case, we raise an error.
 	 */
-	if (estate->es_epqTuple)
+	if (estate->es_epqTupleSlot)
 		ereport(ERROR,
 				(errcode(ERRCODE_T_R_SERIALIZATION_FAILURE),
 				 errmsg("EvalPlanQual can not handle subPlan with Motion node")));
 
 	Assert(node->motionID > 0);
-	Assert(node->motionID <= sliceTable->nMotions);
+	Assert(node->motionID < sliceTable->numSlices);
+	AssertImply(node->motionType == MOTIONTYPE_HASH, node->numHashSegments > 0);
 
-	estate->currentSliceIdInPlan = node->motionID;
-	estate->currentExecutingSliceId = node->motionID;
+	parentIndex = estate->currentSliceId;
+	estate->currentSliceId = node->motionID;
 
 	/*
 	 * create state structure
@@ -907,26 +637,25 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	motionstate = makeNode(MotionState);
 	motionstate->ps.plan = (Plan *) node;
 	motionstate->ps.state = estate;
+	motionstate->ps.ExecProcNode = ExecMotion;
 	motionstate->mstype = MOTIONSTATE_NONE;
 	motionstate->stopRequested = false;
 	motionstate->hashExprs = NIL;
 	motionstate->cdbhash = NULL;
-	motionstate->isExplictGatherMotion = false;
 
-	/* Look up the sending gang's slice table entry. */
-	sendSlice = (Slice *) list_nth(sliceTable->slices, node->motionID);
-	Assert(IsA(sendSlice, Slice));
+	/* Look up the sending and receiving gang's slice table entries. */
+	sendSlice = &sliceTable->slices[node->motionID];
 	Assert(sendSlice->sliceIndex == node->motionID);
+	recvSlice = &sliceTable->slices[parentIndex];
+	Assert(parentIndex == sendSlice->parentIndex);
 
 	/* QD must fill in the global slice table. */
 	if (Gp_role == GP_ROLE_DISPATCH)
 	{
 		MemoryContext oldcxt = MemoryContextSwitchTo(estate->es_query_cxt);
 
-		/* Look up the receiving (parent) gang's slice table entry. */
-		recvSlice = (Slice *) list_nth(sliceTable->slices, sendSlice->parentIndex);
-
-		if (node->motionType == MOTIONTYPE_GATHER)
+		if (node->motionType == MOTIONTYPE_GATHER ||
+			node->motionType == MOTIONTYPE_GATHER_SINGLE)
 		{
 			/* Sending to a single receiving process on the entry db? */
 			/* Is receiving slice a root slice that runs here in the qDisp? */
@@ -934,13 +663,14 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 			{
 				motionstate->mstype = MOTIONSTATE_RECV;
 				Assert(recvSlice->gangType == GANGTYPE_UNALLOCATED ||
-					   recvSlice->gangType == GANGTYPE_PRIMARY_WRITER);
+					   recvSlice->gangType == GANGTYPE_PRIMARY_WRITER ||
+					   recvSlice->gangType == GANGTYPE_PRIMARY_READER);
 			}
 			else
 			{
 				/* sanity checks */
-				if (recvSlice->gangSize != 1)
-					elog(ERROR, "unexpected gang size: %d", recvSlice->gangSize);
+				if (list_length(recvSlice->segments) != 1)
+					elog(ERROR, "unexpected gang size: %d", list_length(recvSlice->segments));
 			}
 		}
 
@@ -950,9 +680,7 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	/* QE must fill in map from motionID to MotionState node. */
 	else
 	{
-		Insist(Gp_role == GP_ROLE_EXECUTE);
-
-		recvSlice = (Slice *) list_nth(sliceTable->slices, sendSlice->parentIndex);
+		Assert(Gp_role == GP_ROLE_EXECUTE);
 
 		if (LocallyExecutingSliceIndex(estate) == recvSlice->sliceIndex)
 		{
@@ -965,19 +693,6 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 			motionstate->mstype = MOTIONSTATE_SEND;
 		}
 		/* TODO: If neither sending nor receiving, don't bother to initialize. */
-	}
-
-	/*
-	 * If it's gather motion and subplan's locus is CdbLocusType_Replicated,
-	 * mark isExplictGatherMotion to true
-	 */
-	if (motionstate->mstype == MOTIONSTATE_SEND &&
-		node->motionType == MOTIONTYPE_GATHER &&
-		outerPlan(node) &&
-		outerPlan(node)->flow &&
-		outerPlan(node)->flow->locustype == CdbLocusType_Replicated)
-	{
-		motionstate->isExplictGatherMotion = true;
 	}
 
 	motionstate->tupleheapReady = false;
@@ -994,7 +709,7 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	motionstate->numTuplesToParent = 0;
 
 	motionstate->stopRequested = false;
-	motionstate->numInputSegs = sendSlice->gangSize;
+	motionstate->numInputSegs = list_length(sendSlice->segments);
 
 	/*
 	 * Miscellaneous initialization
@@ -1002,11 +717,6 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	 * create expression context for node
 	 */
 	ExecAssignExprContext(estate, &motionstate->ps);
-
-	/*
-	 * tuple table initialization
-	 */
-	ExecInitResultTupleSlot(estate, &motionstate->ps);
 
 	/*
 	 * Initializes child nodes. If alien elimination is on, we skip children
@@ -1024,97 +734,75 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 	outerPlan = outerPlanState(motionstate);
 
 	/*
-	 * The advertised 'tdhasoid' flag in our result tuple desc must match what
-	 * the outer plan produces. Otherwise, the sender will send tuples that
-	 * have OIDs, but the receiver treats the tuples as if they doesn't have
-	 * OIDs, or vice versa. This isn't so important for HeapTuples, which have
-	 * an HAS_OIDS flag on every tuple, but for MemTuples it is critical,
-	 * because it affects the way the they are deformed.
-	 *
-	 * GPDB_95_MERGE_FIXME: Should we force ORCA to always use the TL for
-	 * motion nodes or modify ORCA to use the TL from the outer node?
+	 * Initialize result type and slot
 	 */
-	if (outerPlan && ExecGetResultType(outerPlan) && estate->es_plannedstmt->planGen == PLANGEN_PLANNER)
-	{
-		/*
-		 * This is like ExecAssignResultTypeFromTL(), but we copy the tdhasoid
-		 * flag from the subplan.
-		 */
-		bool		hasoid = ExecGetResultType(outerPlan)->tdhasoid;
-
-		tupDesc = ExecTypeFromTL(motionstate->ps.plan->targetlist, hasoid);
-		ExecAssignResultType(&motionstate->ps, tupDesc);
-	}
-	else
-	{
-		ExecAssignResultTypeFromTL(&motionstate->ps);
-		tupDesc = ExecGetResultType(&motionstate->ps);
-	}
+	ExecInitResultTupleSlotTL(&motionstate->ps, &TTSOpsMinimalTuple);
+	tupDesc = ExecGetResultType(&motionstate->ps);
 
 	motionstate->ps.ps_ProjInfo = NULL;
+	motionstate->numHashSegments = node->numHashSegments;
 
 	/* Set up motion send data structures */
 	if (motionstate->mstype == MOTIONSTATE_SEND && node->motionType == MOTIONTYPE_HASH)
 	{
 		int			nkeys;
-		int			numsegments;
 
+		Assert(node->numHashSegments > 0);
+		Assert(node->numHashSegments <= recvSlice->planNumSegments);
 		nkeys = list_length(node->hashExprs);
 
 		if (nkeys > 0)
-			motionstate->hashExprs = (List *) ExecInitExpr((Expr *) node->hashExprs,
-														   (PlanState *) motionstate);
+			motionstate->hashExprs = ExecInitExprList(node->hashExprs,
+													  (PlanState *) motionstate);
 
 		/*
 		 * Create hash API reference
 		 */
-		if (estate->es_plannedstmt->planGen == PLANGEN_PLANNER)
-		{
-			Assert(node->plan.flow);
-			Assert(node->plan.flow->numsegments > 0);
-
-			/*
-			 * For planner generated plan the size of receiver slice can be
-			 * determined from flow.
-			 */
-			numsegments = node->plan.flow->numsegments;
-		}
-		else
-		{
-			/*
-			 * For ORCA generated plan we could distribute to ALL as partially
-			 * distributed tables are not supported by ORCA yet.
-			 */
-			numsegments = getgpsegmentCount();
-		}
-
-		motionstate->cdbhash = makeCdbHash(numsegments, nkeys, node->hashFuncs);
+		motionstate->cdbhash = makeCdbHash(motionstate->numHashSegments,
+										   nkeys,
+										   node->hashFuncs);
 	}
 
-	/* Merge Receive: Set up the key comparator and priority queue. */
+	/*
+	 * Merge Receive: Set up the key comparator and priority queue.
+	 *
+	 * This is very similar to a Merge Append.
+	 */
 	if (node->sendSorted && motionstate->mstype == MOTIONSTATE_RECV)
 	{
-		if (gp_enable_motion_mk_sort)
-			create_motion_mk_heap(motionstate);
-		else
+		int			numInputSegs = motionstate->numInputSegs;
+		int			lastSortColIdx = 0;
+
+		/* Allocate array to slots for the next tuple from each sender */
+		motionstate->slots = palloc0(numInputSegs * sizeof(TupleTableSlot *));
+
+		/* Prepare SortSupport data for each column */
+		motionstate->numSortCols = node->numSortCols;
+		motionstate->sortKeys = (SortSupport) palloc0(node->numSortCols * sizeof(SortSupportData));
+
+		for (int i = 0; i < node->numSortCols; i++)
 		{
-			/* Allocate context object for the key comparator. */
-			motionstate->tupleheap_entries =
-				palloc(motionstate->numInputSegs * sizeof(CdbTupleHeapInfo));
-			/* Create the priority queue structure. */
-			motionstate->tupleheap_cxt =
-				CdbMergeComparator_CreateContext(motionstate->tupleheap_entries,
-												 tupDesc,
-												 node->numSortCols,
-												 node->sortColIdx,
-												 node->sortOperators,
-												 node->collations,
-												 node->nullsFirst);
-			motionstate->tupleheap =
-				binaryheap_allocate(motionstate->numInputSegs,
-									CdbMergeComparator,
-									motionstate->tupleheap_cxt);
+			SortSupport sortKey = &motionstate->sortKeys[i];
+
+			AssertArg(node->sortColIdx[i] != 0);
+			AssertArg(node->sortOperators[i] != 0);
+
+			sortKey->ssup_cxt = CurrentMemoryContext;
+			sortKey->ssup_collation = node->collations[i];
+			sortKey->ssup_nulls_first = node->nullsFirst[i];
+			sortKey->ssup_attno = node->sortColIdx[i];
+
+			PrepareSortSupportFromOrderingOp(node->sortOperators[i], sortKey);
+
+			/* Also make note of the last column used in the sort key */
+			if (node->sortColIdx[i] > lastSortColIdx)
+				lastSortColIdx = node->sortColIdx[i];
 		}
+		motionstate->lastSortColIdx = lastSortColIdx;
+		motionstate->tupleheap =
+			binaryheap_allocate(motionstate->numInputSegs,
+								CdbMergeComparator,
+								motionstate);
 	}
 
 	/*
@@ -1128,15 +816,17 @@ ExecInitMotion(Motion *node, EState *estate, int eflags)
 
 #ifdef CDB_MOTION_DEBUG
 	motionstate->outputFunArray = (Oid *) palloc(tupDesc->natts * sizeof(Oid));
-	for (i = 0; i < tupDesc->natts; i++)
+	for (int i = 0; i < tupDesc->natts; i++)
 	{
 		bool		typisvarlena;
 
-		getTypeOutputInfo(tupDesc->attrs[i]->atttypid,
+		getTypeOutputInfo(tupDesc->attrs[i].atttypid,
 						  &motionstate->outputFunArray[i],
 						  &typisvarlena);
 	}
 #endif
+
+	estate->currentSliceId = parentIndex;
 
 	return motionstate;
 }
@@ -1149,7 +839,6 @@ void
 ExecEndMotion(MotionState *node)
 {
 	Motion	   *motion = (Motion *) node->ps.plan;
-	uint16		motNodeID = motion->motionID;
 #ifdef MEASURE_MOTION_TIME
 	double		otherTimeSec;
 	double		motionTimeSec;
@@ -1166,10 +855,6 @@ ExecEndMotion(MotionState *node)
 	 * Set the slice no for the nodes under this motion.
 	 */
 	Assert(node->ps.state != NULL);
-	node->ps.state->currentSliceIdInPlan = motNodeID;
-	int			parentExecutingSliceId = node->ps.state->currentExecutingSliceId;
-
-	node->ps.state->currentExecutingSliceId = motNodeID;
 
 	/*
 	 * shut down the subplan
@@ -1224,14 +909,7 @@ ExecEndMotion(MotionState *node)
 	if (node->tupleheap != NULL)
 	{
 		binaryheap_free(node->tupleheap);
-
-		CdbMergeComparator_DestroyContext(node->tupleheap_cxt);
 		node->tupleheap = NULL;
-	}
-	if (node->tupleheap_mk)
-	{
-		destroy_motion_mk_heap(node);
-		node->tupleheap_mk = NULL;
 	}
 
 	/* Free the slices and routes */
@@ -1246,20 +924,13 @@ ExecEndMotion(MotionState *node)
 	 *
 	 * TODO: For now, we don't flush the comm-layer.  NO ERRORS DURING AMS!!!
 	 */
-	EndMotionLayerNode(node->ps.state->motionlayer_context, motNodeID, /* flush-comm-layer */ false);
+	EndMotionLayerNode(node->ps.state->motionlayer_context, motion->motionID,
+					   /* flush-comm-layer */ false);
 
 #ifdef CDB_MOTION_DEBUG
 	if (node->outputFunArray)
 		pfree(node->outputFunArray);
 #endif
-
-	/*
-	 * Temporarily set currentExecutingSliceId to the parent value, since this
-	 * motion might be in the top slice of an InitPlan.
-	 */
-	node->ps.state->currentExecutingSliceId = parentExecutingSliceId;
-	EndPlanStateGpmonPkt(&node->ps);
-	node->ps.state->currentExecutingSliceId = motNodeID;
 }
 
 
@@ -1275,32 +946,19 @@ ExecEndMotion(MotionState *node)
 static int
 CdbMergeComparator(Datum lhs, Datum rhs, void *context)
 {
+	MotionState *node = (MotionState *) context;
 	int			lSegIdx = DatumGetInt32(lhs);
 	int			rSegIdx = DatumGetInt32(rhs);
-	CdbMergeComparatorContext *ctx = (CdbMergeComparatorContext *) context;
-	CdbTupleHeapInfo *linfo = (CdbTupleHeapInfo *) &ctx->tupleheap_entries[lSegIdx];
-	CdbTupleHeapInfo *rinfo = (CdbTupleHeapInfo *) &ctx->tupleheap_entries[rSegIdx];
-	GenericTuple ltup = linfo->tuple;
-	GenericTuple rtup = rinfo->tuple;
-	SortSupport	sortKeys = ctx->sortKeys;
-	TupleDesc	tupDesc;
+
+	TupleTableSlot *lslot = node->slots[lSegIdx];
+	TupleTableSlot *rslot = node->slots[rSegIdx];
+	SortSupport	sortKeys = node->sortKeys;
 	int			nkey;
-	int			numSortCols = ctx->numSortCols;
 	int			compare;
 
-	Assert(ltup && rtup);
+	Assert(lslot && rslot);
 
-	tupDesc = ctx->tupDesc;
-
-	/* First column. We have the Datum for that extracted already. */
-	compare = ApplySortComparator(linfo->datum1, linfo->isnull1,
-								  rinfo->datum1, rinfo->isnull1,
-								  &sortKeys[0]);
-	if (compare != 0)
-		return -compare;
-
-	/* Rest of the columns. */
-	for (nkey = 1; nkey < numSortCols; nkey++)
+	for (nkey = 0; nkey < node->numSortCols; nkey++)
 	{
 		SortSupport ssup = &sortKeys[nkey];
 		AttrNumber	attno = ssup->ssup_attno;
@@ -1309,84 +967,27 @@ CdbMergeComparator(Datum lhs, Datum rhs, void *context)
 		bool		isnull1,
 					isnull2;
 
-		if (is_memtuple(ltup))
-			datum1 = memtuple_getattr((MemTuple) ltup, ctx->mt_bind, attno, &isnull1);
-		else
-			datum1 = heap_getattr((HeapTuple) ltup, attno, tupDesc, &isnull1);
-
-		if (is_memtuple(rtup))
-			datum2 = memtuple_getattr((MemTuple) rtup, ctx->mt_bind, attno, &isnull2);
-		else
-			datum2 = heap_getattr((HeapTuple) rtup, attno, tupDesc, &isnull2);
+		/*
+		 * The caller has called slot_getsomeattrs() to ensure
+		 * that all the columns we need are available directly in
+		 * the values/isnull arrays.
+		 */
+		datum1 = lslot->tts_values[attno - 1];
+		isnull1 = lslot->tts_isnull[attno - 1];
+		datum2 = rslot->tts_values[attno - 1];
+		isnull2 = rslot->tts_isnull[attno - 1];
 
 		compare = ApplySortComparator(datum1, isnull1,
 									  datum2, isnull2,
 									  ssup);
 		if (compare != 0)
-			return -compare;
+		{
+			INVERT_COMPARE_RESULT(compare);
+			return compare;
+		}
 	}
-
 	return 0;
 }								/* CdbMergeComparator */
-
-
-/* Create context object for use by CdbMergeComparator */
-static CdbMergeComparatorContext *
-CdbMergeComparator_CreateContext(CdbTupleHeapInfo *tupleheap_entries,
-								 TupleDesc tupDesc,
-								 int numSortCols,
-								 AttrNumber *sortColIdx,
-								 Oid *sortOperators,
-								 Oid *sortCollations,
-								 bool *nullsFirstFlags)
-{
-	CdbMergeComparatorContext *ctx;
-	int			i;
-
-	Assert(tupDesc &&
-		   numSortCols > 0 &&
-		   sortColIdx &&
-		   sortOperators);
-
-	/* Allocate and initialize the context object. */
-	ctx = (CdbMergeComparatorContext *) palloc0(sizeof(*ctx));
-
-	ctx->numSortCols = numSortCols;
-	ctx->tupDesc = tupDesc;
-	ctx->mt_bind = create_memtuple_binding(tupDesc);
-	ctx->tupleheap_entries = tupleheap_entries;
-
-	/* Prepare SortSupport data for each column */
-	ctx->sortKeys = (SortSupport) palloc0(numSortCols * sizeof(SortSupportData));
-
-	for (i = 0; i < numSortCols; i++)
-	{
-		SortSupport sortKey = &ctx->sortKeys[i];
-
-		AssertArg(sortColIdx[i] != 0);
-		AssertArg(sortOperators[i] != 0);
-
-		sortKey->ssup_cxt = CurrentMemoryContext;
-		sortKey->ssup_collation = sortCollations[i];
-		sortKey->ssup_nulls_first = nullsFirstFlags[i];
-		sortKey->ssup_attno = sortColIdx[i];
-
-		PrepareSortSupportFromOrderingOp(sortOperators[i], sortKey);
-	}
-
-	return ctx;
-}								/* CdbMergeComparator_CreateContext */
-
-
-void
-CdbMergeComparator_DestroyContext(CdbMergeComparatorContext *ctx)
-{
-	if (!ctx)
-		return;
-	if (ctx->sortKeys)
-		pfree(ctx->sortKeys);
-}								/* CdbMergeComparator_DestroyContext */
-
 
 /*
  * Experimental code that will be replaced later with new hashing mechanism
@@ -1425,7 +1026,7 @@ evalHashKey(ExprContext *econtext, List *hashkeys, CdbHash * h)
 			/*
 			 * Get the attribute value of the tuple
 			 */
-			keyval = ExecEvalExpr(keyexpr, econtext, &isNull, NULL);
+			keyval = ExecEvalExpr(keyexpr, econtext, &isNull);
 
 			/*
 			 * Compute the hash function
@@ -1494,7 +1095,8 @@ doSendTuple(Motion *motion, MotionState *node, TupleTableSlot *outerTupleSlot)
 	/* We got a tuple from the child-plan. */
 	node->numTuplesFromChild++;
 
-	if (motion->motionType == MOTIONTYPE_GATHER)
+	if (motion->motionType == MOTIONTYPE_GATHER ||
+		motion->motionType == MOTIONTYPE_GATHER_SINGLE)
 	{
 		/*
 		 * Actually, since we can only send to a single output segment
@@ -1518,16 +1120,8 @@ doSendTuple(Motion *motion, MotionState *node, TupleTableSlot *outerTupleSlot)
 		hval = evalHashKey(econtext, node->hashExprs, node->cdbhash);
 
 #ifdef USE_ASSERT_CHECKING
-		if (node->ps.state->es_plannedstmt->planGen == PLANGEN_PLANNER)
-		{
-			Assert(hval < node->ps.plan->flow->numsegments &&
-				   "redistribute destination outside segment array");
-		}
-		else
-		{
-			Assert(hval < getgpsegmentCount() &&
-				   "redistribute destination outside segment array");
-		}
+		Assert(hval < node->numHashSegments &&
+			   "redistribute destination outside segment array");
 #endif							/* USE_ASSERT_CHECKING */
 
 		/*
@@ -1589,10 +1183,8 @@ doSendTuple(Motion *motion, MotionState *node, TupleTableSlot *outerTupleSlot)
 						 motion->motionID,
 						 targetRoute,
 						 node->numTuplesToAMS);
-		formatTuple(&buf, ExecFetchSlotGenericTuple(outerTupleSlot),
-					ExecGetResultType(&node->ps),
-					node->outputFunArray);
-		elog(DEBUG3, buf.data);
+		formatTuple(&buf, outerTupleSlot, node->outputFunArray);
+		elog(DEBUG3, "%s", buf.data);
 		pfree(buf.data);
 	}
 #endif

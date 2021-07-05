@@ -5,6 +5,7 @@
 CREATE TABLE INT4_TBL(f1 int4);
 
 INSERT INTO INT4_TBL(f1) VALUES ('   0  ');
+ANALYZE INT4_TBL;
 
 INSERT INTO INT4_TBL(f1) VALUES ('123456     ');
 
@@ -145,3 +146,13 @@ FROM (VALUES (-2.5::float8),
              (0.5::float8),
              (1.5::float8),
              (2.5::float8)) t(x);
+
+-- check rounding when casting from numeric
+SELECT x, x::int4 AS int4_value
+FROM (VALUES (-2.5::numeric),
+             (-1.5::numeric),
+             (-0.5::numeric),
+             (0.0::numeric),
+             (0.5::numeric),
+             (1.5::numeric),
+             (2.5::numeric)) t(x);

@@ -1,7 +1,7 @@
 /*
  * Copyright 2012, Tomas Vondra (tv@fuzzy.cz). All rights reserved.
  * Copyright 2015, Conversant, Inc. All rights reserved.
- * Copyright 2018, Pivotal Software, Inc. All rights reserved.
+ * Copyright 2018, VMware, Inc. or its affiliates. All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without modification, are
  * permitted provided that the following conditions are met:
@@ -13,8 +13,8 @@
  * of conditions and the following disclaimer in the documentation and/or other materials
  * provided with the distribution.
  *
- * THIS SOFTWARE IS PROVIDED BY TOMAS VONDRA, CONVERSANT INC, PIVOTAL SOFTWARE INC. AND ANY
- * OTHER CONTRIBUTORS (THE "AUTHORS") ''AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ * THIS SOFTWARE IS PROVIDED BY TOMAS VONDRA, CONVERSANT INC, VMWARE, INC. OF ITS AFFILIATES.
+ * AND ANY OTHER CONTRIBUTORS (THE "AUTHORS") ''AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
  * INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
  * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE AUTHORS BE LIABLE FOR ANY DIRECT,
  * INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
@@ -171,7 +171,7 @@ gp_hll_decompress_dense_unpacked(GpHLLCounter hloglog)
 
 	/* decompress the data */
 	pglz_decompress(hloglog->data, VARSIZE_ANY(hloglog) - sizeof(GpHLLData),
-					(char *) &htemp->data, data_rawsize);
+					(char *) &htemp->data, data_rawsize, true);
 
 	hloglog = htemp;
 
@@ -519,16 +519,6 @@ gp_hll_add_hash_dense(GpHLLCounter hloglog, uint64_t hash)
     return hloglog;
 }
 
-/* Just reset the counter (set all the counters to 0). We do this by
- * zeroing the data array */
-void 
-gp_hll_reset_internal(GpHLLCounter hloglog)
-{
-
-    memset(hloglog->data, 0, VARSIZE_ANY(hloglog) - sizeof(GpHLLData) );
-
-}
-
 /* Compress header function */
 GpHLLCounter
 gp_hll_compress(GpHLLCounter hloglog)
@@ -602,6 +592,13 @@ gp_hll_compress_dense(GpHLLCounter hloglog)
     	}
     	return hloglog;
     }
+
+	if (len < 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("LZ compression failed"),
+				 errdetail("LZ compression return value: %d", len)));
+
     memcpy(hloglog->data,dest,len);
 
     /* resize the counter to only encompass the compressed data and the struct
@@ -659,6 +656,13 @@ gp_hll_compress_dense_unpacked(GpHLLCounter hloglog)
 		}
 		return hloglog;
 	}
+
+	if (len < 0)
+		ereport(ERROR,
+				(errcode(ERRCODE_INTERNAL_ERROR),
+				 errmsg("LZ compression failed"),
+				 errdetail("LZ compression return value: %d", len)));
+
 	memcpy(hloglog->data, dest, len);
 
 	/* resize the counter to only encompass the compressed data and the struct
@@ -720,7 +724,7 @@ gp_hll_decompress_dense(GpHLLCounter hloglog)
 
     /* decompress the data */
     pglz_decompress(hloglog->data, VARSIZE_ANY(hloglog) - sizeof(GpHLLData),
-					dest, data_rawsize);
+					dest, data_rawsize, true);
 
     /* copy the struct internals but not the data into a counter with enough 
      * space for the uncompressed data  */
@@ -825,7 +829,7 @@ gp_hyperloglog_merge_counters(GpHLLCounter counter1, GpHLLCounter counter2)
 		return gp_hll_copy(counter2);
 	}
 	else if (counter2 == NULL) {
-		/* if second counter is null just return the the first estimator */
+		/* if second counter is null just return the first estimator */
 		return gp_hll_copy(counter1);
 	}
 	else
@@ -902,11 +906,17 @@ GpMurmurHash64A (const void * key, int len, unsigned int seed)
 
     switch(len & 7) {
         case 7: h ^= (uint64_t)data[6] << 48;
+		/* fallthrough */
         case 6: h ^= (uint64_t)data[5] << 40;
+		/* fallthrough */
         case 5: h ^= (uint64_t)data[4] << 32;
+		/* fallthrough */
         case 4: h ^= (uint64_t)data[3] << 24;
+		/* fallthrough */
         case 3: h ^= (uint64_t)data[2] << 16;
+		/* fallthrough */
         case 2: h ^= (uint64_t)data[1] << 8;
+		/* fallthrough */
         case 1: h ^= (uint64_t)data[0];
         h *= m;
     };
@@ -1167,7 +1177,7 @@ gp_hyperloglog_merge(PG_FUNCTION_ARGS)
 		counter1_merged = PG_GETARG_HLL_P_COPY(1);
 
 	} else if (PG_ARGISNULL(1)) {
-		/* if second counter is null just return the the first estimator */
+		/* if second counter is null just return the first estimator */
 		counter1_merged = PG_GETARG_HLL_P_COPY(0);
 
 	} else {

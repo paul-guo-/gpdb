@@ -2,7 +2,10 @@ GPHOME_CLIENTS=`pwd`
 PATH=${GPHOME_CLIENTS}/bin:${GPHOME_CLIENTS}/ext/python/bin:${PATH}
 PYTHONPATH=${GPHOME_CLIENTS}/bin/ext:${PYTHONPATH}
 
+# Export GPHOME_LOADERS for GPDB5 compatible
+GPHOME_LOADERS=${GPHOME_CLIENTS}
 export GPHOME_CLIENTS
+export GPHOME_LOADERS
 export PATH
 export PYTHONPATH
 
@@ -13,15 +16,6 @@ if [ xDarwin = x`uname -s` ]; then
 else
   LD_LIBRARY_PATH=${GPHOME_CLIENTS}/lib:${GPHOME_CLIENTS}/ext/python/lib:${LD_LIBRARY_PATH}
   export LD_LIBRARY_PATH
-fi
-
-# AIX uses yet another library path variable
-# Also, Python on AIX requires special copies of some libraries.  Hence, lib/pware.
-if [ xAIX = x`uname -s` ]; then
-  LIBPATH=${GPHOME_CLIENTS}/lib/pware:${GPHOME_CLIENTS}/lib:${GPHOME_CLIENTS}/ext/python/lib64:/usr/lib/threads:${LIBPATH}
-  export LIBPATH
-  GP_LIBPATH_FOR_PYTHON=${GPHOME_CLIENTS}/lib/pware
-  export GP_LIBPATH_FOR_PYTHON
 fi
 
 if [ "$1" != "-q" ]; then

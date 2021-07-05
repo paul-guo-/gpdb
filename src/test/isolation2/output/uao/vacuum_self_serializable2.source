@@ -4,9 +4,9 @@ DROP TABLE IF EXISTS ao;
 DROP
 DROP TABLE IF EXISTS ao2;
 DROP
-CREATE TABLE ao (a INT, b INT) WITH (appendonly=true, orientation=@orientation@);
+CREATE TABLE ao (a INT, b INT) USING @amname@;
 CREATE
-CREATE TABLE ao2 (a INT) WITH (appendonly=true, orientation=@orientation@);
+CREATE TABLE ao2 (a INT) USING @amname@;
 CREATE
 INSERT INTO ao SELECT i as a, i as b FROM generate_series(1, 100) AS i;
 INSERT 100
@@ -30,16 +30,22 @@ BEGIN
 2: SELECT segno, tupcount FROM gp_ao_or_aocs_seg('ao');
  segno | tupcount 
 -------+----------
- 1     | 100      
-(1 row)
+ 1     | 25       
+ 1     | 37       
+ 1     | 38       
+(3 rows)
 2: VACUUM ao;
 VACUUM
 2: SELECT segno, tupcount FROM gp_ao_or_aocs_seg('ao');
  segno | tupcount 
 -------+----------
- 1     | 0        
- 2     | 70       
-(2 rows)
+ 1     | 25       
+ 1     | 37       
+ 1     | 38       
+ 2     | 14       
+ 2     | 26       
+ 2     | 30       
+(6 rows)
 1: SELECT COUNT(*) FROM ao;
  count 
 -------

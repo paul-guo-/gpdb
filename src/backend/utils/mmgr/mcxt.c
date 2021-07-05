@@ -10,8 +10,8 @@
  *
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -21,25 +21,15 @@
  *-------------------------------------------------------------------------
  */
 
-/* see palloc.h.  Must be before postgres.h */
-#define MCXT_INCLUDE_DEFINITIONS
-
 #include "postgres.h"
 
+#include "mb/pg_wchar.h"
 #include "miscadmin.h"
 #include "utils/memdebug.h"
 #include "utils/memutils.h"
-#include "utils/memaccounting.h"
 
-#include "cdb/cdbvars.h"                    /* gp_process_memory_cutoff_bytes */
+#include "cdb/cdbvars.h"                    /* coredump_on_memerror */
 #include "inttypes.h"
-
-#ifdef HAVE_STDINT_H
-#include <stdint.h>                         /* SIZE_MAX (C99) */
-#endif
-#ifndef SIZE_MAX
-#define SIZE_MAX ((Size)0-(Size)1)          /* for Solaris */
-#endif
 
 #ifdef CDB_PALLOC_CALLER_ID
 #define CDB_MCXT_WHERE(context) (context)->callerFile, (context)->callerLine
@@ -50,9 +40,6 @@
 #if defined(CDB_PALLOC_TAGS) && !defined(CDB_PALLOC_CALLER_ID)
 #error "If CDB_PALLOC_TAGS is defined, CDB_PALLOC_CALLER_ID must be defined too"
 #endif
-
-/* Maximum allowed length of the name of a context including the parent names prepended */
-#define MAX_CONTEXT_NAME_SIZE 200
 
 /*****************************************************************************
  *	  GLOBAL MEMORY															 *
@@ -75,7 +62,6 @@ MemoryContext CacheMemoryContext = NULL;
 MemoryContext MessageContext = NULL;
 MemoryContext TopTransactionContext = NULL;
 MemoryContext CurTransactionContext = NULL;
-MemoryContext MemoryAccountMemoryContext = NULL;
 MemoryContext DispatcherContext = NULL;
 MemoryContext InterconnectContext = NULL;
 MemoryContext OptimizerMemoryContext = NULL;
@@ -84,6 +70,11 @@ MemoryContext OptimizerMemoryContext = NULL;
 MemoryContext PortalContext = NULL;
 
 static void MemoryContextCallResetCallbacks(MemoryContext context);
+static void MemoryContextStatsInternal(MemoryContext context, int level,
+									   bool print, int max_children,
+									   MemoryContextCounters *totals);
+static void MemoryContextStatsPrint(MemoryContext context, void *passthru,
+									const char *stats_string);
 
 /*
  * You should not do memory allocations within a critical section, because
@@ -98,7 +89,7 @@ static void MemoryContextCallResetCallbacks(MemoryContext context);
 #define AssertNotInCriticalSection(context) \
 	Assert(CritSectionCount == 0 || (context)->allowInCritSection)
 #else
-#define AssertNotInCriticalSection(context) 
+#define AssertNotInCriticalSection(context)
 #endif
 
 /*****************************************************************************
@@ -126,20 +117,13 @@ void
 MemoryContextInit(void)
 {
 	AssertState(TopMemoryContext == NULL);
-	AssertState(CurrentMemoryContext == NULL);
-	AssertState(MemoryAccountMemoryContext == NULL);
 
 	/*
-	 * Initialize TopMemoryContext as an AllocSetContext with slow growth rate
-	 * --- we don't really expect much to be allocated in it.
-	 *
-	 * (There is special-case code in MemoryContextCreate() for this call.)
+	 * First, initialize TopMemoryContext, which is the parent of all others.
 	 */
 	TopMemoryContext = AllocSetContextCreate((MemoryContext) NULL,
 											 "TopMemoryContext",
-											 0,
-											 8 * 1024,
-											 8 * 1024);
+											 ALLOCSET_DEFAULT_SIZES);
 
 	/*
 	 * Not having any other place to point CurrentMemoryContext, make it point
@@ -165,8 +149,6 @@ MemoryContextInit(void)
 										 8 * 1024,
 										 8 * 1024,
 										 8 * 1024);
-	MemoryAccounting_Reset();
-
 	MemoryContextAllowInCriticalSection(ErrorContext, true);
 }
 
@@ -203,7 +185,18 @@ MemoryContextResetOnly(MemoryContext context)
 	if (!context->isReset)
 	{
 		MemoryContextCallResetCallbacks(context);
-		(*context->methods.reset) (context);
+
+		/*
+		 * If context->ident points into the context's memory, it will become
+		 * a dangling pointer.  We could prevent that by setting it to NULL
+		 * here, but that would break valid coding patterns that keep the
+		 * ident elsewhere, e.g. in a parent context.  Another idea is to use
+		 * MemoryContextContains(), but we don't require ident strings to be
+		 * in separately-palloc'd chunks, so that risks false positives.  So
+		 * for now we assume the programmer got it right.
+		 */
+
+		context->methods->reset(context);
 		context->isReset = true;
 		VALGRIND_DESTROY_MEMPOOL(context);
 		VALGRIND_CREATE_MEMPOOL(context, 0, false);
@@ -235,14 +228,15 @@ MemoryContextResetChildren(MemoryContext context)
  *		Delete a context and its descendants, and release all space
  *		allocated therein.
  *
- * The type-specific delete routine removes all subsidiary storage
- * for the context, but we have to delete the context node itself,
- * as well as recurse to get the children.  We must also delink the
- * node from its parent, if it has one.
+ * The type-specific delete routine removes all storage for the context,
+ * but we have to recurse to handle the children.
+ * We must also delink the context from its parent, if it has one.
  */
 void
 MemoryContextDeleteImpl(MemoryContext context, const char* sfile, const char *func, int sline)
 {
+	MemoryContext parent;
+
 	AssertArg(MemoryContextIsValid(context));
 	/* We had better not be deleting TopMemoryContext ... */
 	Assert(context != TopMemoryContext);
@@ -254,7 +248,9 @@ MemoryContextDeleteImpl(MemoryContext context, const char* sfile, const char *fu
 	context->callerLine = sline;
 #endif
 
-	MemoryContextDeleteChildren(context);
+	/* save a function call in common case where there are no children */
+	if (context->firstchild != NULL)
+		MemoryContextDeleteChildren(context);
 
 	/*
 	 * It's not entirely clear whether 'tis better to do this before or after
@@ -269,11 +265,19 @@ MemoryContextDeleteImpl(MemoryContext context, const char* sfile, const char *fu
 	 * there's an error we won't have deleted/busted contexts still attached
 	 * to the context tree.  Better a leak than a crash.
 	 */
+	parent = MemoryContextGetParent(context);
 	MemoryContextSetParent(context, NULL);
 
-	(*context->methods.delete_context) (context);
+	/*
+	 * Also reset the context's ident pointer, in case it points into the
+	 * context.  This would only matter if someone tries to get stats on the
+	 * (already unlinked) context, which is unlikely, but let's be safe.
+	 */
+	context->ident = NULL;
+
+	context->methods->delete_context(context, parent);
+
 	VALGRIND_DESTROY_MEMPOOL(context);
-	pfree(context);
 }
 
 /*
@@ -340,8 +344,25 @@ MemoryContextCallResetCallbacks(MemoryContext context)
 	while ((cb = context->reset_cbs) != NULL)
 	{
 		context->reset_cbs = cb->next;
-		(*cb->func) (cb->arg);
+		cb->func(cb->arg);
 	}
+}
+
+/*
+ * MemoryContextSetIdentifier
+ *		Set the identifier string for a memory context.
+ *
+ * An identifier can be provided to help distinguish among different contexts
+ * of the same kind in memory context stats dumps.  The identifier string
+ * must live at least as long as the context it is for; typically it is
+ * allocated inside that context, so that it automatically goes away on
+ * context deletion.  Pass id = NULL to forget any old identifier.
+ */
+void
+MemoryContextSetIdentifier(MemoryContext context, const char *id)
+{
+	AssertArg(MemoryContextIsValid(context));
+	context->ident = id;
 }
 
 /*
@@ -372,26 +393,24 @@ MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
 	if (new_parent == context->parent)
 		return;
 
+	/* update memory accounting */
+	AllocSetTransferAccounting(context, new_parent);
+
 	/* Delink from existing parent, if any */
 	if (context->parent)
 	{
 		MemoryContext parent = context->parent;
 
-		if (context == parent->firstchild)
-			parent->firstchild = context->nextchild;
+		if (context->prevchild != NULL)
+			context->prevchild->nextchild = context->nextchild;
 		else
 		{
-			MemoryContext child;
-
-			for (child = parent->firstchild; child; child = child->nextchild)
-			{
-				if (context == child->nextchild)
-				{
-					child->nextchild = context->nextchild;
-					break;
-				}
-			}
+			Assert(parent->firstchild == context);
+			parent->firstchild = context->nextchild;
 		}
+
+		if (context->nextchild != NULL)
+			context->nextchild->prevchild = context->prevchild;
 	}
 
 	/* And relink */
@@ -399,12 +418,16 @@ MemoryContextSetParent(MemoryContext context, MemoryContext new_parent)
 	{
 		AssertArg(MemoryContextIsValid(new_parent));
 		context->parent = new_parent;
+		context->prevchild = NULL;
 		context->nextchild = new_parent->firstchild;
+		if (new_parent->firstchild != NULL)
+			new_parent->firstchild->prevchild = context;
 		new_parent->firstchild = context;
 	}
 	else
 	{
 		context->parent = NULL;
+		context->prevchild = NULL;
 		context->nextchild = NULL;
 	}
 }
@@ -439,55 +462,9 @@ MemoryContextAllowInCriticalSection(MemoryContext context, bool allow)
 Size
 GetMemoryChunkSpace(void *pointer)
 {
-	StandardChunkHeader *header;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-
-	AssertArg(MemoryContextIsValid(header->sharedHeader->context));
-
-	return (*header->sharedHeader->context->methods.get_chunk_space) (header->sharedHeader->context,
-														 pointer);
-}
-
-/*
- * GetMemoryChunkContext
- *		Given a currently-allocated chunk, determine the context
- *		it belongs to.
- */
-MemoryContext
-GetMemoryChunkContext(void *pointer)
-{
-	StandardChunkHeader *header;
-
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-
-	AssertArg(MemoryContextIsValid(header->sharedHeader->context));
-
-	return header->sharedHeader->context;
+	return context->methods->get_chunk_space(context, pointer);
 }
 
 /*
@@ -518,69 +495,8 @@ MemoryContextIsEmpty(MemoryContext context)
 	if (context->firstchild != NULL)
 		return false;
 	/* Otherwise use the type-specific inquiry */
-	return (*context->methods.is_empty) (context);
+	return context->methods->is_empty(context);
 }
-
-
-/*
- * MemoryContextNoteAlloc
- *		Update lifetime cumulative statistics upon allocation from host mem mgr.
- *
- * Called by the context-type-specific memory manager upon successfully
- * obtaining a block of size 'nbytes' from its lower-level source (e.g. malloc).
- */
-void
-MemoryContextNoteAlloc(MemoryContext context, Size nbytes)
-{
-    Size            held;
-
-    AssertArg(MemoryContextIsValid(context));
-
-    for (;;)
-    {
-        Assert(context->allBytesAlloc >= context->allBytesFreed);
-        Assert(context->allBytesAlloc - context->allBytesFreed < SIZE_MAX - nbytes);
-
-        context->allBytesAlloc += nbytes;
-
-        held = (Size)(context->allBytesAlloc - context->allBytesFreed);
-        if (context->maxBytesHeld < held)
-            context->maxBytesHeld = held;
-
-        if (!context->parent)
-            break;
-        context = context->parent;
-    }
-}                               /* MemoryContextNoteAlloc */
-
-/*
- * MemoryContextNoteFree
- *		Update lifetime cumulative statistics upon free to host memory manager.
- *
- * Called by the context-type-specific memory manager upon relinquishing a
- * block of size 'nbytes' back to its lower-level source (e.g. free()).
- */
-void
-MemoryContextNoteFree(MemoryContext context, Size nbytes)
-{
-    Size    held;
-
-	AssertArg(MemoryContextIsValid(context));
-
-    while (context)
-    {
-        Assert(context->allBytesAlloc >= context->allBytesFreed + nbytes);
-        Assert(context->allBytesFreed + nbytes >= context->allBytesFreed);
-
-        context->allBytesFreed += nbytes;
-
-        held = (Size)(context->allBytesAlloc - context->allBytesFreed);
-        if (context->localMinHeld > held)
-            context->localMinHeld = held;
-
-        context = context->parent;
-    }
-}                               /* MemoryContextNoteFree */
 
 /*
  * MemoryContextError
@@ -602,7 +518,6 @@ MemoryContextError(int errorcode, MemoryContext context,
 	 */
 	write_stderr("Logging memory usage for memory context error");
 
-	MemoryAccounting_SaveToLog();
 	MemoryContextStats(TopMemoryContext);
 
 	if(coredump_on_memerror)
@@ -651,6 +566,14 @@ MemoryContextError(int errorcode, MemoryContext context,
 }                               /* MemoryContextError */
 
 
+void
+MemoryContextDeclareAccountingRoot(MemoryContext context)
+{
+	AssertArg(MemoryContextIsValid(context));
+
+	return (*context->methods->declare_accounting_root) (context);
+}
+
 /*
  * MemoryContextGetCurrentSpace
  *		Return the number of bytes currently occupied by the memory context.
@@ -664,10 +587,8 @@ Size
 MemoryContextGetCurrentSpace(MemoryContext context)
 {
 	AssertArg(MemoryContextIsValid(context));
-    Assert(context->allBytesAlloc >= context->allBytesFreed);
-    Assert(context->allBytesAlloc - context->allBytesFreed < SIZE_MAX);
 
-    return (Size)(context->allBytesAlloc - context->allBytesFreed);
+	return (*context->methods->get_current_usage) (context);
 }                               /* MemoryContextGetCurrentSpace */
 
 /*
@@ -681,7 +602,8 @@ Size
 MemoryContextGetPeakSpace(MemoryContext context)
 {
 	AssertArg(MemoryContextIsValid(context));
-    return context->maxBytesHeld;
+
+	return (*context->methods->get_peak_usage) (context);
 }                               /* MemoryContextGetPeakSpace */
 
 /*
@@ -696,283 +618,203 @@ MemoryContextGetPeakSpace(MemoryContext context)
 Size
 MemoryContextSetPeakSpace(MemoryContext context, Size nbytes)
 {
-    Size    held;
-    Size    oldpeak;
-
 	AssertArg(MemoryContextIsValid(context));
-    Assert(context->allBytesAlloc >= context->allBytesFreed);
-    Assert(context->allBytesAlloc - context->allBytesFreed < SIZE_MAX);
 
-    oldpeak = context->maxBytesHeld;
-
-    held = (Size)(context->allBytesAlloc - context->allBytesFreed);
-    context->maxBytesHeld = Max(held, nbytes);
-
-    return oldpeak;
+	return (*context->methods->set_peak_usage) (context, nbytes);
 }                               /* MemoryContextSetPeakSpace */
 
-
 /*
- * MemoryContextName
- *		Format the name of the memory context into the caller's buffer.
- *
- * Returns ptr to the name string within the supplied buffer.  (The string
- * is built at the tail of the buffer from right to left.)
+ * Find the memory allocated to blocks for this memory context. If recurse is
+ * true, also include children.
  */
-char *
-MemoryContextName(MemoryContext context, MemoryContext relativeTo,
-                  char *buf, int bufsize)
+int64
+MemoryContextMemAllocated(MemoryContext context, bool recurse)
 {
-    MemoryContext   ctx;
-    char           *cbp = buf + bufsize - 1;
+	int64 total = context->mem_allocated;
 
 	AssertArg(MemoryContextIsValid(context));
 
-    if (bufsize <= 0)
-        return buf;
-
-    for (ctx = context; ctx && ctx != relativeTo; ctx = ctx->parent)
-    {
-        const char *name = ctx->name ? ctx->name : "";
-        int         len = strlen(name);
-
-        if (cbp - buf < len + 1)
-        {
-            len = Min(3, cbp - buf);
-            cbp -= len;
-            memcpy(cbp, "...", len);
-            break;
-        }
-        if (ctx != context)
-            *--cbp = '/';
-        cbp -= len;
-        memcpy(cbp, name, len);
-    }
-
-    if (buf < cbp)
-    {
-        if (!ctx)
-            *--cbp = '/';
-        else if (ctx == context)
-            *--cbp = '.';
-    }
-
-    buf[bufsize-1] = '\0';
-    return cbp;
-}                               /* MemoryContextName */
-
-/*
- * MemoryContext_LogContextStats
- *		Logs memory consumption details of a given context.
- *
- *	Parameters:
- *		siblingCount: number of sibling context of this context in the memory context tree
- *		allAllocated: total bytes allocated in this context
- *		allFreed: total bytes freed in this context
- *		curAvailable: bytes that are allocated in blocks but are not used in any chunks
- *		contextName: name of the context
- */
-static void
-MemoryContext_LogContextStats(uint64 siblingCount, uint64 allAllocated,
-		uint64 allFreed, uint64 curAvailable, const char *contextName)
-{
-	write_stderr("context: " UINT64_FORMAT ", " UINT64_FORMAT ", " UINT64_FORMAT ", " UINT64_FORMAT ", " UINT64_FORMAT ", %s\n", \
-	siblingCount, (allAllocated - allFreed), curAvailable, \
-	allAllocated, allFreed, contextName);
-}
-
-
-/*
- * MemoryContextStats_recur
- *		Print statistics about the named context and all its descendants.
- *
- * This is just a debugging utility, so it's not fancy.  The statistics
- * are merely sent to stderr.
- *
- * Parameters:
- * 		topContext: the top of the sub-tree where we start our processing
- * 		rootContext: the root context of the entire tree that can be used
- * 		to generate a bread crumb like context name
- *
- * 		topContexName: the name of the top context
- * 		nameBuffer: a buffer to format the name of any future context
- *		nameBufferSize: size of the nameBuffer
- *		nBlocksTop: number of blocks in the top context
- *		nChunksTop: number of chunks in the top context
- *
- *		currentAvailableTop: free space across all blocks in the top context
- *
- *		allAllocatedTop: total bytes allocated in the top context, including
- *		blocks that are already dropped
- *
- *		allFreedTop: total bytes that were freed in the top context
- *		maxHeldTop: maximum bytes held in the top context
- */
-static void
-MemoryContextStats_recur(MemoryContext topContext, MemoryContext rootContext,
-                         char *topContextName, char *nameBuffer, int nameBufferSize,
-                         uint64 nBlocksTop, uint64 nChunksTop,
-                         uint64 currentAvailableTop, uint64 allAllocatedTop,
-                         uint64 allFreedTop, uint64 maxHeldTop)
-{
-	MemoryContext   child;
-    char*           name;
-
-	AssertArg(MemoryContextIsValid(topContext));
-
-	uint64 nBlocks = 0;
-	uint64 nChunks = 0;
-	uint64 currentAvailable = 0;
-	uint64 allAllocated = 0;
-	uint64 allFreed = 0;
-	uint64 maxHeld = 0;
-
-	/*
-	 * The top context is always supposed to have children contexts. Therefore, it is not
-	 * collapse-able with other siblings. So, the siblingCount is set to 1.
-	 */
-	MemoryContext_LogContextStats(1 /* siblingCount */, allAllocatedTop, allFreedTop, currentAvailableTop, topContextName);
-
-    uint64 cumBlocks = 0;
-    uint64 cumChunks = 0;
-    uint64 cumCurAvailable = 0;
-    uint64 cumAllAllocated = 0;
-    uint64 cumAllFreed = 0;
-    uint64 cumMaxHeld = 0;
-
-    char prevChildName[MAX_CONTEXT_NAME_SIZE] = "";
-
-    uint64 siblingCount = 0;
-
-	for (child = topContext->firstchild; child != NULL; child = child->nextchild)
+	if (recurse)
 	{
-		/* Get name and ancestry of this MemoryContext */
-		name = MemoryContextName(child, rootContext, nameBuffer, nameBufferSize);
+		MemoryContext child = context->firstchild;
 
-		(*child->methods.stats)(child, &nBlocks, &nChunks, &currentAvailable, &allAllocated, &allFreed, &maxHeld);
-
-		if (child->firstchild == NULL)
-		{
-			/* To qualify for sibling collapsing the context must not have any child context */
-
-			if (strcmp(name, prevChildName) == 0)
-			{
-				cumBlocks += nBlocks;
-				cumChunks += nChunks;
-				cumCurAvailable += currentAvailable;
-				cumAllAllocated += allAllocated;
-				cumAllFreed += allFreed;
-				cumMaxHeld = Max(cumMaxHeld, maxHeld);
-
-				siblingCount++;
-			}
-			else
-			{
-				if (siblingCount != 0)
-				{
-					/*
-					 * Output the previous cumulative stat, and start a new run. Note: don't just
-					 * pass the new one to MemoryContextStats_recur, as the new one might be the
-					 * start of another run of duplicate contexts
-					 */
-
-					MemoryContext_LogContextStats(siblingCount, cumAllAllocated, cumAllFreed, cumCurAvailable, prevChildName);
-				}
-
-				cumBlocks = nBlocks;
-				cumChunks = nChunks;
-				cumCurAvailable = currentAvailable;
-				cumAllAllocated = allAllocated;
-				cumAllFreed = allFreed;
-				cumMaxHeld = maxHeld;
-
-				/* Move new name into previous name */
-				strncpy(prevChildName, name, MAX_CONTEXT_NAME_SIZE - 1);
-
-				/* The current one is the sole sibling */
-				siblingCount = 1;
-			}
-		}
-		else
-		{
-			/* Does not qualify for sibling collapsing as the context has child context */
-
-			if (siblingCount != 0)
-			{
-				/*
-				 * We have previously collapsed (one or more siblings with empty children) context
-				 * stats that we want to print here. Output the previous cumulative stat.
-				 */
-
-				MemoryContext_LogContextStats(siblingCount, cumAllAllocated, cumAllFreed, cumCurAvailable, prevChildName);
-			}
-
-			MemoryContextStats_recur(child, rootContext, name, nameBuffer, nameBufferSize, nBlocks,
-					nChunks, currentAvailable, allAllocated, allFreed, maxHeld);
-
-			/*
-			 * We just traversed a child node, so we need to make sure we don't carry over
-			 * any child name from previous matching siblings. So, we reset prevChildName,
-			 * and all cumulative stats
-			 */
-			prevChildName[0] = '\0';
-
-			cumBlocks = 0;
-			cumChunks = 0;
-			cumCurAvailable = 0;
-			cumAllAllocated = 0;
-			cumAllFreed = 0;
-			cumMaxHeld = 0;
-
-			/*
-			 * The current one doesn't qualify for collapsing, and we already
-			 * printed it and its children by calling MemoryContextStats_recur
-			 */
-			siblingCount = 0;
-		}
+		for (child = context->firstchild;
+			 child != NULL;
+			 child = child->nextchild)
+			total += MemoryContextMemAllocated(child, true);
 	}
 
-	if (siblingCount != 0)
-	{
-		/* Output any unprinted cumulative stats */
-
-		MemoryContext_LogContextStats(siblingCount, cumAllAllocated, cumAllFreed, cumCurAvailable, prevChildName);
-	}
+	return total;
 }
 
 /*
  * MemoryContextStats
- *		Prints the usage details of a context.
+ *		Print statistics about the named context and all its descendants.
  *
- * Parameters:
- * 		context: the context of interest.
+ * This is just a debugging utility, so it's not very fancy.  However, we do
+ * make some effort to summarize when the output would otherwise be very long.
+ * The statistics are sent to stderr.
  */
 void
 MemoryContextStats(MemoryContext context)
 {
-    char*     name;
-    char      namebuf[MAX_CONTEXT_NAME_SIZE];
+	/* A hard-wired limit on the number of children is usually good enough */
+	MemoryContextStatsDetail(context, 100);
+}
+
+/*
+ * MemoryContextStatsDetail
+ *
+ * Entry point for use if you want to vary the number of child contexts shown.
+ */
+void
+MemoryContextStatsDetail(MemoryContext context, int max_children)
+{
+	MemoryContextCounters grand_totals;
+
+	memset(&grand_totals, 0, sizeof(grand_totals));
+
+	MemoryContextStatsInternal(context, 0, true, max_children, &grand_totals);
+
+	fprintf(stderr,
+			"Grand total: %zu bytes in %zd blocks; %zu free (%zd chunks); %zu used\n",
+			grand_totals.totalspace, grand_totals.nblocks,
+			grand_totals.freespace, grand_totals.freechunks,
+			grand_totals.totalspace - grand_totals.freespace);
+}
+
+/*
+ * MemoryContextStatsInternal
+ *		One recursion level for MemoryContextStats
+ *
+ * Print this context if print is true, but in any case accumulate counts into
+ * *totals (if given).
+ */
+static void
+MemoryContextStatsInternal(MemoryContext context, int level,
+						   bool print, int max_children,
+						   MemoryContextCounters *totals)
+{
+	MemoryContextCounters local_totals;
+	MemoryContext child;
+	int			ichild;
 
 	AssertArg(MemoryContextIsValid(context));
 
-    name = MemoryContextName(context, NULL, namebuf, sizeof(namebuf));
-    write_stderr("pid %d: Memory statistics for %s/\n", MyProcPid, name);
-    write_stderr("context: occurrences_count, currently_allocated, currently_available, total_allocated, total_freed, name\n");
+	/* Examine the context itself */
+	context->methods->stats(context,
+							print ? MemoryContextStatsPrint : NULL,
+							(void *) &level,
+							totals);
 
-	uint64 nBlocks = 0;
-	uint64 nChunks = 0;
-	uint64 currentAvailable = 0;
-	uint64 allAllocated = 0;
-	uint64 allFreed = 0;
-	uint64 maxHeld = 0;
-	int namebufsize = sizeof(namebuf);
+	/*
+	 * Examine children.  If there are more than max_children of them, we do
+	 * not print the rest explicitly, but just summarize them.
+	 */
+	memset(&local_totals, 0, sizeof(local_totals));
 
-	/* Get the root context's stat and pass it to the MemoryContextStats_recur for printing */
-	(*context->methods.stats)(context, &nBlocks, &nChunks, &currentAvailable, &allAllocated, &allFreed, &maxHeld);
-	name = MemoryContextName(context, context, namebuf, namebufsize);
+	for (child = context->firstchild, ichild = 0;
+		 child != NULL;
+		 child = child->nextchild, ichild++)
+	{
+		if (ichild < max_children)
+			MemoryContextStatsInternal(child, level + 1,
+									   print, max_children,
+									   totals);
+		else
+			MemoryContextStatsInternal(child, level + 1,
+									   false, max_children,
+									   &local_totals);
+	}
 
-    MemoryContextStats_recur(context, context, name, namebuf, namebufsize, nBlocks, nChunks,
-    		currentAvailable, allAllocated, allFreed, maxHeld);
+	/* Deal with excess children */
+	if (ichild > max_children)
+	{
+		if (print)
+		{
+			int			i;
+
+			for (i = 0; i <= level; i++)
+				fprintf(stderr, "  ");
+			fprintf(stderr,
+					"%d more child contexts containing %zu total in %zd blocks; %zu free (%zd chunks); %zu used\n",
+					ichild - max_children,
+					local_totals.totalspace,
+					local_totals.nblocks,
+					local_totals.freespace,
+					local_totals.freechunks,
+					local_totals.totalspace - local_totals.freespace);
+		}
+
+		if (totals)
+		{
+			totals->nblocks += local_totals.nblocks;
+			totals->freechunks += local_totals.freechunks;
+			totals->totalspace += local_totals.totalspace;
+			totals->freespace += local_totals.freespace;
+		}
+	}
+}
+
+/*
+ * MemoryContextStatsPrint
+ *		Print callback used by MemoryContextStatsInternal
+ *
+ * For now, the passthru pointer just points to "int level"; later we might
+ * make that more complicated.
+ */
+static void
+MemoryContextStatsPrint(MemoryContext context, void *passthru,
+						const char *stats_string)
+{
+	int			level = *(int *) passthru;
+	const char *name = context->name;
+	const char *ident = context->ident;
+	int			i;
+
+	/*
+	 * It seems preferable to label dynahash contexts with just the hash table
+	 * name.  Those are already unique enough, so the "dynahash" part isn't
+	 * very helpful, and this way is more consistent with pre-v11 practice.
+	 */
+	if (ident && strcmp(name, "dynahash") == 0)
+	{
+		name = ident;
+		ident = NULL;
+	}
+
+	for (i = 0; i < level; i++)
+		fprintf(stderr, "  ");
+	fprintf(stderr, "%s: %s", name, stats_string);
+	if (ident)
+	{
+		/*
+		 * Some contexts may have very long identifiers (e.g., SQL queries).
+		 * Arbitrarily truncate at 100 bytes, but be careful not to break
+		 * multibyte characters.  Also, replace ASCII control characters, such
+		 * as newlines, with spaces.
+		 */
+		int			idlen = strlen(ident);
+		bool		truncated = false;
+
+		if (idlen > 100)
+		{
+			idlen = pg_mbcliplen(ident, idlen, 100);
+			truncated = true;
+		}
+		fprintf(stderr, ": ");
+		while (idlen-- > 0)
+		{
+			unsigned char c = *ident++;
+
+			if (c < ' ')
+				c = ' ';
+			fputc(c, stderr);
+		}
+		if (truncated)
+			fprintf(stderr, "...");
+	}
+	fputc('\n', stderr);
 }
 
 /*
@@ -989,7 +831,7 @@ MemoryContextCheck(MemoryContext context)
 
 	AssertArg(MemoryContextIsValid(context));
 
-	(*context->methods.check) (context);
+	context->methods->check(context);
 	for (child = context->firstchild; child != NULL; child = child->nextchild)
 		MemoryContextCheck(child);
 }
@@ -1000,213 +842,111 @@ MemoryContextCheck(MemoryContext context)
  *		Detect whether an allocated chunk of memory belongs to a given
  *		context or not.
  *
- * Note: this test assumes that the pointer was allocated using palloc.
- * If unsure, please use the generic version (MemoryContextContainsGenericAllocation).
- *
- * Caution: this test is reliable as long as the 'pointer' does point to
+ * Caution: this test is reliable as long as 'pointer' does point to
  * a chunk of memory allocated from *some* context.  If 'pointer' points
  * at memory obtained in some other way, there is a small chance of a
- * false-positive result since the bits right before it might look like
- * a valid chunk header by chance. In the latter case (when the memory
- * was not palloc'ed), we are more likely to crash. Please use the generic
- * version of this method if you have any doubt that the tested memory
- * region may not be palloc'ed.
+ * false-positive result, since the bits right before it might look like
+ * a valid chunk header by chance.
  */
 bool
 MemoryContextContains(MemoryContext context, void *pointer)
 {
-	StandardChunkHeader *header;
+	MemoryContext ptr_context;
 
 	/*
+	 * NB: Can't use GetMemoryChunkContext() here - that performs assertions
+	 * that aren't acceptable here since we might be passed memory not
+	 * allocated by any memory context.
+	 *
 	 * Try to detect bogus pointers handed to us, poorly though we can.
 	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
 	 * allocated chunk.
 	 */
 	if (pointer == NULL || pointer != (void *) MAXALIGN(pointer))
-	{
 		return false;
-	}
 
 	/*
-	 * OK, it's probably safe to look at the chunk header.
+	 * OK, it's probably safe to look at the context.
 	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
+	ptr_context = *(MemoryContext *) (((char *) pointer) - sizeof(void *));
 
-	SharedChunkHeader *sharedHeader = (SharedChunkHeader *)header->sharedHeader;
-
-	return sharedHeader->context == context;
+	return ptr_context == context;
 }
 
 /*
- * MemoryContextContainsGenericAllocation
- *		Detects whether a generic (may or may not be allocated by
- *		palloc) chunk of memory belongs to a given context or not.
- *		Note, the "generic" means it will be ready to
- *		handle chunks not allocated using palloc.
- *
- * Caution: this test has the same problem as MemoryContextContains
- * 		where it can falsely detect a chunk belonging to a context,
- * 		while it does not. In addition, it can also falsely conclude
- * 		that a chunk does *not* belong to a context, while in reality
- * 		it does. The latter weakness stems from its versatility to
- * 		handle non-palloc'ed chunks.
- */
-bool
-MemoryContextContainsGenericAllocation(MemoryContext context, void *pointer)
-{
-	StandardChunkHeader *header;
-
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	if (pointer == NULL || pointer != (void *) MAXALIGN(pointer))
-	{
-		return false;
-	}
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-
-	AllocSet set = (AllocSet)context;
-
-	if (header->sharedHeader == set->sharedHeaderList ||
-			(set->sharedHeaderList != NULL && set->sharedHeaderList->next == header->sharedHeader) ||
-			(set->sharedHeaderList != NULL && set->sharedHeaderList->next != NULL && set->sharedHeaderList->next->next == header->sharedHeader))
-	{
-		/*
-		 * At this point we know that one of the sharedHeader pointers of the
-		 * provided context (AllocSet) is the same as the sharedHeader
-		 * pointer of the provided chunk. Therefore, the chunk should
-		 * belong to the AllocSet (with a false positive chance coming
-		 * from some third party allocated memory region having the
-		 * same value as the sharedHeaderList pointer address
-		 */
-		return true;
-	}
-
-	/*
-	 * We might falsely conclude that the chunk does not belong
-	 * to the context, if we fail to match the chunk's sharedHeader
-	 * pointer with one of the leading sharedHeader pointers in the
-	 * context's sharedHeaderList.
-	 */
-	return false;
-}
-
-/*--------------------
  * MemoryContextCreate
  *		Context-type-independent part of context creation.
  *
  * This is only intended to be called by context-type-specific
  * context creation routines, not by the unwashed masses.
  *
- * The context creation procedure is a little bit tricky because
- * we want to be sure that we don't leave the context tree invalid
- * in case of failure (such as insufficient memory to allocate the
- * context node itself).  The procedure goes like this:
- *	1.  Context-type-specific routine first calls MemoryContextCreate(),
- *		passing the appropriate tag/size/methods values (the methods
- *		pointer will ordinarily point to statically allocated data).
- *		The parent and name parameters usually come from the caller.
- *	2.  MemoryContextCreate() attempts to allocate the context node,
- *		plus space for the name.  If this fails we can ereport() with no
- *		damage done.
- *	3.  We fill in all of the type-independent MemoryContext fields.
- *	4.  We call the type-specific init routine (using the methods pointer).
- *		The init routine is required to make the node minimally valid
- *		with zero chance of failure --- it can't allocate more memory,
- *		for example.
- *	5.  Now we have a minimally valid node that can behave correctly
- *		when told to reset or delete itself.  We link the node to its
- *		parent (if any), making the node part of the context tree.
- *	6.  We return to the context-type-specific routine, which finishes
+ * The memory context creation procedure goes like this:
+ *	1.  Context-type-specific routine makes some initial space allocation,
+ *		including enough space for the context header.  If it fails,
+ *		it can ereport() with no damage done.
+ *	2.	Context-type-specific routine sets up all type-specific fields of
+ *		the header (those beyond MemoryContextData proper), as well as any
+ *		other management fields it needs to have a fully valid context.
+ *		Usually, failure in this step is impossible, but if it's possible
+ *		the initial space allocation should be freed before ereport'ing.
+ *	3.	Context-type-specific routine calls MemoryContextCreate() to fill in
+ *		the generic header fields and link the context into the context tree.
+ *	4.  We return to the context-type-specific routine, which finishes
  *		up type-specific initialization.  This routine can now do things
  *		that might fail (like allocate more memory), so long as it's
  *		sure the node is left in a state that delete will handle.
  *
- * This protocol doesn't prevent us from leaking memory if step 6 fails
- * during creation of a top-level context, since there's no parent link
- * in that case.  However, if you run out of memory while you're building
- * a top-level context, you might as well go home anyway...
+ * node: the as-yet-uninitialized common part of the context header node.
+ * tag: NodeTag code identifying the memory context type.
+ * methods: context-type-specific methods (usually statically allocated).
+ * parent: parent context, or NULL if this will be a top-level context.
+ * name: name of context (must be statically allocated).
  *
- * Normally, the context node and the name are allocated from
- * TopMemoryContext (NOT from the parent context, since the node must
- * survive resets of its parent context!).  However, this routine is itself
- * used to create TopMemoryContext!  If we see that TopMemoryContext is NULL,
- * we assume we are creating TopMemoryContext and use malloc() to allocate
- * the node.
- *
- * Note that the name field of a MemoryContext does not point to
- * separately-allocated storage, so it should not be freed at context
- * deletion.
- *--------------------
+ * Context routines generally assume that MemoryContextCreate can't fail,
+ * so this can contain Assert but not elog/ereport.
  */
-MemoryContext
-MemoryContextCreate(NodeTag tag, Size size,
-					MemoryContextMethods *methods,
+void
+MemoryContextCreate(MemoryContext node,
+					NodeTag tag,
+					const MemoryContextMethods *methods,
 					MemoryContext parent,
 					const char *name)
 {
-	MemoryContext node;
-	Size		needed = size + strlen(name) + 1;
-
 	// GPDB_94_MERGE_FIXME: same as AssertNotInCriticalSection
 #if 0
-	/* creating new memory contexts is not allowed in a critical section */
+	/* Creating new memory contexts is not allowed in a critical section */
 	Assert(CritSectionCount == 0);
 #endif
 
-	/* Get space for node and name */
-	if (TopMemoryContext != NULL)
-	{
-		/* Normal case: allocate the node in TopMemoryContext */
-		node = (MemoryContext) MemoryContextAlloc(TopMemoryContext,
-												  needed);
-	}
-	else
-	{
-		/* Special case for startup: use good ol' malloc */
-		node = (MemoryContext) malloc(needed);
-		if(!node)
-			ereport(ERROR, (errcode(ERRCODE_OUT_OF_MEMORY),
-				errmsg("Failed to create memory context: out of memory")
-				));
-	}
-
-	/* Initialize the node as best we can */
-	MemSet(node, 0, size);
+	/* Initialize all standard fields of memory context header */
 	node->type = tag;
-	node->methods = *methods;
+	node->isReset = true;
+	node->methods = methods;
 	node->parent = parent;
 	node->firstchild = NULL;
-	node->nextchild = NULL;
-	node->isReset = true;
-	node->name = ((char *) node) + size;
-	strcpy(node->name, name);
+	node->mem_allocated = 0;
+	node->prevchild = NULL;
+	node->name = name;
+	node->ident = NULL;
+	node->reset_cbs = NULL;
 
-	/* Type-specific routine finishes any other essential initialization */
-	(*node->methods.init) (node);
-
-	/* OK to link node to parent (if any) */
-	/* Could use MemoryContextSetParent here, but doesn't seem worthwhile */
+	/* OK to link node into context tree */
 	if (parent)
 	{
 		node->nextchild = parent->firstchild;
+		if (parent->firstchild != NULL)
+			parent->firstchild->prevchild = node;
 		parent->firstchild = node;
 		/* inherit allowInCritSection flag from parent */
 		node->allowInCritSection = parent->allowInCritSection;
 	}
+	else
+	{
+		node->nextchild = NULL;
+		node->allowInCritSection = false;
+	}
 
 	VALGRIND_CREATE_MEMPOOL(node, 0, false);
-
-	/* Return to type-specific creation routine to finish up */
-	return node;
 }
 
 /*
@@ -1220,11 +960,9 @@ void *
 MemoryContextAlloc(MemoryContext context, Size size)
 {
 	void	   *ret;
-#ifdef PGTRACE_ENABLED
-	StandardChunkHeader *header;
-#endif
 
 	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 #ifdef CDB_PALLOC_CALLER_ID
 	context->callerFile = sfile;
@@ -1239,22 +977,25 @@ MemoryContextAlloc(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods.alloc) (context, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
+		MemoryContextStats(TopMemoryContext);
+
+		/*
+		 * Here, and elsewhere in this module, we show the target context's
+		 * "name" but not its "ident" (if any) in user-visible error messages.
+		 * The "ident" string might contain security-sensitive data, such as
+		 * values in SQL commands.
+		 */
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
 	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
-
-#ifdef PGTRACE_ENABLED
-	header = (StandardChunkHeader *)
-		((char *) ret - STANDARDCHUNKHEADERSIZE);
-	PG_TRACE5(memctxt__alloc, size, header->size, 0, 0, (long) context->name);
-#endif
 
 	return ret;
 }
@@ -1271,10 +1012,8 @@ MemoryContextAllocZero(MemoryContext context, Size size)
 {
 	void	   *ret;
 
-#ifdef PGTRACE_ENABLED
-	StandardChunkHeader *header;
-#endif
 	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 #ifdef CDB_PALLOC_CALLER_ID
 	context->callerFile = sfile;
@@ -1289,24 +1028,20 @@ MemoryContextAllocZero(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods.alloc) (context, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
+		MemoryContextStats(TopMemoryContext);
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
 	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
 
 	MemSetAligned(ret, 0, size);
-
-#ifdef PGTRACE_ENABLED
-	header = (StandardChunkHeader *)
-		((char *) ret - STANDARDCHUNKHEADERSIZE);
-	PG_TRACE5(memctxt__alloc, size, header->size, 0, 0, (long) context->name);
-#endif
 
 	return ret;
 }
@@ -1323,11 +1058,8 @@ MemoryContextAllocZeroAligned(MemoryContext context, Size size)
 {
 	void	   *ret;
 
-#ifdef PGTRACE_ENABLED
-	StandardChunkHeader *header;
-#endif
-
 	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 #ifdef CDB_PALLOC_CALLER_ID
 	context->callerFile = sfile;
@@ -1342,24 +1074,20 @@ MemoryContextAllocZeroAligned(MemoryContext context, Size size)
 
 	context->isReset = false;
 
-	ret = (*context->methods.alloc) (context, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
+		MemoryContextStats(TopMemoryContext);
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
 	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
 
 	MemSetLoop(ret, 0, size);
-
-#ifdef PGTRACE_ENABLED
-	header = (StandardChunkHeader *)
-		((char *) ret - STANDARDCHUNKHEADERSIZE);
-	PG_TRACE5(memctxt__alloc, size, header->size, 0, 0, (long) context->name);
-#endif
 
 	return ret;
 }
@@ -1382,15 +1110,17 @@ MemoryContextAllocExtended(MemoryContext context, Size size, int flags)
 
 	context->isReset = false;
 
-	ret = (*context->methods.alloc) (context, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
 		if ((flags & MCXT_ALLOC_NO_OOM) == 0)
 		{
-			MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-							   context, CDB_MCXT_WHERE(context),
-							   "Out of memory.  Failed on request of size %zu bytes.",
-							   size);
+			MemoryContextStats(TopMemoryContext);
+			ereport(ERROR,
+					(errcode(ERRCODE_OUT_OF_MEMORY),
+					 errmsg("out of memory"),
+					 errdetail("Failed on request of size %zu in memory context \"%s\".",
+							   size, context->name)));
 		}
 		return NULL;
 	}
@@ -1408,25 +1138,28 @@ palloc(Size size)
 {
 	/* duplicates MemoryContextAlloc to avoid increased overhead */
 	void	   *ret;
+	MemoryContext context = CurrentMemoryContext;
 
-	AssertArg(MemoryContextIsValid(CurrentMemoryContext));
+	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 	if (!AllocSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	CurrentMemoryContext->isReset = false;
+	context->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods.alloc) (CurrentMemoryContext, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
 		MemoryContextStats(TopMemoryContext);
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
 				 errmsg("out of memory"),
-				 errdetail("Failed on request of size %zu.", size)));
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
-	VALGRIND_MEMPOOL_ALLOC(CurrentMemoryContext, ret, size);
+	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
 
 	return ret;
 }
@@ -1436,25 +1169,28 @@ palloc0(Size size)
 {
 	/* duplicates MemoryContextAllocZero to avoid increased overhead */
 	void	   *ret;
+	MemoryContext context = CurrentMemoryContext;
 
-	AssertArg(MemoryContextIsValid(CurrentMemoryContext));
+	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 	if (!AllocSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	CurrentMemoryContext->isReset = false;
+	context->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods.alloc) (CurrentMemoryContext, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
 		MemoryContextStats(TopMemoryContext);
 		ereport(ERROR,
 				(errcode(ERRCODE_OUT_OF_MEMORY),
 				 errmsg("out of memory"),
-				 errdetail("Failed on request of size %zu.", size)));
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
-	VALGRIND_MEMPOOL_ALLOC(CurrentMemoryContext, ret, size);
+	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
 
 	MemSetAligned(ret, 0, size);
 
@@ -1466,18 +1202,19 @@ palloc_extended(Size size, int flags)
 {
 	/* duplicates MemoryContextAllocExtended to avoid increased overhead */
 	void	   *ret;
+	MemoryContext context = CurrentMemoryContext;
 
-	AssertArg(MemoryContextIsValid(CurrentMemoryContext));
-	AssertNotInCriticalSection(CurrentMemoryContext);
+	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 	if (((flags & MCXT_ALLOC_HUGE) != 0 && !AllocHugeSizeIsValid(size)) ||
 		((flags & MCXT_ALLOC_HUGE) == 0 && !AllocSizeIsValid(size)))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	CurrentMemoryContext->isReset = false;
+	context->isReset = false;
 
-	ret = (*CurrentMemoryContext->methods.alloc) (CurrentMemoryContext, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
 		if ((flags & MCXT_ALLOC_NO_OOM) == 0)
 		{
@@ -1485,12 +1222,13 @@ palloc_extended(Size size, int flags)
 			ereport(ERROR,
 					(errcode(ERRCODE_OUT_OF_MEMORY),
 					 errmsg("out of memory"),
-					 errdetail("Failed on request of size %zu.", size)));
+					 errdetail("Failed on request of size %zu in memory context \"%s\".",
+							   size, context->name)));
 		}
 		return NULL;
 	}
 
-	VALGRIND_MEMPOOL_ALLOC(CurrentMemoryContext, ret, size);
+	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
 
 	if ((flags & MCXT_ALLOC_ZERO) != 0)
 		MemSetAligned(ret, 0, size);
@@ -1505,44 +1243,9 @@ palloc_extended(Size size, int flags)
 void
 pfree(void *pointer)
 {
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	StandardChunkHeader* header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-	context = header->sharedHeader->context;
-
-	AssertArg(MemoryContextIsValid(context));
-
-#ifdef PGTRACE_ENABLED
-	PG_TRACE5(memctxt__free, 0, 0, 
-#ifdef MEMORY_CONTEXT_CHECKING
-		header->requested_size, header->size,
-#else
-		0, header->size, 
-#endif
-		(long) header->sharedHeader->context->name);
-#endif
-
-#ifdef CDB_PALLOC_CALLER_ID
-	header->sharedHeader->context->callerFile = sfile;
-	header->sharedHeader->context->callerLine = sline;
-#endif
-
-	if (context->methods.free_p)
-		(*context->methods.free_p) (context, pointer);
-	else
-		Assert(header);   /* this assert never fails. Just here so we can set breakpoint in debugger. */
+	context->methods->free_p(context, pointer);
 	VALGRIND_MEMPOOL_FREE(context, pointer);
 }
 
@@ -1553,65 +1256,29 @@ pfree(void *pointer)
 void *
 repalloc(void *pointer, Size size)
 {
-	StandardChunkHeader *header;
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 	void	   *ret;
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-	context = header->sharedHeader->context;
-	AssertArg(MemoryContextIsValid(context));
-
 	if (!AllocSizeIsValid(size))
-		MemoryContextError(ERRCODE_INTERNAL_ERROR,
-				context, CDB_MCXT_WHERE(context),
-				"invalid memory alloc request size %zu", size);
+		elog(ERROR, "invalid memory alloc request size %zu", size);
+
+	AssertNotInCriticalSection(context);
+
 	/* isReset must be false already */
 	Assert(!context->isReset);
 
-#ifdef PGTRACE_ENABLED
+	ret = context->methods->realloc(context, pointer, size);
+	if (unlikely(ret == NULL))
 	{
-		long old_reqsize;
-		long old_size;
-#ifdef MEMORY_CONTEXT_CHECKING
-		old_reqsize = header->requested_size;
-#else
-		old_reqsize = 0;
-#endif
-		old_size = header->size;
+		MemoryContextStats(TopMemoryContext);
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
-#endif
-
-#ifdef CDB_PALLOC_CALLER_ID
-	context->callerFile = sfile;
-	context->callerLine = sline;
-#endif
-
-	ret = (*context->methods.realloc) (context, pointer, size);
-	if (ret == NULL)
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
 
 	VALGRIND_MEMPOOL_CHANGE(context, pointer, ret, size);
-
-#ifdef PGTRACE_ENABLED
-	header = (StandardChunkHeader *)
-		((char *) ret - STANDARDCHUNKHEADERSIZE);
-	PG_TRACE5(memctxt__realloc, size, header->size, old_reqsize, old_size, (long) context->name);
-#endif
 
 	return ret;
 }
@@ -1628,19 +1295,22 @@ MemoryContextAllocHuge(MemoryContext context, Size size)
 	void	   *ret;
 
 	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 	if (!AllocHugeSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
 	context->isReset = false;
 
-	ret = (*context->methods.alloc) (context, size);
-	if (ret == NULL)
+	ret = context->methods->alloc(context, size);
+	if (unlikely(ret == NULL))
 	{
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
+		MemoryContextStats(TopMemoryContext);
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
 	}
 
 	VALGRIND_MEMPOOL_ALLOC(context, ret, size);
@@ -1656,39 +1326,27 @@ MemoryContextAllocHuge(MemoryContext context, Size size)
 void *
 repalloc_huge(void *pointer, Size size)
 {
-	StandardChunkHeader *header;
-	MemoryContext context;
+	MemoryContext context = GetMemoryChunkContext(pointer);
 	void	   *ret;
 
 	if (!AllocHugeSizeIsValid(size))
 		elog(ERROR, "invalid memory alloc request size %zu", size);
 
-	/*
-	 * Try to detect bogus pointers handed to us, poorly though we can.
-	 * Presumably, a pointer that isn't MAXALIGNED isn't pointing at an
-	 * allocated chunk.
-	 */
-	Assert(pointer != NULL);
-	Assert(pointer == (void *) MAXALIGN(pointer));
-
-	/*
-	 * OK, it's probably safe to look at the chunk header.
-	 */
-	header = (StandardChunkHeader *)
-		((char *) pointer - STANDARDCHUNKHEADERSIZE);
-	context = header->sharedHeader->context;
-
-	AssertArg(MemoryContextIsValid(context));
+	AssertNotInCriticalSection(context);
 
 	/* isReset must be false already */
 	Assert(!context->isReset);
 
-	ret = (*context->methods.realloc) (context, pointer, size);
-	if (ret == NULL)
-		MemoryContextError(ERRCODE_OUT_OF_MEMORY,
-						   context, CDB_MCXT_WHERE(context),
-						   "Out of memory.  Failed on request of size %zu bytes.",
-						   size);
+	ret = context->methods->realloc(context, pointer, size);
+	if (unlikely(ret == NULL))
+	{
+		MemoryContextStats(TopMemoryContext);
+		ereport(ERROR,
+				(errcode(ERRCODE_OUT_OF_MEMORY),
+				 errmsg("out of memory"),
+				 errdetail("Failed on request of size %zu in memory context \"%s\".",
+						   size, context->name)));
+	}
 
 	VALGRIND_MEMPOOL_CHANGE(context, pointer, ret, size);
 
@@ -1726,44 +1384,27 @@ pstrdup(const char *in)
 char *
 pnstrdup(const char *in, Size len)
 {
-	char	   *out = palloc(len + 1);
+	char	   *out;
 
+	len = strnlen(in, len);
+
+	out = palloc(len + 1);
 	memcpy(out, in, len);
 	out[len] = '\0';
+
 	return out;
 }
 
-#if defined(WIN32) || defined(__CYGWIN__)
 /*
- *	Memory support routines for libpgport on Win32
- *
- *	Win32 can't load a library that PGDLLIMPORTs a variable
- *	if the link object files also PGDLLIMPORT the same variable.
- *	For this reason, libpgport can't reference CurrentMemoryContext
- *	in the palloc macro calls.
- *
- *	To fix this, we create several functions here that allow us to
- *	manage memory without doing the inline in libpgport.
+ * Make copy of string with all trailing newline characters removed.
  */
-void *
-pgport_palloc(Size sz)
-{
-	return palloc(sz);
-}
-
-
 char *
-pgport_pstrdup(const char *str)
+pchomp(const char *in)
 {
-	return pstrdup(str);
+	size_t		n;
+
+	n = strlen(in);
+	while (n > 0 && in[n - 1] == '\n')
+		n--;
+	return pnstrdup(in, n);
 }
-
-
-/* Doesn't reference a PGDLLIMPORT variable, but here for completeness. */
-void
-pgport_pfree(void *pointer)
-{
-	pfree(pointer);
-}
-
-#endif

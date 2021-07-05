@@ -3,8 +3,11 @@
  * cdbgang_async.c
  *	  Functions for asynchronous implementation of creating gang.
  *
+ * GPDB_12_MERGE_FIXME: Like in cdbdisp_async.c, we should replace poll()
+ * with WaitEventSetWait() here.
+ *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -22,6 +25,7 @@
 #include <sys/poll.h>
 #endif
 
+#include "access/xact.h"
 #include "storage/ipc.h"		/* For proc_exit_inprogress  */
 #include "tcop/tcopprot.h"
 #include "libpq-fe.h"
@@ -29,6 +33,7 @@
 #include "cdb/cdbfts.h"
 #include "cdb/cdbgang.h"
 #include "cdb/cdbgang_async.h"
+#include "cdb/cdbtm.h"
 #include "cdb/cdbvars.h"
 #include "miscadmin.h"
 
@@ -73,6 +78,26 @@ cdbgang_createGang_async(List *segments, SegmentType segmentType)
 	/* allocate and initialize a gang structure */
 	newGangDefinition = buildGangDefinition(segments, segmentType);
 	CurrentGangCreating = newGangDefinition;
+	/*
+	 * If we're in a global transaction, and there is some primary segment down,
+	 * we have to error out so that the current global transaction can be aborted.
+	 * Before error out, we need to clean up QEs, destroy the gang, and reset
+	 * the session.
+	 * We shouldn't error out in transaction abort state to avoid recursive abort.
+	 * In such case, the dispatcher would catch the error and then dtm does (retry)
+	 * abort.
+	 */
+	if (IsTransactionState())
+	{
+		for (i = 0; i < size; i++)
+		{
+			if (FtsIsSegmentDown(newGangDefinition->db_descriptors[i]->segment_database_info))
+			{
+				DisconnectAndDestroyAllGangs(true);
+				elog(ERROR, "gang was lost due to cluster reconfiguration");
+			}
+		}
+	}
 	totalSegs = getgpsegmentCount();
 	Assert(totalSegs > 0);
 
@@ -211,6 +236,8 @@ create_gang_retry:
 						}
 						else
 						{
+							if (segment_failure_due_to_missing_writer(PQerrorMessage(segdbDesc->conn)))
+								markCurrentGxactWriterGangLost();
 							ereport(ERROR, (errcode(ERRCODE_GP_INTERCONNECTION_ERROR),
 											errmsg("failed to acquire resources on one or more segments"),
 											errdetail("%s (%s)", PQerrorMessage(segdbDesc->conn), segdbDesc->whoami)));

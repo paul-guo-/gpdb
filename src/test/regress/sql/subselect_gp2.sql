@@ -22,13 +22,7 @@ select * from test_ext_foo as o
 where (select count(*) from echotable as i where i.c2 = o.c2) >= 2;
 
 -- Planner test to make sure the initplan is not removed for function scan
--- VACUUM FULL: To generate a deterministic plan for the query below.
-VACUUM FULL pg_database;
-VACUUM FULL pg_authid;
-explain (costs off)
-select sess_id from pg_stat_activity
-where query = (select current_query())
-and usename='xxx' and datname='xxx';
+explain select * from generate_series(1,2) s1 join pg_class on true where s1=(select pg_backend_pid());
 
 -- Planner test: constant folding in subplan testexpr  produces no error
 create table subselect_t1 (a int, b int, c int) distributed by (a);
@@ -69,3 +63,17 @@ $$ language plpgsql;
 
 -- Run the function in QEs.
 select number_of_days(start, stop) from datetab;
+
+-- Check delay eager free in squelch functions
+CREATE TABLE subselect2_foo (a int, b int);
+CREATE TABLE subselect2_bar (c int, d int);
+CREATE TABLE subselect2_baz (x int, y int);
+
+INSERT INTO subselect2_foo VALUES (1,1), (1,2);
+INSERT INTO subselect2_bar VALUES (1,1);
+
+SELECT *, (SELECT x FROM subselect2_baz EXCEPT SELECT c FROM subselect2_bar WHERE d = a) FROM subselect2_foo;
+
+
+
+

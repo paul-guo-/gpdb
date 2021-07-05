@@ -14,7 +14,7 @@
 #Check that SHELL is Bash
 if [ -z $BASH ]; then
 	echo "[FATAL]:-Scripts must be executed using the Bash shell"
-	exit 2
+	exit 1
 fi
 #CMDPATH is the list of locations to search for commands, in precedence order
 declare -a CMDPATH
@@ -27,7 +27,7 @@ if [ ${#GPPATH[@]} -eq 0 ];then
 	echo "[FATAL]:-GPHOME environment variable is required to run GPDB but could not be found."
 	echo "Please set it by sourcing the  greenplum_path.sh  in your GPDB installation directory."
 	echo "Example: ''. /usr/local/gpdb/greenplum_path.sh''"
-	exit 2
+	exit 1
 fi
 
 #GP_UNIQUE_COMMAND is used to identify the binary directory
@@ -114,7 +114,7 @@ PSQLBIN=`findMppPath`
 if [ x"$PSQLBIN" = x"" ];then
 		echo "Problem in gp_bash_functions, command '$GP_UNIQUE_COMMAND' not found in Greenplum path."
 		echo "Try setting GPHOME to the location of your Greenplum distribution."
-		exit 99
+		exit 1
 fi
 
 PSQLBIN=`$DIRNAME $PSQLBIN`
@@ -159,7 +159,7 @@ DEFAULT_CHK_PT_SEG=8
 DEFAULT_QD_MAX_CONNECT=250
 QE_CONNECT_FACTOR=3
 # DEFAULT_BUFFERS sets the default shared_buffers unless overridden by '-b'.
-# It applies to the master db and segment dbs.  Specify either the number of
+# It applies to the coordinator db and segment dbs.  Specify either the number of
 # buffers (without suffix) or the amount of memory to use for buffers (with
 # case-insensitive suffix 'kB', 'MB' or 'GB').
 DEFAULT_BUFFERS=128000kB
@@ -192,11 +192,8 @@ LOG_MSG () {
 		# compare it to WARN/FATAL.
 		level=${1%%]*}
 		case "$level" in
-		*WARN*)
-			EXIT_STATUS=1
-			;;
 		*FATAL*)
-			EXIT_STATUS=2
+			EXIT_STATUS=1
 			;;
 		esac
 
@@ -227,7 +224,6 @@ POSTGRES_VERSION_CHK() {
     VER=`$TRUSTED_SHELL $HOST "$EXPORT_GPHOME; $EXPORT_LIB_PATH; $GPHOME/bin/postgres --gp-version"`
     if [ $? -ne 0 ] ; then
 	LOG_MSG "[WARN]:- Failed to obtain postgres version on $HOST" 1
-	EXIT_STATUS=1
 	VERSION_MATCH=0
     fi
     LOG_MSG "[INFO]:- Current postgres version = $CURRENT_VERSION"
@@ -236,7 +232,6 @@ POSTGRES_VERSION_CHK() {
     if [ x"$VER" != x"$CURRENT_VERSION" ] ; then
 	LOG_MSG "[WARN]:-Postgres version does not match. [$CURRENT_VERSION != $VER]" 1
 	VERSION_MATCH=0
-	EXIT_STATUS=1
     else
 	VERSION_MATCH=1
     fi
@@ -257,11 +252,11 @@ ERROR_EXIT () {
 				if [ -s $BACKOUT_FILE ]; then
 						LOG_MSG "[WARN]:-Script has left Greenplum Database in an incomplete state"
 						LOG_MSG "[WARN]:-Run command bash $BACKOUT_FILE to remove these changes"
-						BACKOUT_COMMAND "if [ x$MASTER_HOSTNAME != x\`$HOSTNAME\` ];then $ECHO \"[FATAL]:-Not on original master host $MASTER_HOSTNAME, backout script exiting!\";exit 2;fi"
+						BACKOUT_COMMAND "if [ x$COORDINATOR_HOSTNAME != x\`$HOSTNAME\` ];then $ECHO \"[FATAL]:-Not on original coordinator host $COORDINATOR_HOSTNAME, backout script exiting!\";exit 1;fi"
 						$ECHO "$RM -f $BACKOUT_FILE" >> $BACKOUT_FILE
 				fi
 		fi
-		exit $2
+		exit 1
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
 
@@ -283,11 +278,10 @@ ERROR_CHK () {
 			INITIAL_LEVEL=$DEBUG_LEVEL
 			DEBUG_LEVEL=1
 			LOG_MSG "[WARN]:-Issue with $MSG_TXT"
-			EXIT_STATUS=1
 			DEBUG_LEVEL=$INITIAL_LEVEL
 		else
 			LOG_MSG "[INFO]:-End Function $FUNCNAME"
-			ERROR_EXIT "[FATAL]:-Failed to complete $MSG_TXT " 2
+			ERROR_EXIT "[FATAL]:-Failed to complete $MSG_TXT "
 		fi
 	fi
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
@@ -339,7 +333,7 @@ SED_PG_CONF () {
 				fi
 				RETVAL=$?
 				if [ $RETVAL -ne 0 ]; then
-					ERROR_EXIT "[FATAL]:-Failed to replace $SEARCH_TXT in $FILENAME" 2
+					ERROR_EXIT "[FATAL]:-Failed to replace $SEARCH_TXT in $FILENAME"
 				else
 					LOG_MSG "[INFO]:-Replaced line in $FILENAME"
 					$RM -f ${FILENAME}.bak1
@@ -347,7 +341,7 @@ SED_PG_CONF () {
 				$SED -i'.bak2' -e "s/^#${SEARCH_TXT}/${SEARCH_TXT}/" $FILENAME
 				RETVAL=$?
 				if [ $RETVAL -ne 0 ]; then
-					ERROR_EXIT "[FATAL]:-Failed to replace #$SEARCH_TXT in $FILENAME" 2
+					ERROR_EXIT "[FATAL]:-Failed to replace #$SEARCH_TXT in $FILENAME"
 				else
 					LOG_MSG "[INFO]:-Replaced line in $FILENAME"
 					$RM -f ${FILENAME}.bak2
@@ -369,7 +363,7 @@ SED_PG_CONF () {
 		if [ `$TRUSTED_SHELL $SED_HOST "$GREP -c \"${SEARCH_TXT}\" $FILENAME"` -eq 0 ] || [ $APPEND -eq 1 ]; then
 			$TRUSTED_SHELL $SED_HOST "$ECHO \"$SUB_TXT\" >> $FILENAME"
 			if [ $RETVAL -ne 0 ]; then
-				ERROR_EXIT "[FATAL]:-Failed to append line $SUB_TXT to $FILENAME on $SED_HOST" 2
+				ERROR_EXIT "[FATAL]:-Failed to append line $SUB_TXT to $FILENAME on $SED_HOST"
 			else
 				LOG_MSG "[INFO]:-Appended line $SUB_TXT to $FILENAME on $SED_HOST" 1
 			fi
@@ -381,7 +375,7 @@ SED_PG_CONF () {
 			fi
 			$TRUSTED_SHELL $SED_HOST sed -i'.bak1' -f /dev/stdin "$FILENAME" <<< "$SED_COMMAND" > /dev/null 2>&1
 			if [ $RETVAL -ne 0 ]; then
-				ERROR_EXIT "[FATAL]:-Failed to insert $SUB_TXT in $FILENAME on $SED_HOST" 2
+				ERROR_EXIT "[FATAL]:-Failed to insert $SUB_TXT in $FILENAME on $SED_HOST"
 			else
 				LOG_MSG "[INFO]:-Replaced line in $FILENAME on $SED_HOST"
 				$TRUSTED_SHELL $SED_HOST "$RM -f ${FILENAME}.bak1" > /dev/null 2>&1
@@ -390,7 +384,7 @@ SED_PG_CONF () {
 			SED_COMMAND="s/^#${SEARCH_TXT}/${SEARCH_TXT}/"
 			$TRUSTED_SHELL $SED_HOST sed -i'.bak2' -f /dev/stdin "$FILENAME" <<< "$SED_COMMAND" > /dev/null 2>&1
 			if [ $RETVAL -ne 0 ]; then
-				ERROR_EXIT "[FATAL]:-Failed to substitute #${SEARCH_TXT} in $FILENAME on $SED_HOST" 2
+				ERROR_EXIT "[FATAL]:-Failed to substitute #${SEARCH_TXT} in $FILENAME on $SED_HOST"
 			else
 				LOG_MSG "[INFO]:-Replaced line in $FILENAME on $SED_HOST"
 				$TRUSTED_SHELL $SED_HOST "$RM -f ${FILENAME}.bak2" > /dev/null 2>&1
@@ -406,7 +400,7 @@ POSTGRES_PORT_CHK () {
 	LOG_MSG "[INFO]:-Start Function $FUNCNAME"
 	GET_PG_PID_ACTIVE $1 $2
 	if [ $PID -ne 0 ];then
-		ERROR_EXIT "[FATAL]:-Host $2 has an active database process on port = $1" 2
+		ERROR_EXIT "[FATAL]:-Host $2 has an active database process on port = $1"
 	fi
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
@@ -484,13 +478,14 @@ CREATE_SPREAD_MIRROR_ARRAY () {
 		# Calculate the index based on host and subnet number
 		((PRIM_SEG_INDEX=($DEST_HOST*$NUM_DATADIR)+($DEST_SUBNET*$DIRS_PER_SUBNET)))
 
-		QE_M_NAME=`$ECHO ${QE_PRIMARY_ARRAY[$PRIM_SEG_INDEX]}|$AWK -F"~" '{print $1}'`
+		QE_M_HOST=`$ECHO ${QE_PRIMARY_ARRAY[$PRIM_SEG_INDEX]}|$AWK -F"~" '{print $1}'`
+		QE_M_NAME=`$ECHO ${QE_PRIMARY_ARRAY[$PRIM_SEG_INDEX]}|$AWK -F"~" '{print $2}'`
 		GP_M_DIR=${MIRROR_DATA_DIRECTORY[$SEGS_PROCESSED%$NUM_DATADIR]}
-		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $2}'`
+		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $3}'`
 		((GP_M_PORT=$P_PORT+$MIRROR_OFFSET))
-		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $5}'`
-		M_SEG=`$ECHO $QE_LINE|$AWK -F"~" '{print $3}'|$AWK -F"/" '{print $NF}'`
-		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}/${M_SEG}~${DBID_COUNT}~${M_CONTENT})
+		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $6}'`
+		M_SEG=`$ECHO $QE_LINE|$AWK -F"~" '{print $4}'|$AWK -F"/" '{print $NF}'`
+		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_HOST}~${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}/${M_SEG}~${DBID_COUNT}~${M_CONTENT})
 		POSTGRES_PORT_CHK $GP_M_PORT $QE_M_NAME
 		((DBID_COUNT=$DBID_COUNT+1))
 		((SEGS_PROCESSED=$SEGS_PROCESSED+1))
@@ -545,14 +540,15 @@ CREATE_GROUP_MIRROR_ARRAY () {
 
 		if [ $DEBUG_LEVEL -eq 0 ] && [ x"" != x"$VERBOSE" ];then $NOLINE_ECHO ".\c";fi
 
-		QE_M_NAME=`$ECHO ${QE_PRIMARY_ARRAY[$MIRROR_INDEX]}|$AWK -F"~" '{print $1}'`
-		GP_M_DIR=${MIRROR_DATA_DIRECTORY[$PRIMARY_INDEX%$NUM_DATADIR]}/`$ECHO $QE_LINE|$AWK -F"~" '{print $3}'|$AWK -F"/" '{print $NF}'`
+		QE_M_HOST=`$ECHO ${QE_PRIMARY_ARRAY[$MIRROR_INDEX]}|$AWK -F"~" '{print $1}'`
+		QE_M_NAME=`$ECHO ${QE_PRIMARY_ARRAY[$MIRROR_INDEX]}|$AWK -F"~" '{print $2}'`
+		GP_M_DIR=${MIRROR_DATA_DIRECTORY[$PRIMARY_INDEX%$NUM_DATADIR]}/`$ECHO $QE_LINE|$AWK -F"~" '{print $4}'|$AWK -F"/" '{print $NF}'`
 
-		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $5}'`
-		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $2}'`
+		M_CONTENT=`$ECHO $QE_LINE|$AWK -F"~" '{print $6}'`
+		P_PORT=`$ECHO $QE_LINE|$AWK -F"~" '{print $3}'`
 		GP_M_PORT=$(($P_PORT+$MIRROR_OFFSET))
 
-		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}~${DBID_COUNT}~${M_CONTENT})
+		QE_MIRROR_ARRAY=(${QE_MIRROR_ARRAY[@]} ${QE_M_HOST}~${QE_M_NAME}~${GP_M_PORT}~${GP_M_DIR}~${DBID_COUNT}~${M_CONTENT})
 		POSTGRES_PORT_CHK $GP_M_PORT $QE_M_NAME
 
 		DBID_COUNT=$(($DBID_COUNT+1))
@@ -567,11 +563,11 @@ GET_REPLY () {
 	$ECHO -n "> "
 	read REPLY
 	if [ -z $REPLY ]; then
-		LOG_MSG "[WARN]:-User abort requested, Script Exits!" 1
+		LOG_MSG "[FATAL]:-User abort requested, Script Exits!" 1
 		exit 1
 	fi
 	if [ $REPLY != Y ] && [ $REPLY != y ]; then
-		LOG_MSG "[WARN]:-User abort requested, Script Exits!" 1
+		LOG_MSG "[FATAL]:-User abort requested, Script Exits!" 1
 		exit 1
 	fi
 }
@@ -593,7 +589,6 @@ CHK_FILE () {
 			RETVAL=$?
 			if [ $RETVAL -ne 0 ];then
 				LOG_MSG "[WARN]:-Failed to obtain details of $FILENAME on $FILE_HOST"
-				EXIT_STATUS=1
 				EXISTS=1
 			fi
 		fi
@@ -613,7 +608,6 @@ CHK_DIR () {
 			RETVAL=$?
 			if [ $RETVAL -ne 0 ];then
 			LOG_MSG "[WARN]:-Failed to obtain details of $DIR_NAME on $DIR_HOST" 1
-			EXIT_STATUS=1
 			EXISTS=1
 			fi
 		fi
@@ -622,50 +616,50 @@ CHK_DIR () {
 		fi
 }
 
-GET_MASTER_PORT () {
+GET_COORDINATOR_PORT () {
 		LOG_MSG "[INFO]:-Start Function $FUNCNAME"
-		MASTER_DATA_DIRECTORY=$1
-		if [ x"" == x"$MASTER_DATA_DIRECTORY" ];then
-			ERROR_EXIT "[FATAL]:-MASTER_DATA_DIRECTORY variable not set" 2;fi
-		if [ ! -d $MASTER_DATA_DIRECTORY ]; then
-				ERROR_EXIT "[FATAL]:-No $MASTER_DATA_DIRECTORY directory" 2
+		COORDINATOR_DATA_DIRECTORY=$1
+		if [ x"" == x"$COORDINATOR_DATA_DIRECTORY" ];then
+			ERROR_EXIT "[FATAL]:-COORDINATOR_DATA_DIRECTORY variable not set";fi
+		if [ ! -d $COORDINATOR_DATA_DIRECTORY ]; then
+				ERROR_EXIT "[FATAL]:-No $COORDINATOR_DATA_DIRECTORY directory"
 		fi
-		if [ -r $MASTER_DATA_DIRECTORY/$PG_CONF ];then
-			MASTER_PORT=`$AWK 'split($0,a,"#")>0 && split(a[1],b,"=")>1 {print b[1] " " b[2]}' $MASTER_DATA_DIRECTORY/$PG_CONF | $AWK '$1=="port" {print $2}' | $TAIL -1`
-			if [ x"" == x"$MASTER_PORT" ] ; then
+		if [ -r $COORDINATOR_DATA_DIRECTORY/$PG_CONF ];then
+			COORDINATOR_PORT=`$AWK 'split($0,a,"#")>0 && split(a[1],b,"=")>1 {print b[1] " " b[2]}' $COORDINATOR_DATA_DIRECTORY/$PG_CONF | $AWK '$1=="port" {print $2}' | $TAIL -1`
+			if [ x"" == x"$COORDINATOR_PORT" ] ; then
                 #look for include files
-                for INC_FILE in `$AWK '/^[ ]*include /{print $2}' $MASTER_DATA_DIRECTORY/$PG_CONF | $TR -d "'\""` ; do
+                for INC_FILE in `$AWK '/^[ ]*include /{print $2}' $COORDINATOR_DATA_DIRECTORY/$PG_CONF | $TR -d "'\""` ; do
                     if [[ $INC_FILE == /* ]] ; then
-                        GET_MASTER_PORT_RECUR "$INC_FILE" 1
+                        GET_COORDINATOR_PORT_RECUR "$INC_FILE" 1
                     else
-                        GET_MASTER_PORT_RECUR "$MASTER_DATA_DIRECTORY/$INC_FILE" 1
+                        GET_COORDINATOR_PORT_RECUR "$COORDINATOR_DATA_DIRECTORY/$INC_FILE" 1
                     fi
                 done
-                if [ x"" == x"$MASTER_PORT" ] ; then
-			        ERROR_EXIT "[FATAL]:-Failed to obtain master port number from $MASTER_DATA_DIRECTORY/$PG_CONF" 2
+                if [ x"" == x"$COORDINATOR_PORT" ] ; then
+			        ERROR_EXIT "[FATAL]:-Failed to obtain coordinator port number from $COORDINATOR_DATA_DIRECTORY/$PG_CONF"
                 fi
 			fi
 		else
-			ERROR_EXIT "[FATAL]:-Do not have read access to $MASTER_DATA_DIRECTORY/$PG_CONF" 2
+			ERROR_EXIT "[FATAL]:-Do not have read access to $COORDINATOR_DATA_DIRECTORY/$PG_CONF"
 		fi
 		LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
 
-GET_MASTER_PORT_RECUR () {
+GET_COORDINATOR_PORT_RECUR () {
     INCLUDED_FILE=$1
     RECUR=$2
     if [ $RECUR -le 10 ] ; then
-        MASTER_PORT=`$AWK 'split($0,a,"#")>0 && split(a[1],b,"=")>1 {print b[1] " " b[2]}' $INCLUDED_FILE | $AWK '$1=="port" {print $2}' | $TAIL -1`
-        if [ x"" == x"$MASTER_PORT" ] ; then
+        COORDINATOR_PORT=`$AWK 'split($0,a,"#")>0 && split(a[1],b,"=")>1 {print b[1] " " b[2]}' $INCLUDED_FILE | $AWK '$1=="port" {print $2}' | $TAIL -1`
+        if [ x"" == x"$COORDINATOR_PORT" ] ; then
             #look for include files
             let CURR_DEPTH=$RECUR+1
             for INC_FILE in `$AWK '/^[ ]*include /{print $2}' $INC_FILE | $TR -d "'\""` ; do
                 if [[ $INC_FILE == /* ]] ; then
-                    GET_MASTER_PORT_RECUR "$INC_FILE" $CURR_DEPTH
+                    GET_COORDINATOR_PORT_RECUR "$INC_FILE" $CURR_DEPTH
                 else
-                    GET_MASTER_PORT_RECUR "$MASTER_DATA_DIRECTORY/$INC_FILE" $CURR_DEPTH
+                    GET_COORDINATOR_PORT_RECUR "$COORDINATOR_DATA_DIRECTORY/$INC_FILE" $CURR_DEPTH
                 fi
-                if [ x"" != x"$MASTER_PORT" ] ; then
+                if [ x"" != x"$COORDINATOR_PORT" ] ; then
                     break
                 fi
             done
@@ -688,12 +682,12 @@ GET_CIDRADDR () {
     fi
 }
 
-BUILD_MASTER_PG_HBA_FILE () {
+BUILD_COORDINATOR_PG_HBA_FILE () {
         LOG_MSG "[INFO]:-Start Function $FUNCNAME"
-	if [ $# -eq 0 ];then ERROR_EXIT "[FATAL]:-Passed zero parameters, expected at least 2" 2;fi
+	if [ $# -eq 0 ];then ERROR_EXIT "[FATAL]:-Passed zero parameters, expected at least 2";fi
 	GP_DIR=$1
 	HBA_HOSTNAMES=${2:-0}
-        LOG_MSG "[INFO]:-Clearing values in Master $PG_HBA"
+        LOG_MSG "[INFO]:-Clearing values in Coordinator $PG_HBA"
         $GREP "^#" ${GP_DIR}/$PG_HBA > $TMP_PG_HBA
         $MV $TMP_PG_HBA ${GP_DIR}/$PG_HBA
         LOG_MSG "[INFO]:-Setting local access"
@@ -703,7 +697,7 @@ BUILD_MASTER_PG_HBA_FILE () {
         if [ $HBA_HOSTNAMES -eq 0 ];then
             $ECHO "host     all         $USER_NAME         127.0.0.1/28    trust" >> ${GP_DIR}/$PG_HBA
 
-            for ADDR in "${MASTER_IP_ADDRESS_ALL[@]}"
+            for ADDR in "${COORDINATOR_IP_ADDRESS_ALL[@]}"
             do
                 # MPP-15889
                 CIDRADDR=$(GET_CIDRADDR $ADDR)
@@ -718,7 +712,7 @@ BUILD_MASTER_PG_HBA_FILE () {
             done
 
             # Add all local IPV6 addresses
-            for ADDR in "${MASTER_IPV6_LOCAL_ADDRESS_ALL[@]}"
+            for ADDR in "${COORDINATOR_IPV6_LOCAL_ADDRESS_ALL[@]}"
             do
                 # MPP-15889
                 CIDRADDR=$(GET_CIDRADDR $ADDR)
@@ -726,20 +720,37 @@ BUILD_MASTER_PG_HBA_FILE () {
             done
         else
             $ECHO "host     all         $USER_NAME         localhost    trust" >> ${GP_DIR}/$PG_HBA
-            $ECHO "host     all         $USER_NAME         $MASTER_HOSTNAME       trust" >> ${GP_DIR}/$PG_HBA
+            $ECHO "host     all         $USER_NAME         $COORDINATOR_HOSTNAME       trust" >> ${GP_DIR}/$PG_HBA
         fi
 
 
         # Add replication config
         $ECHO "local    replication $USER_NAME         $PG_METHOD" >> ${GP_DIR}/$PG_HBA
-        $ECHO "host     replication $USER_NAME         samenet       trust" >> ${GP_DIR}/$PG_HBA
-        LOG_MSG "[INFO]:-Complete Master $PG_HBA configuration"
+        # Add the samehost replication entry to support single-host development
+        $ECHO "host     replication $USER_NAME         samehost       trust" >> ${GP_DIR}/$PG_HBA
+        if [ $HBA_HOSTNAMES -eq 0 ];then
+            local COORDINATOR_IP_ADDRESS_NO_LOOPBACK=($("$GPHOME"/libexec/ifaddrs --no-loopback))
+            if [ x"" != x"$STANDBY_HOSTNAME" ] && [ "$STANDBY_HOSTNAME" != "$COORDINATOR_HOSTNAME" ];then
+                local STANDBY_IP_ADDRESS_NO_LOOPBACK=($($TRUSTED_SHELL $STANDBY_HOSTNAME "$GPHOME"/libexec/ifaddrs --no-loopback))
+            fi
+            for ADDR in "${COORDINATOR_IP_ADDRESS_NO_LOOPBACK[@]}" "${STANDBY_IP_ADDRESS_NO_LOOPBACK[@]}"
+            do
+                CIDRADDR=$(GET_CIDRADDR $ADDR)
+                $ECHO "host     replication $USER_NAME         $CIDRADDR       trust" >> ${GP_DIR}/$PG_HBA
+            done
+        else
+            $ECHO "host     replication $USER_NAME         $COORDINATOR_HOSTNAME       trust" >> ${GP_DIR}/$PG_HBA
+            if [ x"" != x"$STANDBY_HOSTNAME" ] && [ "$STANDBY_HOSTNAME" != "$COORDINATOR_HOSTNAME" ];then
+                $ECHO "host     replication $USER_NAME         $STANDBY_HOSTNAME       trust" >> ${GP_DIR}/$PG_HBA
+            fi
+        fi
+        LOG_MSG "[INFO]:-Complete Coordinator $PG_HBA configuration"
         LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
 
 BUILD_GPSSH_CONF () {
         LOG_MSG "[INFO]:-Start Function $FUNCNAME"
-        if [ $# -eq 0 ];then ERROR_EXIT "[FATAL]:-Passed zero parameters, expected at least 1" 2;fi
+        if [ $# -eq 0 ];then ERROR_EXIT "[FATAL]:-Passed zero parameters, expected at least 1";fi
         GP_DIR=$1
         $CAT <<_EOF_ >> $GP_DIR/gpssh.conf
 [gpssh]
@@ -766,63 +777,6 @@ prompt_validation_timeout = 1.0
 sync_retries = 3
 _EOF_
         LOG_MSG "[INFO]:-End Function $FUNCNAME"
-}
-
-BUILD_PERFMON() {
-	LOG_MSG "[INFO]:-Start Function $FUNCNAME"
-	GP_DIR=$1
-	$MKDIR -p $GP_DIR/gpperfmon/conf $GP_DIR/gpperfmon/logs $GP_DIR/gpperfmon/data
-	$CAT <<_EOF_ >> $GP_DIR/gpperfmon/conf/gpperfmon.conf
-[GPMMON]
-# quantum specifies the time in seconds between updates from
-# performance monitor agents on all segments. Valid values
-# are 10, 15, 20, 30, or 60
-quantum = 15
-
-# min_query_time specifies the minimum query run time
-# in seconds for statistics collection. The monitor logs all
-# queries that run longer than this value in the queries_history
-# table. For queries with shorter run times, no historical
-# data is collected.
-min_query_time = 20
-
-# This should be a percentage between 0 and 100 and should be
-# less than the error_disk_space_percentage.  If a filesystem's
-# disk space used percentage equals or exceeds this value a
-# warning will be logged and a warning email/snmp trap may be
-# sent.  If this configuration is set to 0 or not specified, no
-# warnings are sent.
-#warning_disk_space_percentage = 80
-
-# This should be a percentage between 0 and 100 and should be
-# greater than the warning_disk_space_percentage. If a
-# filesystem's disk space used percentage equals or exceeds
-# this value an error will be logged and a error email/snmp
-# trap may be sent.  If this configuration is set to 0 or not
-# specified, no errors are sent.
-#error_disk_space_percentage = 90
-
-#This is the interval in minutes that limits the number of
-#error/warning messages that are sent. The minimum value for
-#this configuration is 1.  Setting this to 0 or not specifying
-#this configuration results in it getting set to the minimum.
-disk_space_interval = 60
-
-#This is the maximum number of error/warning messages that
-#will be sent in the disk_space_interval.  The maximum value
-#for this configuration is 50.  The minimum value for this
-#configuration is 1.  Setting this configuration to greater
-#than 50 or not specifying this configuration results in it
-#getting set to the maximum.
-max_disk_space_messages_per_interval = 10
-
-# The number of partitions for statistics data in month
-# will be retained. Older partitions will be dropped.
-#partition_age = 6
-
-
-log_location = $GP_DIR/gpperfmon/logs
-_EOF_
 }
 
 GET_PG_PID_ACTIVE () {
@@ -855,7 +809,6 @@ GET_PG_PID_ACTIVE () {
 				#Have a process but no lock file
 					LOG_MSG "[WARN]:-No lock file $PG_LOCK_FILE but process running on port $PORT" 1
 					PID=1
-					EXIT_STATUS=1
 				fi
 				if [ $PG_LOCK_TMP -eq 1 ] && [ x"" == x"$PG_LOCK_NETSTAT" ];then
 				#Have a lock file but no process
@@ -866,7 +819,6 @@ GET_PG_PID_ACTIVE () {
 						PID=1
 					fi
 					LOG_MSG "[WARN]:-Have lock file $PG_LOCK_FILE but no process running on port $PORT" 1
-					EXIT_STATUS=1
 				fi
 				if [ $PG_LOCK_TMP -eq 1 ] && [ x"" != x"$PG_LOCK_NETSTAT" ];then
 				#Have both a lock file and a netstat process
@@ -875,7 +827,6 @@ GET_PG_PID_ACTIVE () {
 					else
 						LOG_MSG "[WARN]:-Unable to access ${PG_LOCK_FILE}" 1
 						PID=1
-						EXIT_STATUS=1
 					fi
 					LOG_MSG "[INFO]:-Have lock file $PG_LOCK_FILE and a process running on port $PORT"
 				fi
@@ -884,7 +835,6 @@ GET_PG_PID_ACTIVE () {
 			PING_HOST $HOST 1
 			if [ $RETVAL -ne 0 ];then
 				PID=0
-				EXIT_STATUS=1
 			else
 				PORT_ARRAY=(`$TRUSTED_SHELL $HOST "$NETSTAT -an 2>/dev/null |$GREP ".s.PGSQL.${PORT}" 2>/dev/null"|$AWK '{print $NF}'|$AWK -F"." '{print $NF}'|$SORT -u`)
 				for P_CHK in ${PORT_ARRAY[@]}
@@ -902,7 +852,6 @@ GET_PG_PID_ACTIVE () {
 					#Have a process but no lock file
 						LOG_MSG "[WARN]:-No lock file $PG_LOCK_FILE but process running on port $PORT on $HOST" 1
 						PID=1
-						EXIT_STATUS=1
 					fi
 					if [ $PG_LOCK_TMP -eq 1 ] && [ x"" == x"$PG_LOCK_NETSTAT" ];then
 					#Have a lock file but no process
@@ -914,7 +863,6 @@ GET_PG_PID_ACTIVE () {
 						fi
 						LOG_MSG "[WARN]:-Have lock file $PG_LOCK_FILE but no process running on port $PORT on $HOST" 1
 						PID=1
-						EXIT_STATUS=1
 					fi
 					if [ $PG_LOCK_TMP -eq 1 ] && [ x"" != x"$PG_LOCK_NETSTAT" ];then
 					#Have both a lock file and a netstat process
@@ -923,7 +871,6 @@ GET_PG_PID_ACTIVE () {
 							PID=`$TRUSTED_SHELL $HOST "$CAT ${PG_LOCK_FILE}|$HEAD -1 2>/dev/null"|$AWK '{print $1}'`
 						else
 							LOG_MSG "[WARN]:-Unable to access ${PG_LOCK_FILE} on $HOST" 1
-							EXIT_STATUS=1
 						fi
 						LOG_MSG "[INFO]:-Have lock file $PG_LOCK_FILE and a process running on port $PORT on $HOST"
 					fi
@@ -987,19 +934,19 @@ PING_HOST () {
 		0) LOG_MSG "[INFO]:-$TARGET_HOST contact established"
                    ;;
 		1) if [ $PING_EXIT -eq 0 ];then
-			ERROR_EXIT "[FATAL]:-Unable to contact $TARGET_HOST: $OUTPUT" 2
+			ERROR_EXIT "[FATAL]:-Unable to contact $TARGET_HOST: $OUTPUT"
 		   else
 			LOG_MSG "[WARN]:-Unable to contact $TARGET_HOST: $OUTPUT" 1
 		   fi
                    ;;
 		2) if [ $PING_EXIT -eq 0 ];then
-			ERROR_EXIT "[FATAL]:-Unknown host $TARGET_HOST: $OUTPUT" 2
+			ERROR_EXIT "[FATAL]:-Unknown host $TARGET_HOST: $OUTPUT"
 		   else
 			LOG_MSG "[WARN]:-Unknown host $TARGET_HOST: $OUTPUT" 1
 		   fi
                    ;;
 		*) if [ $PING_EXIT -eq 0 ];then
-			ERROR_EXIT "[FATAL]:-Cannot ping host $TARGET_HOST: $OUTPUT" 2
+			ERROR_EXIT "[FATAL]:-Cannot ping host $TARGET_HOST: $OUTPUT"
 		   else
 			LOG_MSG "[WARN]:-Cannot ping host $TARGET_HOST: $OUTPUT" 1
 		   fi
@@ -1024,7 +971,7 @@ PARALLEL_SETUP () {
 
 PARALLEL_COUNT () {
         LOG_MSG "[INFO]:-Start Function $FUNCNAME"
-	if [ $# -ne 2 ];then ERROR_EXIT "[FATAL]:-Incorrect number of parameters passed to $FUNCNAME" 2;fi
+	if [ $# -ne 2 ];then ERROR_EXIT "[FATAL]:-Incorrect number of parameters passed to $FUNCNAME";fi
 	BATCH_LIMIT=$1
 	BATCH_DEFAULT=$2
 	((INST_COUNT=$INST_COUNT+1))
@@ -1055,7 +1002,7 @@ PARALLEL_WAIT () {
 			if [ $DEBUG_LEVEL -eq 0 ] && [ x"" != x"$VERBOSE" ];then $NOLINE_ECHO ".\c";fi
 			LOG_MSG "[FATAL]:-Failed to process this batch of segments within $WAIT_LIMIT seconds" 1
 			LOG_MSG "[INFO]:-Review contents of $LOG_FILE" 1
-			ERROR_EXIT "[FATAL]:-Process timeout failure" 2
+			ERROR_EXIT "[FATAL]:-Process timeout failure"
 		fi
 	done
 	if [ $DEBUG_LEVEL -eq 0 ] && [ x"" != x"$VERBOSE" ];then $ECHO;fi
@@ -1088,7 +1035,7 @@ PARALLEL_SUMMARY_STATUS_REPORT () {
                 fi
                 LOG_MSG "[INFO]:------------------------------------------------" 1
 	else
-		 LOG_MSG "[WARN]:-Could not locate status file $1" 1
+		LOG_MSG "[WARN]:-Could not locate status file $1" 1
 		REPORT_FAIL=1
 	fi
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
@@ -1098,10 +1045,10 @@ CHK_GPDB_ID () {
 	LOG_MSG "[INFO]:-Start Function $FUNCNAME"
 	if [ -f ${INITDB} ];then
 	        PERMISSION=`ls -al ${INITDB}|$AWK '{print $1}'`
-		MASTER_INITDB_ID=`ls -al ${INITDB}|$AWK '{print $3}'`
-		INIT_CHAR=`$ECHO $MASTER_INITDB_ID|$TR -d '\n'|$WC -c|$TR -d ' '`
-		MASTER_INITDB_GROUPID=`ls -al ${INITDB}|$AWK '{print $4}'`
-		GROUP_INIT_CHAR=`$ECHO $MASTER_INITDB_ID|$TR -d '\n'|$WC -c|$TR -d ' '`
+		COORDINATOR_INITDB_ID=`ls -al ${INITDB}|$AWK '{print $3}'`
+		INIT_CHAR=`$ECHO $COORDINATOR_INITDB_ID|$TR -d '\n'|$WC -c|$TR -d ' '`
+		COORDINATOR_INITDB_GROUPID=`ls -al ${INITDB}|$AWK '{print $4}'`
+		GROUP_INIT_CHAR=`$ECHO $COORDINATOR_INITDB_ID|$TR -d '\n'|$WC -c|$TR -d ' '`
 		GPDB_ID=`id|$TR '(' ' '|$TR ')' ' '|$AWK '{print $2}'`
 		GPDB_GROUPID=`id|$TR '(' ' '|$TR ')' ' '|$AWK '{print $4}'`
 
@@ -1120,13 +1067,13 @@ CHK_GPDB_ID () {
 			GPDB_GROUPID_CHK=$GPDB_GROUPID
 		fi
 
-		if [ x$GPDB_ID_CHK == x$MASTER_INITDB_ID ] && [ x"x" == x"$USER_EXECUTE" ];then
-		    LOG_MSG "[INFO]:-Current user id of $GPDB_ID, matches initdb id of $MASTER_INITDB_ID"
-		elif [ x$GPDB_GROUPID_CHK == x$MASTER_INITDB_GROUPID ] && [ x"x" == x"$GROUP_EXECUTE" ] ; then
-		    LOG_MSG "[INFO]:-Current group id of $GPDB_GROUPID, matches initdb group id of $MASTER_INITDB_GROUPID"
+		if [ x$GPDB_ID_CHK == x$COORDINATOR_INITDB_ID ] && [ x"x" == x"$USER_EXECUTE" ];then
+		    LOG_MSG "[INFO]:-Current user id of $GPDB_ID, matches initdb id of $COORDINATOR_INITDB_ID"
+		elif [ x$GPDB_GROUPID_CHK == x$COORDINATOR_INITDB_GROUPID ] && [ x"x" == x"$GROUP_EXECUTE" ] ; then
+		    LOG_MSG "[INFO]:-Current group id of $GPDB_GROUPID, matches initdb group id of $COORDINATOR_INITDB_GROUPID"
 		else
 			LOG_MSG "[WARN]:-File permission mismatch.  The $GPDB_ID_CHK owns the Greenplum Database installation directory."
-			LOG_MSG "[WARN]:-You are currently logged in as $MASTER_INITDB_ID and may not have sufficient"
+			LOG_MSG "[WARN]:-You are currently logged in as $COORDINATOR_INITDB_ID and may not have sufficient"
 			LOG_MSG "[WARN]:-permissions to run the Greenplum binaries and management utilities."
 		fi
 
@@ -1166,6 +1113,21 @@ CHK_GPDB_ID () {
 	LOG_MSG "[INFO]:-End Function $FUNCNAME"
 }
 
+SET_GP_USER_PW () {
+    LOG_MSG "[INFO]:-Start Function $FUNCNAME"
+
+    local alter_statement="alter user :\"username\" password :'password';"
+
+    $PSQL --variable=ON_ERROR_STOP=1 \
+      -p $COORDINATOR_PORT \
+      -d "$DEFAULTDB" \
+      --variable=username="$USER_NAME" \
+      --variable=password="$GP_PASSWD" <<< "$alter_statement" >> $LOG_FILE 2>&1
+
+    ERROR_CHK $? "update Greenplum superuser password" 1
+    LOG_MSG "[INFO]:-End Function $FUNCNAME"
+}
+
 #******************************************************************************
 # Main Section
 #******************************************************************************
@@ -1189,7 +1151,6 @@ case $OS_TYPE in
 		PG_METHOD="ident"
 		HOST_ARCH_TYPE="uname -i"
 		NOLINE_ECHO="$ECHO -e"
-		DEFAULT_LOCALE_SETTING=en_US.utf8
 		PING6=`findCmdInPath ping6`
 		PING_TIME="-c 1"
 		;;
@@ -1201,7 +1162,6 @@ case $OS_TYPE in
 		PG_METHOD="ident"
 		HOST_ARCH_TYPE="uname -m"
 		NOLINE_ECHO=$ECHO
-		DEFAULT_LOCALE_SETTING=en_US.utf-8
 		PING6=`findCmdInPath ping6`
 		PING_TIME="-c 1"
 		;;
@@ -1211,7 +1171,6 @@ case $OS_TYPE in
 		PG_METHOD="ident"
 		HOST_ARCH_TYPE="uname -m"
 		NOLINE_ECHO="$ECHO -e"
-		DEFAULT_LOCALE_SETTING=en_US.utf8
 		PING_TIME="-c 1"
 		;;
 	openbsd ) IPV4_ADDR_LIST_CMD="ifconfig -a inet"
@@ -1220,7 +1179,6 @@ case $OS_TYPE in
 		PG_METHOD="ident"
 		HOST_ARCH_TYPE="uname -m"
 		NOLINE_ECHO="echo -e"
-		DEFAULT_LOCALE_SETTING=en_US.UTF-8
 		PING_TIME="-c 1"
 		DF="df -P"
 		;;
@@ -1230,7 +1188,7 @@ esac
 GP_LIBRARY_PATH=`$DIRNAME \`$DIRNAME $INITDB\``/lib
 
 ##
-# we setup some EXPORT foo='blah' commands for when we dispatch to segments and standby master
+# we setup some EXPORT foo='blah' commands for when we dispatch to segments and standby coordinator
 ##
 EXPORT_GPHOME='export GPHOME='$GPHOME
 if [ x"$LIB_TYPE" == x"LD_LIBRARY_PATH" ]; then

@@ -18,8 +18,9 @@
     <body>
       <p>Certain query features are not supported with the default GPORCA optimizer. When an
         unsupported query is executed, Greenplum logs this notice along with the query
-        text:<codeblock>Feature not supported by the Pivotal Query Optimizer: UTILITY command</codeblock></p>
+        text:<codeblock>Feature not supported by the Greenplum Query Optimizer: UTILITY command</codeblock></p>
       <p>These features are unsupported when GPORCA is enabled (the default): <ul id="ul_ndm_gyl_vp">
+          <li>Prepared statements that have parameterized values.</li>
           <li>Indexed expressions (an index defined as expression based on one or more columns of
             the table)</li>
           <li>SP-GiST indexing method. GPORCA supports only B-tree, bitmap, GIN, and GiST indexes.
@@ -32,6 +33,8 @@
             </ul></li>
           <li>SortMergeJoin (SMJ).</li>
           <li>Ordered aggregations.</li>
+          <li>Multi-argument <codeph>DISTINCT</codeph> qualified aggregates, for example
+              <codeph>SELECT corr(DISTINCT a, b) FROM tbl1;</codeph></li>
           <li>These analytics extensions:<ul id="ul_iwr_3yl_vp">
               <li>CUBE</li>
               <li>Multiple grouping sets</li>
@@ -42,8 +45,13 @@
               <li><cmdname>FIELDSELECT</cmdname></li>
             </ul></li>
           <li>Aggregate functions that take set operators as input arguments.</li>
-          <li><cmdname>percentile_*</cmdname> window functions (Greenplum Database does not support
-            ordered-set aggregate functions).</li>
+          <li>Multiple Distinct Qualified Aggregates, such as <codeph>SELECT count(DISTINCT a),
+              sum(DISTINCT b) FROM foo</codeph>, are not supported by default. They can be enabled
+            with the <codeph>optimizer_enable_multiple_distinct_aggs</codeph>
+            <xref
+              href="../../../ref_guide/config_params/guc-list.xml#optimizer_enable_multiple_distinct_aggs"
+              >Configuration Parameter</xref>.</li>
+          <li><cmdname>percentile_*</cmdname> window functions (ordered-set aggregate functions).</li>
           <li>Inverse distribution functions.</li>
           <li>Queries that execute functions that are defined with the <codeph>ON MASTER</codeph> or
               <codeph>ON ALL SEGMENTS</codeph> attribute.</li>

@@ -4,7 +4,7 @@
  *	  Implementation of segment probing interface
  *
  * Portions Copyright (c) 2006-2011, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -148,6 +148,7 @@ static bool
 ftsConnectStart(fts_segment_info *ftsInfo)
 {
 	char conninfo[1024];
+	char *hostip;
 
 	/*
 	 * No events should be pending on the connection that hasn't started
@@ -162,8 +163,9 @@ ftsConnectStart(fts_segment_info *ftsInfo)
 				ftsInfo->state == FTS_SYNCREP_OFF_SEGMENT,
 				SEGMENT_IS_ACTIVE_PRIMARY(ftsInfo->primary_cdbinfo));
 
+	hostip = ftsInfo->primary_cdbinfo->config->hostip;
 	snprintf(conninfo, 1024, "host=%s port=%d gpconntype=%s",
-			 ftsInfo->primary_cdbinfo->config->hostip, ftsInfo->primary_cdbinfo->config->port,
+			 hostip ? hostip : "", ftsInfo->primary_cdbinfo->config->port,
 			 GPCONN_TYPE_FTS);
 	ftsInfo->conn = PQconnectStart(conninfo);
 
@@ -200,7 +202,8 @@ ftsConnectStart(fts_segment_info *ftsInfo)
 static void
 checkIfFailedDueToRecoveryInProgress(fts_segment_info *ftsInfo)
 {
-	if (strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_RECOVERY_MSG)))
+	if (strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_RECOVERY_MSG)) ||
+		strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_STARTUP_MSG)))
 	{
 		XLogRecPtr tmpptr;
 		char *ptr = strstr(PQerrorMessage(ftsInfo->conn),
@@ -254,7 +257,7 @@ checkIfFailedDueToRecoveryInProgress(fts_segment_info *ftsInfo)
 				   (uint32) (tmpptr >> 32),
 				   (uint32) tmpptr,
 				   ftsInfo->primary_cdbinfo->config->segindex,
-				   ftsInfo->mirror_cdbinfo->config->dbid,
+				   ftsInfo->primary_cdbinfo->config->dbid,
 				   ftsInfo->mirror_cdbinfo->config->dbid);
 		}
 	}
@@ -596,30 +599,20 @@ probeRecordResponse(fts_segment_info *ftsInfo, PGresult *result)
 {
 	ftsInfo->result.isPrimaryAlive = true;
 
-	int *isMirrorAlive = (int *) PQgetvalue(result, 0,
-											Anum_fts_message_response_is_mirror_up);
-	Assert (isMirrorAlive);
-	ftsInfo->result.isMirrorAlive = *isMirrorAlive;
+	ftsInfo->result.isMirrorAlive = *PQgetvalue(result, 0,
+			Anum_fts_message_response_is_mirror_up);
 
-	int *isInSync = (int *) PQgetvalue(result, 0,
-								   Anum_fts_message_response_is_in_sync);
-	Assert (isInSync);
-	ftsInfo->result.isInSync = *isInSync;
+	ftsInfo->result.isInSync = *PQgetvalue(result, 0,
+			Anum_fts_message_response_is_in_sync);
 
-	int *isSyncRepEnabled = (int *) PQgetvalue(result, 0,
-											   Anum_fts_message_response_is_syncrep_enabled);
-	Assert (isSyncRepEnabled);
-	ftsInfo->result.isSyncRepEnabled = *isSyncRepEnabled;
+	ftsInfo->result.isSyncRepEnabled = *PQgetvalue(result, 0,
+			Anum_fts_message_response_is_syncrep_enabled);
 
-	int *isRoleMirror = (int *) PQgetvalue(result, 0,
-										   Anum_fts_message_response_is_role_mirror);
-	Assert (isRoleMirror);
-	ftsInfo->result.isRoleMirror = *isRoleMirror;
+	ftsInfo->result.isRoleMirror = *PQgetvalue(result, 0,
+			Anum_fts_message_response_is_role_mirror);
 
-	int *retryRequested = (int *) PQgetvalue(result, 0,
-											 Anum_fts_message_response_request_retry);
-	Assert (retryRequested);
-	ftsInfo->result.retryRequested = *retryRequested;
+	ftsInfo->result.retryRequested = *PQgetvalue(result, 0,
+			Anum_fts_message_response_request_retry);
 
 	elogif(gp_log_fts >= GPVARS_VERBOSITY_DEBUG, LOG,
 		   "FTS: segment (content=%d, dbid=%d, role=%c) reported "
@@ -685,15 +678,9 @@ ftsReceive(fts_context *context)
 				/* Parse the response. */
 				if (PQisBusy(ftsInfo->conn))
 				{
-					elog(LOG, "FTS: error parsing response from (content=%d, "
-						 "dbid=%d) state=%d, retry_count=%d, "
-						 "conn->asyncStatus=%d %s",
-						 ftsInfo->primary_cdbinfo->config->segindex,
-						 ftsInfo->primary_cdbinfo->config->dbid,
-						 ftsInfo->state, ftsInfo->retry_count,
-						 ftsInfo->conn->asyncStatus,
-						 PQerrorMessage(ftsInfo->conn));
-					ftsInfo->state = nextFailedState(ftsInfo->state);
+					/*
+					 * There is not enough data in the buffer.
+					 */
 					break;
 				}
 
@@ -809,7 +796,7 @@ retryForFtsFailed(fts_segment_info *ftsInfo, pg_time_t now)
 }
 
 /*
- * If retry attempts are available, transition the sgement to the start state
+ * If retry attempts are available, transition the segments to the start state
  * corresponding to their failure state.  If retries have exhausted, leave the
  * segment in the failure state.
  */
@@ -834,6 +821,7 @@ processRetry(fts_context *context)
 				if (!(ftsInfo->result.retryRequested &&
 					  SEGMENT_IS_ALIVE(ftsInfo->mirror_cdbinfo)))
 					break;
+				/* else, fallthrough */
 			case FTS_PROBE_FAILED:
 			case FTS_SYNCREP_OFF_FAILED:
 			case FTS_PROMOTE_FAILED:
@@ -937,7 +925,6 @@ updateConfiguration(CdbComponentDatabaseInfo *primary,
 		 * dispatcher, now that changes has been persisted to catalog.
 		 */
 		Assert(ftsProbeInfo);
-		ftsLock();
 		if (IsPrimaryAlive)
 			FTS_STATUS_SET_UP(ftsProbeInfo->status[primary->config->dbid]);
 		else
@@ -947,14 +934,13 @@ updateConfiguration(CdbComponentDatabaseInfo *primary,
 			FTS_STATUS_SET_UP(ftsProbeInfo->status[mirror->config->dbid]);
 		else
 			FTS_STATUS_SET_DOWN(ftsProbeInfo->status[mirror->config->dbid]);
-		ftsUnlock();
 	}
 
 	return UpdateNeeded;
 }
 
 /*
- * Process resonses from primary segments:
+ * Process responses from primary segments:
  * (a) Transition internal state so that segments can be messaged subsequently
  * (e.g. promotion and turning off syncrep).
  * (b) Update gp_segment_configuration catalog table, if needed.
@@ -1077,7 +1063,8 @@ processResponse(fts_context *context)
 				/* If primary is in recovery, do not mark it down and promote mirror */
 				if (ftsInfo->recovery_making_progress)
 				{
-					Assert(strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_RECOVERY_MSG)));
+					Assert(strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_RECOVERY_MSG)) ||
+						   strstr(PQerrorMessage(ftsInfo->conn), _(POSTMASTER_IN_STARTUP_MSG)));
 					elogif(gp_log_fts >= GPVARS_VERBOSITY_VERBOSE, LOG,
 						 "FTS: detected segment is in recovery mode and making "
 						 "progress (content=%d) primary dbid=%d, mirror dbid=%d",
@@ -1126,7 +1113,11 @@ processResponse(fts_context *context)
 				}
 				else
 				{
-					elog(WARNING, "FTS double fault detected (content=%d) "
+					/*
+					 * Only log here, will handle it later, having an "ERROR"
+					 * keyword here for customer convenience
+					 */
+					elog(WARNING, "ERROR: FTS double fault detected (content=%d) "
 						 "primary dbid=%d, mirror dbid=%d",
 						 primary->config->segindex, primary->config->dbid, mirror->config->dbid);
 					ftsInfo->state = FTS_RESPONSE_PROCESSED;
@@ -1143,7 +1134,11 @@ processResponse(fts_context *context)
 				ftsInfo->state = FTS_RESPONSE_PROCESSED;
 				break;
 			case FTS_PROMOTE_FAILED:
-				elog(WARNING, "FTS double fault detected (content=%d) "
+				/*
+				 * Only log here, will handle it later, having an "ERROR"
+				 * keyword here for customer convenience
+				 */
+				elog(WARNING, "ERROR: FTS double fault detected (content=%d) "
 					 "primary dbid=%d, mirror dbid=%d",
 					 primary->config->segindex, primary->config->dbid, mirror->config->dbid);
 				ftsInfo->state = FTS_RESPONSE_PROCESSED;
@@ -1151,7 +1146,7 @@ processResponse(fts_context *context)
 			case FTS_PROMOTE_SUCCESS:
 				elogif(gp_log_fts >= GPVARS_VERBOSITY_VERBOSE, LOG,
 					   "FTS mirror (content=%d, dbid=%d) promotion "
-					   "triggerred successfully",
+					   "triggered successfully",
 					   primary->config->segindex, primary->config->dbid);
 				ftsInfo->state = FTS_RESPONSE_PROCESSED;
 				break;

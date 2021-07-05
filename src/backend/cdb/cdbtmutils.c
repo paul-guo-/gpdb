@@ -8,7 +8,7 @@
  * structures, converting values to strings, etc.
  *
  * Portions Copyright (c) 2005-2009, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -20,6 +20,7 @@
 #include "postgres.h"
 
 #include "cdb/cdbtm.h"
+#include "cdb/cdbvars.h"
 #include "access/xact.h"
 
 /*
@@ -27,23 +28,35 @@
  * transaction id.
  */
 void
-dtxCrackOpenGid(
+dtxDeformGid(
 				const char *gid,
-				DistributedTransactionTimeStamp *distribTimeStamp,
 				DistributedTransactionId *distribXid)
 {
 	int			itemsScanned;
 
-	itemsScanned = sscanf(gid, "%u-%u", distribTimeStamp, distribXid);
-	if (itemsScanned != 2)
-		elog(ERROR, "Bad distributed transaction identifier \"%s\"", gid);
+	itemsScanned = sscanf(gid, UINT64_FORMAT, distribXid);
+	if (itemsScanned != 1)
+	{
+		/*
+		 * Returning without an error here allows tests inheritied from
+		 * upstream PostgreSQL to run without errors.  These tests execute
+		 * PREPARE TRANSACTION command with a GID that doesn't conform to the
+		 * Greenplum specific format.  Note that DTM messages sent from QD
+		 * cannot be processed in utility mode.  Therefore, we can safely
+		 * allow non-Greenplum GIDs only in utility mode.
+		 */
+		if (Gp_role == GP_ROLE_UTILITY)
+			*distribXid = 0;
+		else
+			elog(ERROR, "Bad distributed transaction identifier \"%s\"", gid);
+	}
 }
 
 void
-dtxFormGID(char *gid, DistributedTransactionTimeStamp tstamp, DistributedTransactionId gxid)
+dtxFormGid(char *gid, DistributedTransactionId gxid)
 {
-	sprintf(gid, "%u-%.10u", tstamp, gxid);
-	/* gxid is unsigned int32 and its max string length is 10 */
+	sprintf(gid, UINT64_FORMAT, gxid);
+	/* gxid is unsigned int64 */
 	Assert(strlen(gid) < TMGIDSIZE);
 }
 
@@ -56,6 +69,10 @@ DtxStateToString(DtxState state)
 			return "None";
 		case DTX_STATE_ACTIVE_DISTRIBUTED:
 			return "Active Distributed";
+		case DTX_STATE_ONE_PHASE_COMMIT:
+			return "One Phase Commit (Before Notifying)";
+		case DTX_STATE_NOTIFYING_ONE_PHASE_COMMIT:
+			return "Notifying One Phase";
 		case DTX_STATE_PREPARING:
 			return "Preparing";
 		case DTX_STATE_PREPARED:
@@ -64,8 +81,6 @@ DtxStateToString(DtxState state)
 			return "Inserting Committed";
 		case DTX_STATE_INSERTED_COMMITTED:
 			return "Inserted Committed";
-		case DTX_STATE_FORCED_COMMITTED:
-			return "Forced Committed";
 		case DTX_STATE_NOTIFYING_COMMIT_PREPARED:
 			return "Notifying Commit Prepared";
 		case DTX_STATE_INSERTING_FORGET_COMMITTED:
@@ -104,8 +119,6 @@ DtxProtocolCommandToString(DtxProtocolCommand command)
 			return "Distributed Commit (one-phase)";
 		case DTX_PROTOCOL_COMMAND_COMMIT_PREPARED:
 			return "Distributed Commit Prepared";
-		case DTX_PROTOCOL_COMMAND_COMMIT_NOT_PREPARED:
-			return "Distributed Commit Not Prepared";
 		case DTX_PROTOCOL_COMMAND_ABORT_PREPARED:
 			return "Distributed Abort Prepared";
 		case DTX_PROTOCOL_COMMAND_RETRY_COMMIT_PREPARED:

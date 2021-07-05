@@ -60,13 +60,12 @@ static void plpython_error_callback(void *arg);
 static void plpython_inline_error_callback(void *arg);
 static void PLy_init_interp(void);
 
-static PLyExecutionContext *PLy_push_execution_context(void);
+static PLyExecutionContext *PLy_push_execution_context(bool atomic_context);
 static void PLy_pop_execution_context(void);
 
 /* static state for Python library conflict detection */
 static int *plpython_version_bitmask_ptr = NULL;
 static int	plpython_version_bitmask = 0;
-static const int plpython_python_version = PY_MAJOR_VERSION;
 
 /* initialize global variables */
 PyObject   *PLy_interp_globals = NULL;
@@ -85,7 +84,6 @@ void
 _PG_init(void)
 {
 	int		  **bitmask_ptr;
-	const int **version_ptr;
 
 	/*
 	 * Set up a shared bitmask variable telling which Python version(s) are
@@ -103,43 +101,17 @@ _PG_init(void)
 	/* ... and announce my presence */
 	*plpython_version_bitmask_ptr |= (1 << PY_MAJOR_VERSION);
 
-	/*
-	 * This should be safe even in the presence of conflicting plpythons, and
-	 * it's necessary to do it here for the next error to be localized.
-	 */
-	pg_bindtextdomain(TEXTDOMAIN);
-
-	/*
-	 * We used to have a scheme whereby PL/Python would fail immediately if
-	 * loaded into a session in which a conflicting libpython is already
-	 * present.  We don't like to do that anymore, but it seems possible that
-	 * a plpython library adhering to the old convention is present in the
-	 * session, in which case we have to fail.  We detect an old library if
-	 * plpython_python_version is already defined but the indicated version
-	 * isn't reflected in plpython_version_bitmask.  Otherwise, set the
-	 * variable so that the right thing happens if an old library is loaded
-	 * later.
-	 */
-	version_ptr = (const int **) find_rendezvous_variable("plpython_python_version");
-	if (!(*version_ptr))
-		*version_ptr = &plpython_python_version;
-	else
-	{
-		if ((*plpython_version_bitmask_ptr & (1 << **version_ptr)) == 0)
-			ereport(FATAL,
-					(errmsg("Python major version mismatch in session"),
-					 errdetail("This session has previously used Python major version %d, and it is now attempting to use Python major version %d.",
-							   **version_ptr, plpython_python_version),
-					 errhint("Start a new session to use a different Python major version.")));
-	}
-
 	/* Register SIGINT/SIGTERM handler for python */
 	prev_cancel_pending_hook = cancel_pending_hook;
 	cancel_pending_hook = PLy_handle_cancel_interrupt;
 
+	/*
+	 * This should be safe even in the presence of conflicting plpythons, and
+	 * it's necessary to do it before possibly throwing a conflict error, or
+	 * the error message won't get localized.
+	 */
 	pg_bindtextdomain(TEXTDOMAIN);
 }
-
 
 /*
  * Perform one-time setup of PL/Python, after checking for a conflict
@@ -169,11 +141,6 @@ PLy_initialize(void)
 
 #if PY_MAJOR_VERSION >= 3
 	PyImport_AppendInittab("plpy", PyInit_plpy);
-	/* PYTHONPATH and PYTHONHOME has been set to GPDB's python2.7 in Postmaster when
-	 * gpstart. So for plpython3u, we need to unset PYTHONPATH and PYTHONHOME.
-	 */
-	unsetenv("PYTHONPATH");
-	unsetenv("PYTHONHOME");
 #endif
 	Py_Initialize();
 #if PY_MAJOR_VERSION >= 3
@@ -246,7 +213,7 @@ PLy_init_interp(void)
 	PLy_interp_globals = PyModule_GetDict(mainmod);
 	PLy_interp_safe_globals = PyDict_New();
 	if (PLy_interp_safe_globals == NULL)
-		PLy_elog(ERROR, "could not create globals");
+		PLy_elog(ERROR, NULL);
 	PyDict_SetItemString(PLy_interp_globals, "GD", PLy_interp_safe_globals);
 	Py_DECREF(mainmod);
 	if (PLy_interp_globals == NULL || PyErr_Occurred())
@@ -293,19 +260,24 @@ plpython2_validator(PG_FUNCTION_ARGS)
 	/* call plpython validator with our fcinfo so it gets our oid */
 	return plpython_validator(fcinfo);
 }
-#endif   /* PY_MAJOR_VERSION < 3 */
+#endif							/* PY_MAJOR_VERSION < 3 */
 
 Datum
 plpython_call_handler(PG_FUNCTION_ARGS)
 {
+	bool		nonatomic;
 	Datum		retval;
 	PLyExecutionContext *exec_ctx;
 	ErrorContextCallback plerrcontext;
 
 	PLy_initialize();
 
+	nonatomic = fcinfo->context &&
+		IsA(fcinfo->context, CallContext) &&
+		!castNode(CallContext, fcinfo->context)->atomic;
+
 	/* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
-	if (SPI_connect() != SPI_OK_CONNECT)
+	if (SPI_connect_ext(nonatomic ? SPI_OPT_NONATOMIC : 0) != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect failed");
 
 	/*
@@ -313,7 +285,7 @@ plpython_call_handler(PG_FUNCTION_ARGS)
 	 * popped again, so avoid putting anything that could throw error between
 	 * here and the PG_TRY.
 	 */
-	exec_ctx = PLy_push_execution_context();
+	exec_ctx = PLy_push_execution_context(!nonatomic);
 
 	PG_TRY();
 	{
@@ -368,13 +340,13 @@ plpython2_call_handler(PG_FUNCTION_ARGS)
 {
 	return plpython_call_handler(fcinfo);
 }
-#endif   /* PY_MAJOR_VERSION < 3 */
+#endif							/* PY_MAJOR_VERSION < 3 */
 
 Datum
 plpython_inline_handler(PG_FUNCTION_ARGS)
 {
+	LOCAL_FCINFO(fake_fcinfo, 0);
 	InlineCodeBlock *codeblock = (InlineCodeBlock *) DatumGetPointer(PG_GETARG_DATUM(0));
-	FunctionCallInfoData fake_fcinfo;
 	FmgrInfo	flinfo;
 	PLyProcedure proc;
 	PLyExecutionContext *exec_ctx;
@@ -383,26 +355,34 @@ plpython_inline_handler(PG_FUNCTION_ARGS)
 	PLy_initialize();
 
 	/* Note: SPI_finish() happens in plpy_exec.c, which is dubious design */
-	if (SPI_connect() != SPI_OK_CONNECT)
+	if (SPI_connect_ext(codeblock->atomic ? 0 : SPI_OPT_NONATOMIC) != SPI_OK_CONNECT)
 		elog(ERROR, "SPI_connect failed");
 
-	MemSet(&fake_fcinfo, 0, sizeof(fake_fcinfo));
+	MemSet(fcinfo, 0, SizeForFunctionCallInfo(0));
 	MemSet(&flinfo, 0, sizeof(flinfo));
-	fake_fcinfo.flinfo = &flinfo;
+	fake_fcinfo->flinfo = &flinfo;
 	flinfo.fn_oid = InvalidOid;
 	flinfo.fn_mcxt = CurrentMemoryContext;
 
 	MemSet(&proc, 0, sizeof(PLyProcedure));
-	proc.pyname = PLy_strdup("__plpython_inline_block");
+	proc.mcxt = AllocSetContextCreate(TopMemoryContext,
+									  "__plpython_inline_block",
+									  ALLOCSET_DEFAULT_SIZES);
+	proc.pyname = MemoryContextStrdup(proc.mcxt, "__plpython_inline_block");
 	proc.langid = codeblock->langOid;
-	proc.result.out.d.typoid = VOIDOID;
+
+	/*
+	 * This is currently sufficient to get PLy_exec_function to work, but
+	 * someday we might need to be honest and use PLy_output_setup_func.
+	 */
+	proc.result.typoid = VOIDOID;
 
 	/*
 	 * Push execution context onto stack.  It is important that this get
 	 * popped again, so avoid putting anything that could throw error between
 	 * here and the PG_TRY.
 	 */
-	exec_ctx = PLy_push_execution_context();
+	exec_ctx = PLy_push_execution_context(codeblock->atomic);
 
 	PG_TRY();
 	{
@@ -418,7 +398,7 @@ plpython_inline_handler(PG_FUNCTION_ARGS)
 
 		PLy_procedure_compile(&proc, codeblock->source_text);
 		exec_ctx->curr_proc = &proc;
-		PLy_exec_function(&fake_fcinfo, &proc);
+		PLy_exec_function(fake_fcinfo, &proc);
 	}
 	PG_CATCH();
 	{
@@ -444,7 +424,7 @@ plpython2_inline_handler(PG_FUNCTION_ARGS)
 {
 	return plpython_inline_handler(fcinfo);
 }
-#endif   /* PY_MAJOR_VERSION < 3 */
+#endif							/* PY_MAJOR_VERSION < 3 */
 
 static bool
 PLy_procedure_is_trigger(Form_pg_proc procStruct)
@@ -460,8 +440,14 @@ plpython_error_callback(void *arg)
 	PLyExecutionContext *exec_ctx = (PLyExecutionContext *) arg;
 
 	if (exec_ctx->curr_proc)
-		errcontext("PL/Python function \"%s\"",
-				   PLy_procedure_name(exec_ctx->curr_proc));
+	{
+		if (exec_ctx->curr_proc->is_procedure)
+			errcontext("PL/Python procedure \"%s\"",
+					   PLy_procedure_name(exec_ctx->curr_proc));
+		else
+			errcontext("PL/Python function \"%s\"",
+					   PLy_procedure_name(exec_ctx->curr_proc));
+	}
 }
 
 static void
@@ -479,17 +465,32 @@ PLy_current_execution_context(void)
 	return PLy_execution_contexts;
 }
 
-static PLyExecutionContext *
-PLy_push_execution_context(void)
+MemoryContext
+PLy_get_scratch_context(PLyExecutionContext *context)
 {
-	PLyExecutionContext *context = PLy_malloc(sizeof(PLyExecutionContext));
+	/*
+	 * A scratch context might never be needed in a given plpython procedure,
+	 * so allocate it on first request.
+	 */
+	if (context->scratch_ctx == NULL)
+		context->scratch_ctx =
+			AllocSetContextCreate(TopTransactionContext,
+								  "PL/Python scratch context",
+								  ALLOCSET_DEFAULT_SIZES);
+	return context->scratch_ctx;
+}
 
+static PLyExecutionContext *
+PLy_push_execution_context(bool atomic_context)
+{
+	PLyExecutionContext *context;
+
+	/* Pick a memory context similar to what SPI uses. */
+	context = (PLyExecutionContext *)
+		MemoryContextAlloc(atomic_context ? TopTransactionContext : PortalContext,
+						   sizeof(PLyExecutionContext));
 	context->curr_proc = NULL;
-	context->scratch_ctx = AllocSetContextCreate(TopTransactionContext,
-												 "PL/Python scratch context",
-												 ALLOCSET_DEFAULT_MINSIZE,
-												 ALLOCSET_DEFAULT_INITSIZE,
-												 ALLOCSET_DEFAULT_MAXSIZE);
+	context->scratch_ctx = NULL;
 	context->next = PLy_execution_contexts;
 	PLy_execution_contexts = context;
 	return context;
@@ -505,6 +506,7 @@ PLy_pop_execution_context(void)
 
 	PLy_execution_contexts = context->next;
 
-	MemoryContextDelete(context->scratch_ctx);
-	PLy_free(context);
+	if (context->scratch_ctx)
+		MemoryContextDelete(context->scratch_ctx);
+	pfree(context);
 }

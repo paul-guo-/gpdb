@@ -3,7 +3,7 @@
  * test_rls_hooks.c
  *		Code for testing RLS hooks.
  *
- * Copyright (C) 2015, PostgreSQL Global Development Group
+ * Copyright (c) 2015-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *		src/test/modules/test_rls_hooks/test_rls_hooks.c
@@ -18,16 +18,17 @@
 
 #include "test_rls_hooks.h"
 
-#include <catalog/pg_type.h>
-#include <nodes/makefuncs.h>
-#include <nodes/makefuncs.h>
-#include <parser/parse_clause.h>
-#include <parser/parse_node.h>
-#include <parser/parse_relation.h>
-#include <rewrite/rowsecurity.h>
-#include <utils/acl.h>
-#include <utils/rel.h>
-#include <utils/relcache.h>
+#include "catalog/pg_type.h"
+#include "nodes/makefuncs.h"
+#include "nodes/makefuncs.h"
+#include "parser/parse_clause.h"
+#include "parser/parse_collate.h"
+#include "parser/parse_node.h"
+#include "parser/parse_relation.h"
+#include "rewrite/rowsecurity.h"
+#include "utils/acl.h"
+#include "utils/rel.h"
+#include "utils/relcache.h"
 
 PG_MODULE_MAGIC;
 
@@ -74,20 +75,19 @@ test_rls_hooks_permissive(CmdType cmdtype, Relation relation)
 	ParseState *qual_pstate;
 	RangeTblEntry *rte;
 
-	if (strcmp(RelationGetRelationName(relation), "rls_test_permissive")
-		&& strcmp(RelationGetRelationName(relation), "rls_test_both"))
+	if (strcmp(RelationGetRelationName(relation), "rls_test_permissive") != 0 &&
+		strcmp(RelationGetRelationName(relation), "rls_test_both") != 0)
 		return NIL;
 
 	qual_pstate = make_parsestate(NULL);
 
-	rte = addRangeTableEntryForRelation(qual_pstate, relation, NULL, false,
-										false);
+	rte = addRangeTableEntryForRelation(qual_pstate, relation, AccessShareLock,
+										NULL, false, false);
 	addRTEtoQuery(qual_pstate, rte, false, true, true);
 
 	role = ObjectIdGetDatum(ACL_ID_PUBLIC);
 
 	policy->policy_name = pstrdup("extension policy");
-	policy->policy_id = InvalidOid;
 	policy->polcmd = '*';
 	policy->roles = construct_array(&role, 1, OIDOID, sizeof(Oid), true, 'i');
 
@@ -106,8 +106,10 @@ test_rls_hooks_permissive(CmdType cmdtype, Relation relation)
 	e = (Node *) makeSimpleA_Expr(AEXPR_OP, "=", (Node *) n, (Node *) c, 0);
 
 	policy->qual = (Expr *) transformWhereClause(qual_pstate, copyObject(e),
-												 EXPR_KIND_WHERE,
+												 EXPR_KIND_POLICY,
 												 "POLICY");
+	/* Fix up collation information */
+	assign_expr_collations(qual_pstate, (Node *) policy->qual);
 
 	policy->with_check_qual = copyObject(policy->qual);
 	policy->hassublinks = false;
@@ -119,6 +121,11 @@ test_rls_hooks_permissive(CmdType cmdtype, Relation relation)
 
 /*
  * Return restrictive policies to be added
+ *
+ * Note that a permissive policy must exist or the default-deny policy
+ * will be included and nothing will be visible.  If no filtering should
+ * be done except for the restrictive policy, then a single "USING (true)"
+ * permissive policy can be used; see the regression tests.
  */
 List *
 test_rls_hooks_restrictive(CmdType cmdtype, Relation relation)
@@ -133,20 +140,19 @@ test_rls_hooks_restrictive(CmdType cmdtype, Relation relation)
 	RangeTblEntry *rte;
 
 
-	if (strcmp(RelationGetRelationName(relation), "rls_test_restrictive")
-		&& strcmp(RelationGetRelationName(relation), "rls_test_both"))
+	if (strcmp(RelationGetRelationName(relation), "rls_test_restrictive") != 0 &&
+		strcmp(RelationGetRelationName(relation), "rls_test_both") != 0)
 		return NIL;
 
 	qual_pstate = make_parsestate(NULL);
 
-	rte = addRangeTableEntryForRelation(qual_pstate, relation, NULL, false,
-										false);
+	rte = addRangeTableEntryForRelation(qual_pstate, relation, AccessShareLock,
+										NULL, false, false);
 	addRTEtoQuery(qual_pstate, rte, false, true, true);
 
 	role = ObjectIdGetDatum(ACL_ID_PUBLIC);
 
 	policy->policy_name = pstrdup("extension policy");
-	policy->policy_id = InvalidOid;
 	policy->polcmd = '*';
 	policy->roles = construct_array(&role, 1, OIDOID, sizeof(Oid), true, 'i');
 
@@ -160,8 +166,10 @@ test_rls_hooks_restrictive(CmdType cmdtype, Relation relation)
 	e = (Node *) makeSimpleA_Expr(AEXPR_OP, "=", (Node *) n, (Node *) c, 0);
 
 	policy->qual = (Expr *) transformWhereClause(qual_pstate, copyObject(e),
-												 EXPR_KIND_WHERE,
+												 EXPR_KIND_POLICY,
 												 "POLICY");
+	/* Fix up collation information */
+	assign_expr_collations(qual_pstate, (Node *) policy->qual);
 
 	policy->with_check_qual = copyObject(policy->qual);
 	policy->hassublinks = false;

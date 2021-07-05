@@ -18,7 +18,7 @@
  * be sure which distributed transaction we are looking at.
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -33,6 +33,7 @@
 #include "access/transam.h"
 #include "cdb/cdbtm.h"
 #include "cdb/cdbvars.h"
+#include "port/atomics.h"
 #include "storage/shmem.h"
 #include "utils/faultinjector.h"
 #include "utils/guc.h"
@@ -88,7 +89,7 @@ typedef struct DistributedLogShmem
 	 * distributed snapshot from the QD (or in the QD itself, whenever
 	 * we compute a new snapshot).
 	 */
-	TransactionId	oldestXmin;
+	volatile TransactionId	oldestXmin;
 
 } DistributedLogShmem;
 
@@ -144,7 +145,7 @@ DistributedLog_InitOldestXmin(void)
 		oldestXmin = xid;
 	}
 
-	DistributedLogShared->oldestXmin = oldestXmin;
+	pg_atomic_write_u32((pg_atomic_uint32 *)&DistributedLogShared->oldestXmin, oldestXmin);
 }
 /*
  * Advance the "oldest xmin" among distributed snapshots.
@@ -170,13 +171,13 @@ DistributedLog_InitOldestXmin(void)
  */
 TransactionId
 DistributedLog_AdvanceOldestXmin(TransactionId oldestLocalXmin,
-								 DistributedTransactionTimeStamp distribTransactionTimeStamp,
 								 DistributedTransactionId xminAllDistributedSnapshots)
 {
 	TransactionId oldestXmin;
 	TransactionId oldOldestXmin;
 	int			currPage;
 	int			slotno;
+	bool		DistributedLogControlLockHeldByMe = false;
 	DistributedLogEntry *entries = NULL;
 
 	Assert(!IS_QUERY_DISPATCHER());
@@ -192,8 +193,8 @@ DistributedLog_AdvanceOldestXmin(TransactionId oldestLocalXmin,
 #endif
 
 	LWLockAcquire(DistributedLogTruncateLock, LW_SHARED);
-	LWLockAcquire(DistributedLogControlLock, LW_EXCLUSIVE);
-	oldestXmin = oldOldestXmin = DistributedLogShared->oldestXmin;
+	oldestXmin = (TransactionId)pg_atomic_read_u32((pg_atomic_uint32 *)&DistributedLogShared->oldestXmin);
+	oldOldestXmin = oldestXmin;
 	Assert(oldestXmin != InvalidTransactionId);
 
 	/*
@@ -214,28 +215,68 @@ DistributedLog_AdvanceOldestXmin(TransactionId oldestLocalXmin,
 
 		if (page != currPage)
 		{
-			slotno = SimpleLruReadPage(DistributedLogCtl, page, true, oldestXmin);
+			/*
+			 * SimpleLruReadPage_ReadOnly will acquire a lwlock, it is the
+			 * caller's responsibility to release this lock.
+			 * But we cannot release the lock immediately in one run of the
+			 * loop, since the entries of current buffer will still be used
+			 * by other items in the same page.
+			 * So we release the lock when encountering a new page.
+			 */
+			if (DistributedLogControlLockHeldByMe)
+			{
+				Assert(LWLockHeldByMe(DistributedLogControlLock));
+				LWLockRelease(DistributedLogControlLock);
+			}
+			slotno = SimpleLruReadPage_ReadOnly(DistributedLogCtl, page, oldestXmin);
+			DistributedLogControlLockHeldByMe = true;
 			currPage = page;
+			/* entries is protected by the DistributedLogControl shared lock */
 			entries = (DistributedLogEntry *) DistributedLogCtl->shared->page_buffer[slotno];
 		}
 
 		ptr = &entries[entryno];
-
 		/*
 		 * If this XID is already visible to all distributed snapshots, we can
 		 * advance past it. Otherwise stop here. (Local-only transactions will
 		 * have zeros in distribXid and distribTimeStamp; this test will also
 		 * skip over those.)
+		 *
+		 * And the distributed xid is just a plain counter, so we just use the `>=` for
+		 * the comparison of gxid
 		 */
-		if (ptr->distribTimeStamp == distribTransactionTimeStamp &&
-			!TransactionIdPrecedes(ptr->distribXid, xminAllDistributedSnapshots))
+		if (ptr->distribXid >= xminAllDistributedSnapshots)
 			break;
 
 		TransactionIdAdvance(oldestXmin);
 	}
+	if (DistributedLogControlLockHeldByMe)
+	{
+		Assert(LWLockHeldByMe(DistributedLogControlLock));
+		LWLockRelease(DistributedLogControlLock);
+	}
 
-	DistributedLogShared->oldestXmin = oldestXmin;
-	LWLockRelease(DistributedLogControlLock);
+	/*
+	 * The shared oldestXmin (DistributedLogShared->oldestXmin) may be updated
+	 * concurrently. It should be set to a higher value, because a higher xmin
+	 * can belong to another distributed log segment, its older segments might
+	 * already be truncated.
+	 */
+	if (!TransactionIdEquals(oldOldestXmin, oldestXmin))
+	{
+		uint32 expected = (uint32)oldOldestXmin;
+
+		while (1)
+		{
+			if (pg_atomic_compare_exchange_u32((pg_atomic_uint32 *)&DistributedLogShared->oldestXmin, 
+											&expected, (uint32)oldestXmin))
+				break;
+
+			if (TransactionIdPrecedesOrEquals(oldestXmin, expected))
+				break;
+		}
+	}
+
 	LWLockRelease(DistributedLogTruncateLock);
 
 	if (TransactionIdToSegment(oldOldestXmin) < TransactionIdToSegment(oldestXmin))
@@ -251,7 +292,8 @@ TransactionId
 DistributedLog_GetOldestXmin(TransactionId oldestLocalXmin)
 {
 	TransactionId result;
-	result = DistributedLogShared->oldestXmin;
+
+	result = (TransactionId)pg_atomic_read_u32((pg_atomic_uint32 *)&DistributedLogShared->oldestXmin);
 
 	Assert(!IS_QUERY_DISPATCHER());
 	elogif(Debug_print_full_dtm, LOG, "distributed oldestXmin is '%u'", result);
@@ -276,7 +318,6 @@ static void
 DistributedLog_SetCommittedWithinAPage(
 	int                                 numLocIds,
 	TransactionId 						*localXid,
-	DistributedTransactionTimeStamp		distribTimeStamp,
 	DistributedTransactionId 			distribXid,
 	bool								isRedo)
 {
@@ -318,32 +359,27 @@ DistributedLog_SetCommittedWithinAPage(
 
 		int	entryno = TransactionIdToEntry(localXid[i]);
 
-		if (ptr[entryno].distribTimeStamp != 0 || ptr[entryno].distribXid != 0)
+		if (ptr[entryno].distribXid != 0)
 		{
-			if (ptr[entryno].distribTimeStamp != distribTimeStamp)
-				elog(ERROR,
-					 "Current distributed timestamp = %u does not match input timestamp = %u for local xid = %u in distributed log (page = %d, entryno = %d)",
-					 ptr[entryno].distribTimeStamp, distribTimeStamp,
-					 localXid[i], page, entryno);
-
 			if (ptr[entryno].distribXid != distribXid)
 				elog(ERROR,
-					 "Current distributed xid = %u does not match input distributed xid = %u for local xid = %u in distributed log (page = %d, entryno = %d)",
+					 "Current distributed xid = "UINT64_FORMAT" does not match"
+					 " input distributed xid = "UINT64_FORMAT" for "
+					 "local xid = %u in distributed log (page = %d, entryno = %d)",
 					 ptr[entryno].distribXid, distribXid, localXid[i], page, entryno);
 
 			alreadyThere = true;
 		}
 		else
 		{
-			ptr[entryno].distribTimeStamp = distribTimeStamp;
 			ptr[entryno].distribXid = distribXid;
 
 			DistributedLogCtl->shared->page_dirty[slotno] = true;
 		}
 
 		elog((Debug_print_full_dtm ? LOG : DEBUG5),
-			 "DistributedLog_SetCommitted with local xid = %d (page = %d, entryno = %d) and distributed transaction xid = %u (timestamp = %u) status = %s",
-			 localXid[i], page, entryno, distribXid, distribTimeStamp,
+			 "DistributedLog_SetCommitted with local xid = %d (page = %d, entryno = %d) and distributed transaction xid = "UINT64_FORMAT" status = %s",
+			 localXid[i], page, entryno, distribXid,
 			 (alreadyThere ? "already there" : "set"));
 	}
 
@@ -357,7 +393,6 @@ DistributedLog_SetCommittedWithinAPage(
  */
 static void
 DistributedLog_SetCommittedByPages(int nsubxids, TransactionId *subxids,
-								   DistributedTransactionTimeStamp distribTimeStamp,
 								   DistributedTransactionId distribXid,
 								   bool isRedo)
 {
@@ -377,7 +412,7 @@ DistributedLog_SetCommittedByPages(int nsubxids, TransactionId *subxids,
 		}
 
 		DistributedLog_SetCommittedWithinAPage(num_on_page, subxids + start_of_range,
-											   distribTimeStamp, distribXid, isRedo);
+											   distribXid, isRedo);
 	}
 }
 
@@ -387,19 +422,38 @@ DistributedLog_SetCommittedByPages(int nsubxids, TransactionId *subxids,
  */
 void
 DistributedLog_SetCommittedTree(TransactionId xid, int nxids, TransactionId *xids,
-								DistributedTransactionTimeStamp	distribTimeStamp,
 								DistributedTransactionId distribXid,
 								bool isRedo)
 {
 	if (!IS_QUERY_DISPATCHER())
 	{
-		DistributedLog_SetCommittedWithinAPage(1, &xid, distribTimeStamp,
-											   distribXid, isRedo);
+		DistributedLog_SetCommittedWithinAPage(1, &xid, distribXid, isRedo);
 
 		/* add entry for sub-transaction page at time */
-		DistributedLog_SetCommittedByPages(nxids, xids, distribTimeStamp,
-										   distribXid, isRedo);
+		DistributedLog_SetCommittedByPages(nxids, xids, distribXid, isRedo);
 	}
+}
+
+/*
+ * Get the corresponding distributed xid and timestamp of a local xid.
+ */
+void
+DistributedLog_GetDistributedXid(
+	TransactionId 						localXid,
+	DistributedTransactionId 			*distribXid)
+{
+	int			page = TransactionIdToPage(localXid);
+	int			entryno = TransactionIdToEntry(localXid);
+	int			slotno;
+	DistributedLogEntry *ptr;
+
+	Assert(!IS_QUERY_DISPATCHER());
+
+	slotno = SimpleLruReadPage_ReadOnly(DistributedLogCtl, page, localXid);
+	ptr = (DistributedLogEntry *) DistributedLogCtl->shared->page_buffer[slotno];
+	ptr += entryno;
+	*distribXid = ptr->distribXid;
+	LWLockRelease(DistributedLogControlLock);
 }
 
 /*
@@ -408,7 +462,6 @@ DistributedLog_SetCommittedTree(TransactionId xid, int nxids, TransactionId *xid
 bool
 DistributedLog_CommittedCheck(
 	TransactionId 						localXid,
-	DistributedTransactionTimeStamp		*distribTimeStamp,
 	DistributedTransactionId 			*distribXid)
 {
 	int			page = TransactionIdToPage(localXid);
@@ -420,51 +473,34 @@ DistributedLog_CommittedCheck(
 	DistributedLogEntry *ptr;
 	TransactionId oldestXmin;
 
-	LWLockAcquire(DistributedLogTruncateLock, LW_SHARED);
-	LWLockAcquire(DistributedLogControlLock, LW_EXCLUSIVE);
 
-	oldestXmin = DistributedLogShared->oldestXmin;
+	oldestXmin = (TransactionId)pg_atomic_read_u32((pg_atomic_uint32 *)&DistributedLogShared->oldestXmin);
 	if (oldestXmin == InvalidTransactionId)
 		elog(PANIC, "DistributedLog's OldestXmin not initialized yet");
 
 	if (TransactionIdPrecedes(localXid, oldestXmin))
 	{
-		LWLockRelease(DistributedLogControlLock);
-		LWLockRelease(DistributedLogTruncateLock);
-
-		*distribTimeStamp = 0;	// Set it to something.
 		*distribXid = 0;
 		return false;
 	}
 
-	slotno = SimpleLruReadPage(DistributedLogCtl, page, true, localXid);
+	LWLockAcquire(DistributedLogTruncateLock, LW_SHARED);
+	slotno = SimpleLruReadPage_ReadOnly(DistributedLogCtl, page, localXid);
 	ptr = (DistributedLogEntry *) DistributedLogCtl->shared->page_buffer[slotno];
 	ptr += entryno;
-	*distribTimeStamp = ptr->distribTimeStamp;
 	*distribXid = ptr->distribXid;
 	ptr = NULL;
 	LWLockRelease(DistributedLogControlLock);
 	LWLockRelease(DistributedLogTruncateLock);
 
-	if (*distribTimeStamp != 0 && *distribXid != 0)
+	if (*distribXid != 0)
 	{
 		return true;
 	}
-	else if (*distribTimeStamp == 0 && *distribXid == 0)
+	else
 	{
 		// Not found.
 		return false;
-	}
-	else
-	{
-		if (*distribTimeStamp == 0)
-			elog(ERROR, "Found zero timestamp for local xid = %u in distributed log (distributed xid = %u, page = %d, entryno = %d)",
-			     localXid, *distribXid, page, entryno);
-
-		elog(ERROR, "Found zero distributed xid for local xid = %u in distributed log (dtx start time = %u, page = %d, entryno = %d)",
-			     localXid, *distribTimeStamp, page, entryno);
-
-		return false;	// We'll never reach here.
 	}
 }
 
@@ -475,7 +511,6 @@ DistributedLog_CommittedCheck(
 bool
 DistributedLog_ScanForPrevCommitted(
 	TransactionId 						*indexXid,
-	DistributedTransactionTimeStamp 	*distribTimeStamp,
 	DistributedTransactionId 			*distribXid)
 {
 	TransactionId highXid;
@@ -484,7 +519,6 @@ DistributedLog_ScanForPrevCommitted(
 	int slotno;
 	TransactionId xid;
 
-	*distribTimeStamp = 0;	// Set it to something.
 	*distribXid = 0;
 
 	if ((*indexXid) == InvalidTransactionId)
@@ -514,7 +548,6 @@ DistributedLog_ScanForPrevCommitted(
 			LWLockRelease(DistributedLogControlLock);
 
 			*indexXid = InvalidTransactionId;
-			*distribTimeStamp = 0;	// Set it to something.
 			*distribXid = 0;
 			return false;
 		}
@@ -529,10 +562,9 @@ DistributedLog_ScanForPrevCommitted(
 			ptr = (DistributedLogEntry *) DistributedLogCtl->shared->page_buffer[slotno];
 			ptr += entryno;
 
-			if (ptr->distribTimeStamp != 0 && ptr->distribXid != 0)
+			if (ptr->distribXid != 0)
 			{
 				*indexXid = xid;
-				*distribTimeStamp = ptr->distribTimeStamp;
 				*distribXid = ptr->distribXid;
 				LWLockRelease(DistributedLogControlLock);
 
@@ -545,7 +577,6 @@ DistributedLog_ScanForPrevCommitted(
 		if (lowXid == FirstNormalTransactionId)
 		{
 			*indexXid = InvalidTransactionId;
-			*distribTimeStamp = 0;	// Set it to something.
 			*distribXid = 0;
 			return false;
 		}
@@ -563,6 +594,33 @@ DistributedLog_SharedShmemSize(void)
 }
 
 /*
+ * Number of shared Distributed Log buffers.
+ *
+ * On larger multi-processor systems, it is possible to have many distributed
+ * log page requests in flight at one time which could lead to disk access for
+ * distributed log page if the required page is not found in memory.  Testing
+ * revealed that we can get the best performance by having 128 distributed log
+ * buffers, more than that it doesn't improve performance.
+ *
+ * Unconditionally keeping the number of distributed log buffers to 128 did
+ * not seem like a good idea, because it would increase the minimum amount of
+ * shared memory required to start, which could be a problem for people
+ * running very small configurations.  The following formula seems to
+ * represent a reasonable compromise: people with very low values for
+ * shared_buffers will get fewer distributed log buffers as well, and everyone
+ * else will get 128.
+ *
+ * This logic is exactly same as used for CLOG buffers. Except the minimum
+ * used for CLOG buffers is 4 whereas we use 8 here, as that was the previous
+ * default and hence lets be conservative and not go below that number.
+ */
+Size
+DistributedLog_ShmemBuffers(void)
+{
+	return Min(128, Max(8, NBuffers / 512));
+}
+
+/*
  * Initialization of shared memory for the distributed log.
  */
 Size
@@ -576,7 +634,7 @@ DistributedLog_ShmemSize(void)
 	}
 	else
 	{
-		size = SimpleLruShmemSize(NUM_DISTRIBUTEDLOG_BUFFERS, 0);
+		size = SimpleLruShmemSize(DistributedLog_ShmemBuffers(), 0);
 		size += DistributedLog_SharedShmemSize();
 	}
 
@@ -593,8 +651,9 @@ DistributedLog_ShmemInit(void)
 
 	/* Set up SLRU for the distributed log. */
 	DistributedLogCtl->PagePrecedes = DistributedLog_PagePrecedes;
-	SimpleLruInit(DistributedLogCtl, "DistributedLogCtl", NUM_DISTRIBUTEDLOG_BUFFERS, 0,
-				  DistributedLogControlLock, "pg_distributedlog");
+	SimpleLruInit(DistributedLogCtl, "DistributedLogCtl", DistributedLog_ShmemBuffers(), 0,
+				  DistributedLogControlLock, "pg_distributedlog",
+				  LWTRANCHE_DISTRIBUTEDLOG_BUFFERS);
 
 	/* Create or attach to the shared structure */
 	DistributedLogShared =

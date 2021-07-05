@@ -4,7 +4,7 @@
  *      gpdb compression utilities.
  *
  * Portions Copyright (c) 2009, Greenplum Inc.
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -16,7 +16,7 @@
 #ifndef GP_COMPRESS_H
 #define GP_COMPRESS_H
 
-#ifdef HAVE_LIBZSTD
+#ifdef USE_ZSTD
 #include "zstd.h"
 #endif
 
@@ -54,16 +54,19 @@ extern void gp_decompress(
  * To use:
  *
  * zstd_context *ctx = call zstd_alloc_context();
+ *
  * ctx->cctx = ZSTD_createCCtx();
+ * if (!ctx->cctx)
+ *     elog(ERROR, "out of memory");
  *
  * <use the context using normal ZSTD functions>
  *
- * zsd_free_context(ctx);
+ * zstd_free_context(ctx);
  *
  * If the transaction is aborted, the handle will be automatically closed,
  * when the resource owner is destroyed.
  */
-#ifdef HAVE_LIBZSTD
+#ifdef USE_ZSTD
 
 typedef struct
 {
@@ -77,7 +80,7 @@ typedef struct
 extern void zstd_free_context(zstd_context *context);
 extern zstd_context *zstd_alloc_context(void);
 
-#endif	/* HAVE_LIBZSTD */
+#endif	/* USE_ZSTD */
 
 
 #endif

@@ -17,7 +17,7 @@ partition by range (f2)
 CREATE TABLE TIMESTAMP_MONTH_rangep_STARTEXCL (i1 int, f2 timestamp)
 partition by range (f2)
 (
-  start ('2000-01-01'::timestamp) EXCLUSIVE
+  start ('2000-01-02'::timestamp)
   end (date '2001-01-01'::timestamp) INCLUSIVE
   every ('1 month'::interval)
 );
@@ -98,7 +98,6 @@ SELECT * FROM TIMESTAMP_MONTH_listp WHERE f2 = '2000-01-03';
 SELECT * FROM TIMESTAMP_MONTH_listp WHERE f2 = TO_TIMESTAMP('2000-01-03', 'YYYY-MM-DD');
 SELECT * FROM TIMESTAMP_MONTH_listp WHERE f2 = TO_DATE('2000-01-03', 'YYYY-MM-DD');
 
-
 --
 -- Data Engineer can see partition key in psql
 --
@@ -107,11 +106,11 @@ SELECT * FROM TIMESTAMP_MONTH_listp WHERE f2 = TO_DATE('2000-01-03', 'YYYY-MM-DD
 CREATE TABLE T26002_T1 (empid int, departmentid int, year int, region varchar(20))
 DISTRIBUTED BY (empid)
   PARTITION BY RANGE (year)
-  SUBPARTITION BY LIST (region, departmentid)
+  SUBPARTITION BY LIST (region)
     SUBPARTITION TEMPLATE (
-       SUBPARTITION usa VALUES (('usa', 1)),
-       SUBPARTITION europe VALUES (('europe', 2)),
-       SUBPARTITION asia VALUES (('asia', 3)),
+       SUBPARTITION usa VALUES (('usa')),
+       SUBPARTITION europe VALUES (('europe')),
+       SUBPARTITION asia VALUES (('asia')),
        DEFAULT SUBPARTITION other_regions)
 ( START (2012) END (2015) EVERY (3),
   DEFAULT PARTITION outlying_years);
@@ -270,7 +269,7 @@ alter table mpp3263 add column AAA int;
 alter table mpp3263 add column BBB int;
 alter table mpp3263 drop column BBB;
 
-alter table mpp3263 drop partition;
+alter table mpp3263 drop partition for (0);
 
 alter table mpp3263 add column CCC int;
 
@@ -328,7 +327,7 @@ alter table mpp3542_0000000000111111111122222222223333333333444444444455555 rena
 alter table  mpp3542_0000000000111111111122222222223333333333444444444455555 rename to m; 
 
 create table mpp3466 (i int) partition by range(i) (start(1) end(10) every(2), default partition f);
-alter table mpp3466 split partition f at (3) into (partition f, partition new);
+alter table mpp3466 split partition f at (3) into (partition f, partition new1);
 drop table mpp3466;
 create table mpp3058 (a char(1), b date, d char(3))       
  distributed by (a)         
@@ -429,9 +428,10 @@ alter table mpp3607 add partition bb end (0); -- Expected Overlaps
 alter table mpp3607 drop partition aa;
 
 alter table mpp3607 add partition aa end (-4); -- partition rule aa < -4, foo >=2
-alter table mpp3607 add partition bb end (-3); -- Overlaps
+alter table mpp3607 add partition bb end (-3); -- will not overlap
 
 alter table mpp3607 drop partition aa;
+alter table mpp3607 drop partition bb;
 
 alter table mpp3607 add partition aa end (0); -- partition rule aa < 0, foo >=2
 alter table mpp3607 drop partition aa;
@@ -463,7 +463,7 @@ partition b values(5, 6, 7, 8), default partition default_part);
 insert into mpp3671 select i from generate_series(1, 10) i;
 alter table mpp3671 split partition for(1) at (1,2) into (partition f1a, partition f1b);
 drop table mpp3671;
-create table mpp3639 (i int) partition by range(i) (start(0) exclusive end(100) inclusive every(10));
+create table mpp3639 (i int) partition by range(i) (start(1) end(100) inclusive every(10));
 insert into mpp3639 select i from generate_series(1, 100) i;
 insert into mpp3639 select i from generate_series(1, 100) i;
 insert into mpp3639 select i from generate_series(1, 100) i;
@@ -539,7 +539,7 @@ create table mpp3512a (like mpp3512_part);
 
 \d mpp3512
 \d mpp3512a
-select * from pg_partitions where tablename='mpp3512_part';
+select relid,parentrelid,isleaf,level, pg_catalog.pg_get_expr(relpartbound, oid) from pg_partition_tree('mpp3512_part'), pg_class where relid = oid;
 
 drop table mpp3512;
 drop table mpp3512_part;
@@ -614,13 +614,6 @@ create table mpp3754b ( i int, d date, constraint prim_tr primary key (d)) parti
 
 drop table mpp3754a;
 drop table mpp3754b;
-
-create table mpp4172 (a char(1), b int)
-distributed by (b)
-partition by range(a)
-(
-partition aa start ('2006') end ('2009'), partition bb start ('2007') end ('2008')
-);
 
 CREATE TABLE mpp4582 (id int,
 mpp4582 int, year date, gender char(1))
@@ -1213,13 +1206,14 @@ ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE (|);
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE (~);
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE (`);
 
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 
 set client_min_messages='warning';
 drop schema qa147 cascade;
 reset client_min_messages;
 
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid, level, template from gp_partition_template where not exists (select oid from pg_class where oid = relid);
+
 -- Mix-Match for Alter subpartition template
 CREATE TABLE qa147sales (trans_id int, date date, amount 
 decimal(9,2), region text)  
@@ -1236,29 +1230,29 @@ SUBPARTITION TEMPLATE
 
 -- Clear TEMPLATE
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE ();
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- This will overwrite previous subpartition template
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usa VALUES ('usa'), SUBPARTITION asia VALUES ('asia') );
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Invalid subpartition
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2008-02-01') EXCLUSIVE );
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2009-01-01') EXCLUSIVE EVERY (INTERVAL '1 month') );
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( 
 SUBPARTITION usa1 VALUES('usa'),
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE);
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( 
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE,
 SUBPARTITION usa1 VALUES('usa'));
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 
 drop table qa147sales;
 
@@ -1278,33 +1272,33 @@ SUBPARTITION TEMPLATE
 
 -- Clear TEMPLATE
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE ();
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- This will overwrite previous subpartition template
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2008-02-01') EXCLUSIVE );
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2009-01-01') EXCLUSIVE EVERY (INTERVAL '1 month') );
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Invalid subpartition template
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usa VALUES ('usa'), SUBPARTITION asia VALUES ('asia') );
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 (
 SUBPARTITION usa1 VALUES('usa'),
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE);
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147sales SET SUBPARTITION TEMPLATE
 ( 
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE,
 SUBPARTITION usa1 VALUES('usa'));
-select * from pg_partition_templates where tablename='qa147sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147sales'::regclass;
 
 drop table qa147sales;
-select * from pg_partition_templates where tablename='qa147sales';
+select relid, level, template from gp_partition_template where not exists (select oid from pg_class where oid = relid);
 
 -- Now with Schema
 -- Mix-Match for Alter subpartition template in a schema
@@ -1324,32 +1318,32 @@ SUBPARTITION TEMPLATE
 
 -- Clear TEMPLATE
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE ();
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- This will overwrite previous subpartition template
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usa VALUES ('usa'), SUBPARTITION asia VALUES ('asia') );
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Invalid subpartition
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2008-02-01') EXCLUSIVE );
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2009-01-01') EXCLUSIVE EVERY (INTERVAL '1 month') );
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 (
 SUBPARTITION usa1 VALUES('usa'),
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE);
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 (
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE,
 SUBPARTITION usa1 VALUES('usa'));
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 
 DROP SCHEMA qa147 cascade;
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid, level, template from gp_partition_template where not exists (select oid from pg_class where oid = relid);
 
 CREATE SCHEMA qa147;
 CREATE TABLE qa147.sales (trans_id int, date date, amount
@@ -1368,33 +1362,33 @@ SUBPARTITION TEMPLATE
 
 -- Clear TEMPLATE
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE ();
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- This will overwrite previous subpartition template
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2008-02-01') EXCLUSIVE );
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usam1 start (date '2008-01-01') INCLUSIVE END (date '2009-01-01') EXCLUSIVE EVERY (INTERVAL '1 month') );
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Invalid subpartition template
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 ( SUBPARTITION usa VALUES ('usa'), SUBPARTITION asia VALUES ('asia') );
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 (
 SUBPARTITION usa1 VALUES('usa'),
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE);
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 -- Mix and Match RANGE/LIST . Expect to Error
 ALTER TABLE qa147.sales SET SUBPARTITION TEMPLATE
 (
 SUBPARTITION usadate start (date '2008-01-01') INCLUSIVE END(date '2009-01-01') EXCLUSIVE,
 SUBPARTITION usa1 VALUES('usa'));
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid::regclass, level, template from gp_partition_template where relid = 'qa147.sales'::regclass;
 
 drop schema qa147 cascade;
-select * from pg_partition_templates where schemaname='qa147' and tablename='sales';
+select relid, level, template from gp_partition_template where not exists (select oid from pg_class where oid = relid);
 set gp_autostats_mode=on_change;
 set gp_autostats_on_change_threshold=100;
 
@@ -1423,9 +1417,9 @@ drop table mpp5427;
 -- MPP-5524
 create table mpp5524 (a int, b int, c int, d int) partition by range(d) (start(1) end(20) every(5));
 -- Not allowed
-alter table mpp5524 alter partition for(rank(1)) set distributed by (b);
+alter table mpp5524 alter partition for (1) set distributed by (b);
 -- Not allowed
-alter table mpp5524 alter partition for(rank(2)) set distributed by (c);
+alter table mpp5524 alter partition for (2) set distributed by (c);
 insert into mpp5524 select i, i+1, i+2, i+3 from generate_series(1, 10) i;
 drop table mpp5524;
 
@@ -1436,14 +1430,13 @@ alter table fff_main_1_prt_1 drop oids;
 alter table fff_main_1_prt_1 no inherit fff_main;
 alter table fff_main_1_prt_1 drop column rank;
 alter table fff_main_1_prt_1 add partition;
-alter table fff_main_1_prt_1 drop partition;
+alter table fff_main_1_prt_1 drop partition for (0);
 
 alter table fff_main_1_prt_1 add column c int;
 
 create table fff_main2 (like fff_main);
 alter table fff_main_1_prt_1 inherit fff_main2;
 alter table fff_main_1_prt_1 alter column i type bigint;
-alter table fff_main_1_prt_1 set without oids;
 alter table fff_main_1_prt_1 drop constraint fff_main_1_prt_1_check;
 
 -- Add default partition
@@ -1452,7 +1445,7 @@ alter table fff_main add default partition def;
 alter table fff_main_1_prt_1 split partition def at ('2009');
 
 -- Unable to coalesce or merge, not supported
-alter table fff_main_1_prt_1 exchange partition aa  with table fff_main_1_prt_2 without validation;
+alter table fff_main_1_prt_1 exchange partition aa  with table fff_main_1_prt_2;
 
 alter table fff_main add partition aa start ('2008') end ('2009');
 alter table fff_main add partition bb start ('2009') end ('2010');
@@ -1480,7 +1473,7 @@ alter table partsupp_def set subpartition template( subpartition aaa start(400) 
 -- Note 2: We do not support this function yet, but if we are able to split default partition with default subpartition, would we
 -- be using the subpartition template to definte the "new" partition or the existing one.
 
-select * from pg_partition_templates where tablename='partsupp_def';
+select relid::regclass, level, template from gp_partition_template where relid = 'partsupp_def'::regclass;
 
 alter table partsup_def add partition f1 start(0) end (300) every(100);
 
@@ -1500,7 +1493,7 @@ subpartition template
 alter table partsupp_def2 set subpartition template();
 alter table partsupp_def2 set subpartition template( subpartition aaa start(400) end (600) every(100) );
 
-select * from pg_partition_templates where tablename='partsupp_def2';
+select relid::regclass, level, template from gp_partition_template where relid = 'partsupp_def2'::regclass;
 
 drop table partsupp_def;
 drop table partsupp_def2;
@@ -1624,9 +1617,7 @@ drop table partition_cleanup1;
 drop schema partition_999 cascade;
 
 -- These should be empty
-select 'pg_partition_columns', count(*) from pg_partition_columns where tablename='partition_cleanup%';
-select 'pg_partitions', count(*) from pg_partitions where tablename='partition_cleanup%';
-select 'pg_partition_templates', count(*) from pg_partition_templates where tablename='partition_cleanup%';
+select relid, level, template from gp_partition_template where not exists (select oid from pg_class where oid = relid);
 
 
 --
@@ -1657,6 +1648,24 @@ left join pg_roles on pg_roles.oid = pg_shdepend.refobjid
 where classid = 'pg_class'::regclass and objid::regclass::text like 'part_acl_test%'
 and datname = current_database();
 
+-- Validate, using GrantStmt from cached plan in function works
+-- fine. Using partition table is added spice to this validation as
+-- for partition tables need to perform parent to all child partition
+-- lookup on QD before dispatching the command to segments. There used
+-- to bug where functions cached plan was scribbled during this
+-- process.
+CREATE TABLE grant_test (f1 int) PARTITION BY RANGE (f1) (START (2018) END (2020) EVERY (1), DEFAULT PARTITION extra);
+CREATE FUNCTION grant_table_in_function() RETURNS void AS
+$$
+BEGIN
+    GRANT ALL ON TABLE grant_test TO part_acl_u1;
+END;
+$$ VOLATILE LANGUAGE plpgsql;
+
+SELECT grant_table_in_function();
+-- calling it second time in same session should use cached plan for
+-- GrantStmt
+SELECT grant_table_in_function();
 
 -- CLEANUP
 -- start_ignore

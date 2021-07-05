@@ -4,7 +4,7 @@
  *	  GPDB resource manager code.
  *
  * Portions Copyright (c) 2006-2017, Greenplum inc.
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -24,6 +24,7 @@
 #include "utils/guc.h"
 #include "utils/resource_manager.h"
 #include "utils/resgroup-ops.h"
+#include "utils/session_state.h"
 
 /*
  * GUC variables.
@@ -96,4 +97,9 @@ InitResManager(void)
 	{
 		SPI_InitMemoryReservation();
 	}
+
+	if (MySessionState &&
+		!IsBackgroundWorker &&
+		(Gp_role == GP_ROLE_DISPATCH || Gp_role == GP_ROLE_EXECUTE))
+		GPMemoryProtect_TrackStartupMemory();
 }

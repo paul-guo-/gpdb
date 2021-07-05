@@ -5,8 +5,8 @@
  *	  ("VALUES (...), (...), ..." in rangetable).
  *
  * Portions Copyright (c) 2006-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -25,11 +25,12 @@
  */
 #include "postgres.h"
 
-#include "cdb/cdbvars.h"
 #include "executor/executor.h"
 #include "executor/nodeValuesscan.h"
-#include "optimizer/var.h"              /* CDB: contain_var_reference() */
-#include "parser/parsetree.h"
+#include "jit/jit.h"
+#include "utils/expandeddatum.h"
+
+#include "cdb/cdbvars.h"
 
 
 static TupleTableSlot *ValuesNext(ValuesScanState *node);
@@ -102,6 +103,7 @@ ValuesNext(ValuesScanState *node)
 		bool	   *isnull;
 		ListCell   *lc;
 		int			resind;
+		int			saved_jit_flags;
 
 		/*
 		 * Get rid of any prior cycle's leftovers.  We use ReScanExprContext
@@ -132,7 +134,15 @@ ValuesNext(ValuesScanState *node)
 		oldsubplans = node->ss.ps.subPlan;
 		node->ss.ps.subPlan = NIL;
 
-		exprstatelist = (List *) ExecInitExpr((Expr *) exprlist, &node->ss.ps);
+		/*
+		 * As the expressions are only ever used once, disable JIT for them.
+		 * This is worthwhile because it's common to insert significant
+		 * amounts of data via VALUES().
+		 */
+		saved_jit_flags = econtext->ecxt_estate->es_jit_flags;
+		econtext->ecxt_estate->es_jit_flags = PGJIT_NONE;
+		exprstatelist = ExecInitExprList(exprlist, &node->ss.ps);
+		econtext->ecxt_estate->es_jit_flags = saved_jit_flags;
 
 		node->ss.ps.subPlan = oldsubplans;
 
@@ -143,19 +153,30 @@ ValuesNext(ValuesScanState *node)
 		 * Compute the expressions and build a virtual result tuple. We
 		 * already did ExecClearTuple(slot).
 		 */
-		ExecClearTuple(slot); 
-		values = slot_get_values(slot); 
-		isnull = slot_get_isnull(slot);
+		values = slot->tts_values;
+		isnull = slot->tts_isnull;
 
 		resind = 0;
 		foreach(lc, exprstatelist)
 		{
 			ExprState  *estate = (ExprState *) lfirst(lc);
+			Form_pg_attribute attr = TupleDescAttr(slot->tts_tupleDescriptor,
+												   resind);
 
 			values[resind] = ExecEvalExpr(estate,
 										  econtext,
-										  &isnull[resind],
-										  NULL);
+										  &isnull[resind]);
+
+			/*
+			 * We must force any R/W expanded datums to read-only state, in
+			 * case they are multiply referenced in the plan node's output
+			 * expressions, or in case we skip the output projection and the
+			 * output column is multiply referenced in higher plan nodes.
+			 */
+			values[resind] = MakeExpandedObjectReadOnly(values[resind],
+														isnull[resind],
+														attr->attlen);
+
 			resind++;
 		}
 
@@ -165,15 +186,6 @@ ValuesNext(ValuesScanState *node)
 		 * And return the virtual tuple.
 		 */
 		ExecStoreVirtualTuple(slot);
-
-        /* CDB: Label each row with a synthetic ctid for subquery dedup. */
-        if (node->cdb_want_ctid)
-        {
-            HeapTuple   tuple = ExecFetchSlotHeapTuple(slot); 
-
-            ItemPointerSet(&tuple->t_self, node->curr_idx >> 16,
-                           (OffsetNumber)node->curr_idx);
-        }
 	}
 
 	return slot;
@@ -198,9 +210,11 @@ ValuesRecheck(ValuesScanState *node, TupleTableSlot *slot)
  *		access method functions.
  * ----------------------------------------------------------------
  */
-TupleTableSlot *
-ExecValuesScan(ValuesScanState *node)
+static TupleTableSlot *
+ExecValuesScan(PlanState *pstate)
 {
+	ValuesScanState *node = castNode(ValuesScanState, pstate);
+
 	return ExecScan(&node->ss,
 					(ExecScanAccessMtd) ValuesNext,
 					(ExecScanRecheckMtd) ValuesRecheck);
@@ -231,6 +245,7 @@ ExecInitValuesScan(ValuesScan *node, EState *estate, int eflags)
 	scanstate = makeNode(ValuesScanState);
 	scanstate->ss.ps.plan = (Plan *) node;
 	scanstate->ss.ps.state = estate;
+	scanstate->ss.ps.ExecProcNode = ExecValuesScan;
 
 	/*
 	 * Miscellaneous initialization
@@ -247,30 +262,22 @@ ExecInitValuesScan(ValuesScan *node, EState *estate, int eflags)
 	ExecAssignExprContext(estate, planstate);
 
 	/*
-	 * tuple table initialization
+	 * Get info about values list, initialize scan slot with it.
 	 */
-	ExecInitResultTupleSlot(estate, &scanstate->ss.ps);
-	ExecInitScanTupleSlot(estate, &scanstate->ss);
+	tupdesc = ExecTypeFromExprList((List *) linitial(node->values_lists));
+	ExecInitScanTupleSlot(estate, &scanstate->ss, tupdesc, &TTSOpsVirtual);
+
+	/*
+	 * Initialize result type and projection.
+	 */
+	ExecInitResultTypeTL(&scanstate->ss.ps);
+	ExecAssignScanProjectionInfo(&scanstate->ss);
 
 	/*
 	 * initialize child expressions
 	 */
-	scanstate->ss.ps.targetlist = (List *)
-		ExecInitExpr((Expr *) node->scan.plan.targetlist,
-					 (PlanState *) scanstate);
-	scanstate->ss.ps.qual = (List *)
-		ExecInitExpr((Expr *) node->scan.plan.qual,
-					 (PlanState *) scanstate);
-
-	/* Check if targetlist or qual contains a var node referencing the ctid column */
-	scanstate->cdb_want_ctid = contain_ctid_var_reference(&node->scan);
-
-	/*
-	 * get info about values list
-	 */
-	tupdesc = ExecTypeFromExprList((List *) linitial(node->values_lists));
-
-	ExecAssignScanType(&scanstate->ss, tupdesc);
+	scanstate->ss.ps.qual =
+		ExecInitQual(node->scan.plan.qual, (PlanState *) scanstate);
 
 	/*
 	 * Other node-specific setup
@@ -286,12 +293,6 @@ ExecInitValuesScan(ValuesScan *node, EState *estate, int eflags)
 	{
 		scanstate->exprlists[i++] = (List *) lfirst(vtl);
 	}
-
-	/*
-	 * Initialize result tuple type and projection info.
-	 */
-	ExecAssignResultTypeFromTL(&scanstate->ss.ps);
-	ExecAssignScanProjectionInfo(&scanstate->ss);
 
 	return scanstate;
 }
@@ -315,10 +316,9 @@ ExecEndValuesScan(ValuesScanState *node)
 	/*
 	 * clean out the tuple table
 	 */
-	ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
+	if (node->ss.ps.ps_ResultTupleSlot)
+		ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
 	ExecClearTuple(node->ss.ss_ScanTupleSlot);
-
-	EndPlanStateGpmonPkt(&node->ss.ps);
 }
 
 /* ----------------------------------------------------------------
@@ -330,7 +330,8 @@ ExecEndValuesScan(ValuesScanState *node)
 void
 ExecReScanValuesScan(ValuesScanState *node)
 {
-	ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
+	if (node->ss.ps.ps_ResultTupleSlot)
+		ExecClearTuple(node->ss.ps.ps_ResultTupleSlot);
 
 	ExecScanReScan(&node->ss);
 

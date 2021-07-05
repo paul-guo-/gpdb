@@ -1,7 +1,8 @@
 Parsed test spec with 2 sessions
 
-starting permutation: s1 at1 sc1 s2 at2 sc2 rx1 wx rx1 c2
+starting permutation: s1 at1 sc1 s2 at2 sc2 rx1 wx rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -12,7 +13,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -20,8 +21,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 at2 rx1 sc2 wx rx1 c2
+starting permutation: s1 at1 sc1 s2 at2 rx1 sc2 wx rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -32,7 +34,7 @@ a_id
 1              
 step sc2: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -40,8 +42,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 at2 rx1 wx sc2 rx1 c2
+starting permutation: s1 at1 sc1 s2 at2 rx1 wx sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -52,7 +55,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -60,8 +63,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 at2 rx1 wx rx1 sc2 c2
+starting permutation: s1 at1 sc1 s2 at2 rx1 wx rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -71,7 +75,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -80,8 +84,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 at2 rx1 wx rx1 c2 sc2
+starting permutation: s1 at1 sc1 s2 at2 rx1 wx rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -91,7 +96,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -100,8 +105,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 at2 sc2 wx rx1 c2
+starting permutation: s1 at1 sc1 s2 rx1 at2 sc2 wx rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -112,7 +118,7 @@ a_id
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -120,8 +126,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 at2 wx sc2 rx1 c2
+starting permutation: s1 at1 sc1 s2 rx1 at2 wx sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -132,7 +139,7 @@ a_id
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -140,8 +147,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 at2 wx rx1 sc2 c2
+starting permutation: s1 at1 sc1 s2 rx1 at2 wx rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -151,7 +159,7 @@ a_id
 1              
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -160,8 +168,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 at2 wx rx1 c2 sc2
+starting permutation: s1 at1 sc1 s2 rx1 at2 wx rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -171,7 +180,7 @@ a_id
 1              
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -180,8 +189,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx at2 sc2 rx1 c2
+starting permutation: s1 at1 sc1 s2 rx1 wx at2 sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -192,7 +202,7 @@ a_id
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -200,8 +210,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx at2 rx1 sc2 c2
+starting permutation: s1 at1 sc1 s2 rx1 wx at2 rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -211,7 +222,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -220,8 +231,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx at2 rx1 c2 sc2
+starting permutation: s1 at1 sc1 s2 rx1 wx at2 rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -231,7 +243,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -240,8 +252,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx rx1 at2 sc2 c2
+starting permutation: s1 at1 sc1 s2 rx1 wx rx3 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -250,7 +263,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -260,8 +273,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx rx1 at2 c2 sc2
+starting permutation: s1 at1 sc1 s2 rx1 wx rx3 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -270,7 +284,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -280,8 +294,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 s2 rx1 wx rx1 c2 at2 sc2
+starting permutation: s1 at1 sc1 s2 rx1 wx rx3 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
@@ -290,7 +305,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -300,8 +315,9 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 at2 sc2 wx rx1 c2
+starting permutation: s1 at1 sc1 rx1 s2 at2 sc2 wx rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -312,7 +328,7 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -320,8 +336,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 at2 wx sc2 rx1 c2
+starting permutation: s1 at1 sc1 rx1 s2 at2 wx sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -332,7 +349,7 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -340,8 +357,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 at2 wx rx1 sc2 c2
+starting permutation: s1 at1 sc1 rx1 s2 at2 wx rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -351,7 +369,7 @@ a_id
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -360,8 +378,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 at2 wx rx1 c2 sc2
+starting permutation: s1 at1 sc1 rx1 s2 at2 wx rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -371,7 +390,7 @@ a_id
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -380,8 +399,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx at2 sc2 rx1 c2
+starting permutation: s1 at1 sc1 rx1 s2 wx at2 sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -392,7 +412,7 @@ step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -400,8 +420,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx at2 rx1 sc2 c2
+starting permutation: s1 at1 sc1 rx1 s2 wx at2 rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -411,7 +432,7 @@ a_id
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -420,8 +441,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx at2 rx1 c2 sc2
+starting permutation: s1 at1 sc1 rx1 s2 wx at2 rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -431,7 +453,7 @@ a_id
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -440,8 +462,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx rx1 at2 sc2 c2
+starting permutation: s1 at1 sc1 rx1 s2 wx rx3 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -450,7 +473,7 @@ a_id
 1              
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -460,8 +483,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx rx1 at2 c2 sc2
+starting permutation: s1 at1 sc1 rx1 s2 wx rx3 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -470,7 +494,7 @@ a_id
 1              
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -480,8 +504,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 s2 wx rx1 c2 at2 sc2
+starting permutation: s1 at1 sc1 rx1 s2 wx rx3 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -490,7 +515,7 @@ a_id
 1              
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -500,8 +525,9 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 at2 sc2 rx1 c2
+starting permutation: s1 at1 sc1 rx1 wx s2 at2 sc2 rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -512,7 +538,7 @@ step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -520,8 +546,9 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 at2 rx1 sc2 c2
+starting permutation: s1 at1 sc1 rx1 wx s2 at2 rx3 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -531,7 +558,7 @@ a_id
 step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -540,8 +567,9 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 at2 rx1 c2 sc2
+starting permutation: s1 at1 sc1 rx1 wx s2 at2 rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -551,7 +579,7 @@ a_id
 step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -560,8 +588,9 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 rx1 at2 sc2 c2
+starting permutation: s1 at1 sc1 rx1 wx s2 rx3 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -570,7 +599,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -580,8 +609,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 rx1 at2 c2 sc2
+starting permutation: s1 at1 sc1 rx1 wx s2 rx3 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -590,7 +620,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -600,8 +630,9 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx s2 rx1 c2 at2 sc2
+starting permutation: s1 at1 sc1 rx1 wx s2 rx3 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -610,7 +641,7 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -620,8 +651,9 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 sc1 rx1 wx rx1 s2 at2 sc2 c2
+starting permutation: s1 at1 sc1 rx1 wx rx3 s2 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
@@ -629,407 +661,7 @@ a_id
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 sc1 rx1 wx rx1 s2 at2 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 sc1 rx1 wx rx1 s2 c2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s2: BEGIN;
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 sc1 rx1 wx rx1 c2 s2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 at2 sc2 wx rx1 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 at2 wx sc2 rx1 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 at2 wx rx1 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 at2 wx rx1 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx at2 sc2 rx1 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx at2 rx1 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx at2 rx1 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx rx1 at2 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx rx1 at2 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 s2 wx rx1 c2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 at2 sc2 rx1 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 at2 rx1 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 at2 rx1 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 rx1 at2 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 rx1 at2 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx s2 rx1 c2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 sc1 wx rx1 s2 at2 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1040,16 +672,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 rx1 sc1 wx rx1 s2 at2 c2 sc2
+starting permutation: s1 at1 sc1 rx1 wx rx3 s2 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
-step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1060,16 +693,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 sc1 wx rx1 s2 c2 at2 sc2
+starting permutation: s1 at1 sc1 rx1 wx rx3 s2 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
-step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1080,16 +714,17 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 sc1 wx rx1 c2 s2 at2 sc2
+starting permutation: s1 at1 sc1 rx1 wx rx3 c2 s2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
-step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1100,8 +735,451 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 at2 sc2 rx1 c2
+starting permutation: s1 at1 rx1 sc1 s2 at2 sc2 wx rx3 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 at2 wx sc2 rx3 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step wx: INSERT INTO b VALUES (0);
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 at2 wx rx3 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 at2 wx rx3 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx at2 sc2 rx3 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx at2 rx3 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx at2 rx3 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx rx3 at2 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx rx3 at2 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 s2 wx rx3 c2 at2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 at2 sc2 rx3 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 at2 rx3 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 at2 rx3 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 rx3 at2 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 rx3 at2 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx s2 rx3 c2 at2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx rx3 s2 at2 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx rx3 s2 at2 c2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx rx3 s2 c2 at2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step s2: BEGIN;
+step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 sc1 wx rx3 c2 s2 at2 sc2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: s1 at1 rx1 wx sc1 s2 at2 sc2 rx3 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step wx: INSERT INTO b VALUES (0); <waiting ...>
+step sc1: COMMIT;
+step wx: <... completed>
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 at1 rx1 wx sc1 s2 at2 rx3 sc2 c2
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1112,17 +1190,18 @@ step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
+step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 at2 rx1 sc2 c2
+starting permutation: s1 at1 rx1 wx sc1 s2 at2 rx3 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1133,17 +1212,18 @@ step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
-step sc2: COMMIT;
 step c2: COMMIT;
+step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 at2 rx1 c2 sc2
+starting permutation: s1 at1 rx1 wx sc1 s2 rx3 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1153,18 +1233,19 @@ step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
-step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
+step c2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 rx1 at2 sc2 c2
+starting permutation: s1 at1 rx1 wx sc1 s2 rx3 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1174,18 +1255,19 @@ step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
 step c2: COMMIT;
+step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 rx1 at2 c2 sc2
+starting permutation: s1 at1 rx1 wx sc1 s2 rx3 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1195,18 +1277,19 @@ step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 s2 rx1 c2 at2 sc2
+starting permutation: s1 at1 rx1 wx sc1 rx3 s2 at2 sc2 c2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1215,19 +1298,20 @@ a_id
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
-step c2: COMMIT;
+step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
+step c2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 rx1 s2 at2 sc2 c2
+starting permutation: s1 at1 rx1 wx sc1 rx3 s2 at2 c2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1236,7 +1320,7 @@ a_id
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1244,11 +1328,12 @@ a_id
 3              
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
 step c2: COMMIT;
+step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 rx1 s2 at2 c2 sc2
+starting permutation: s1 at1 rx1 wx sc1 rx3 s2 c2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1257,19 +1342,20 @@ a_id
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx sc1 rx1 s2 c2 at2 sc2
+starting permutation: s1 at1 rx1 wx sc1 rx3 c2 s2 at2 sc2
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -1278,28 +1364,7 @@ a_id
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s2: BEGIN;
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 at1 rx1 wx sc1 rx1 c2 s2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-step sc1: COMMIT;
-step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1310,69 +1375,20 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 at1 rx1 wx rx1 sc1 s2 at2 sc2 c2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 at1 rx1 wx rx1 sc1 s2 at2 c2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 at1 rx1 wx rx1 sc1 s2 c2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 at1 rx1 wx rx1 sc1 c2 s2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 at1 rx1 wx rx1 c2 sc1 s2 at2 sc2
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 at1 sc1 s2 at2 sc2 wx rx1 c2
+starting permutation: s1 rx1 at1 sc1 s2 at2 sc2 wx rx3 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1380,19 +1396,20 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 s2 at2 wx sc2 rx1 c2
+starting permutation: s1 rx1 at1 sc1 s2 at2 wx sc2 rx3 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1400,78 +1417,19 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 s2 at2 wx rx1 sc2 c2
+starting permutation: s1 rx1 at1 sc1 s2 at2 wx rx3 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 s2 at2 wx rx1 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 s2 wx at2 sc2 rx1 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 s2 wx at2 rx1 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1480,18 +1438,19 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 s2 wx at2 rx1 c2 sc2
+starting permutation: s1 rx1 at1 sc1 s2 at2 wx rx3 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1500,79 +1459,20 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 s2 wx rx1 at2 sc2 c2
+starting permutation: s1 rx1 at1 sc1 s2 wx at2 sc2 rx3 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 s2 wx rx1 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 s2 wx rx1 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: s1 rx1 at1 sc1 wx s2 at2 sc2 rx1 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1580,18 +1480,19 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx s2 at2 rx1 sc2 c2
+starting permutation: s1 rx1 at1 sc1 s2 wx at2 rx3 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1600,18 +1501,19 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx s2 at2 rx1 c2 sc2
+starting permutation: s1 rx1 at1 sc1 s2 wx at2 rx3 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1620,17 +1522,18 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx s2 rx1 at2 sc2 c2
+starting permutation: s1 rx1 at1 sc1 s2 wx rx3 at2 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1640,17 +1543,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx s2 rx1 at2 c2 sc2
+starting permutation: s1 rx1 at1 sc1 s2 wx rx3 at2 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1660,17 +1564,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx s2 rx1 c2 at2 sc2
+starting permutation: s1 rx1 at1 sc1 s2 wx rx3 c2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1680,16 +1585,143 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx rx1 s2 at2 sc2 c2
+starting permutation: s1 rx1 at1 sc1 wx s2 at2 sc2 rx3 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx s2 at2 rx3 sc2 c2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx s2 at2 rx3 c2 sc2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx s2 rx3 at2 sc2 c2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx s2 rx3 at2 c2 sc2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx s2 rx3 c2 at2 sc2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: s1 rx1 at1 sc1 wx rx3 s2 at2 sc2 c2
+step s1: BEGIN;
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1700,16 +1732,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx rx1 s2 at2 c2 sc2
+starting permutation: s1 rx1 at1 sc1 wx rx3 s2 at2 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1720,16 +1753,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx rx1 s2 c2 at2 sc2
+starting permutation: s1 rx1 at1 sc1 wx rx3 s2 c2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1740,16 +1774,17 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 sc1 wx rx1 c2 s2 at2 sc2
+starting permutation: s1 rx1 at1 sc1 wx rx3 c2 s2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1760,12 +1795,13 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 at2 sc2 rx1 c2
+starting permutation: s1 rx1 at1 wx sc1 s2 at2 sc2 rx3 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
@@ -1773,7 +1809,7 @@ step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1781,19 +1817,20 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 at2 rx1 sc2 c2
+starting permutation: s1 rx1 at1 wx sc1 s2 at2 rx3 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1802,19 +1839,20 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 at2 rx1 c2 sc2
+starting permutation: s1 rx1 at1 wx sc1 s2 at2 rx3 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1823,18 +1861,19 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 rx1 at2 sc2 c2
+starting permutation: s1 rx1 at1 wx sc1 s2 rx3 at2 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1844,18 +1883,19 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 rx1 at2 c2 sc2
+starting permutation: s1 rx1 at1 wx sc1 s2 rx3 at2 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1865,18 +1905,19 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 s2 rx1 c2 at2 sc2
+starting permutation: s1 rx1 at1 wx sc1 s2 rx3 c2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1886,17 +1927,18 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 rx1 s2 at2 sc2 c2
+starting permutation: s1 rx1 at1 wx sc1 rx3 s2 at2 sc2 c2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1907,17 +1949,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 rx1 s2 at2 c2 sc2
+starting permutation: s1 rx1 at1 wx sc1 rx3 s2 at2 c2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1928,17 +1971,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 rx1 s2 c2 at2 sc2
+starting permutation: s1 rx1 at1 wx sc1 rx3 s2 c2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1949,17 +1993,18 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx sc1 rx1 c2 s2 at2 sc2
+starting permutation: s1 rx1 at1 wx sc1 rx3 c2 s2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -1970,57 +2015,7 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 at1 wx rx1 sc1 s2 at2 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 at1 wx rx1 sc1 s2 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 at1 wx rx1 sc1 s2 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 at1 wx rx1 sc1 c2 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 at1 wx rx1 c2 sc1 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 at2 sc2 rx1 c2
+starting permutation: s1 rx1 wx at1 rx3 c2 sc1 s2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
@@ -2028,255 +2023,28 @@ a_id
 1              
 step wx: INSERT INTO b VALUES (0);
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 at2 rx1 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 at2 rx1 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 rx1 at2 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 rx1 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 s2 rx1 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 rx1 s2 at2 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 rx1 s2 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 rx1 s2 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 sc1 rx1 c2 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 rx1 sc1 s2 at2 sc2 c2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 rx1 sc1 s2 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 rx1 sc1 s2 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 rx1 sc1 c2 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: s1 rx1 wx at1 rx1 c2 sc1 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 wx rx1 at1 sc1 s2 at2 sc2 c2
+starting permutation: s1 rx1 wx rx3 at1 c2 sc1 s2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx rx1 at1 sc1 s2 at2 c2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx rx1 at1 sc1 s2 c2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx rx1 at1 sc1 c2 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: s1 rx1 wx rx1 at1 c2 sc1 s2 at2 sc2
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2284,65 +2052,48 @@ a_id
 3              
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: s1 rx1 wx rx1 c2 at1 sc1 s2 at2 sc2
+starting permutation: s1 rx1 wx rx3 c2 at1 sc1 s2 at2 sc2
 step s1: BEGIN;
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 s2 at2 sc2 wx rx1 c2
+starting permutation: rx1 s1 at1 sc1 s2 at2 sc2 wx rx3 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 s2 at2 wx sc2 rx1 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2350,59 +2101,20 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 s2 at2 wx rx1 sc2 c2
+starting permutation: rx1 s1 at1 sc1 s2 at2 wx sc2 rx3 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
 step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 s2 at2 wx rx1 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 s2 wx at2 sc2 rx1 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2410,18 +2122,19 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 s2 wx at2 rx1 sc2 c2
+starting permutation: rx1 s1 at1 sc1 s2 at2 wx rx3 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2430,18 +2143,19 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 s2 wx at2 rx1 c2 sc2
+starting permutation: rx1 s1 at1 sc1 s2 at2 wx rx3 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2450,79 +2164,20 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 s2 wx rx1 at2 sc2 c2
+starting permutation: rx1 s1 at1 sc1 s2 wx at2 sc2 rx3 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step c2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 s2 wx rx1 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step c2: COMMIT;
-step sc2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 s2 wx rx1 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step s2: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step c2: COMMIT;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-
-starting permutation: rx1 s1 at1 sc1 wx s2 at2 sc2 rx1 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
-step s2: BEGIN;
-step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2530,18 +2185,19 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx s2 at2 rx1 sc2 c2
+starting permutation: rx1 s1 at1 sc1 s2 wx at2 rx3 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2550,18 +2206,19 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx s2 at2 rx1 c2 sc2
+starting permutation: rx1 s1 at1 sc1 s2 wx at2 rx3 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
+step wx: INSERT INTO b VALUES (0);
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2570,17 +2227,18 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx s2 rx1 at2 sc2 c2
+starting permutation: rx1 s1 at1 sc1 s2 wx rx3 at2 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2590,17 +2248,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx s2 rx1 at2 c2 sc2
+starting permutation: rx1 s1 at1 sc1 s2 wx rx3 at2 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2610,17 +2269,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx s2 rx1 c2 at2 sc2
+starting permutation: rx1 s1 at1 sc1 s2 wx rx3 c2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
-step wx: INSERT INTO b VALUES (0);
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2630,16 +2290,143 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx rx1 s2 at2 sc2 c2
+starting permutation: rx1 s1 at1 sc1 wx s2 at2 sc2 rx3 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx s2 at2 rx3 sc2 c2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx s2 at2 rx3 c2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx s2 rx3 at2 sc2 c2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+step c2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx s2 rx3 at2 c2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step c2: COMMIT;
+step sc2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx s2 rx3 c2 at2 sc2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step s2: BEGIN;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+a_id           
+
+3              
+3              
+3              
+step c2: COMMIT;
+step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
+step sc2: COMMIT;
+
+starting permutation: rx1 s1 at1 sc1 wx rx3 s2 at2 sc2 c2
+step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
+a_id           
+
+1              
+step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
+step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
+step sc1: COMMIT;
+step wx: INSERT INTO b VALUES (0);
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2650,16 +2437,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx rx1 s2 at2 c2 sc2
+starting permutation: rx1 s1 at1 sc1 wx rx3 s2 at2 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2670,16 +2458,17 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx rx1 s2 c2 at2 sc2
+starting permutation: rx1 s1 at1 sc1 wx rx3 s2 c2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2690,16 +2479,17 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 sc1 wx rx1 c2 s2 at2 sc2
+starting permutation: rx1 s1 at1 sc1 wx rx3 c2 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2710,12 +2500,13 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 at2 sc2 rx1 c2
+starting permutation: rx1 s1 at1 wx sc1 s2 at2 sc2 rx3 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
@@ -2723,7 +2514,7 @@ step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2731,19 +2522,20 @@ a_id
 3              
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 at2 rx1 sc2 c2
+starting permutation: rx1 s1 at1 wx sc1 s2 at2 rx3 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2752,19 +2544,20 @@ a_id
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 at2 rx1 c2 sc2
+starting permutation: rx1 s1 at1 wx sc1 s2 at2 rx3 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2773,18 +2566,19 @@ a_id
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 rx1 at2 sc2 c2
+starting permutation: rx1 s1 at1 wx sc1 s2 rx3 at2 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2794,18 +2588,19 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 rx1 at2 c2 sc2
+starting permutation: rx1 s1 at1 wx sc1 s2 rx3 at2 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2815,18 +2610,19 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 s2 rx1 c2 at2 sc2
+starting permutation: rx1 s1 at1 wx sc1 s2 rx3 c2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
 step s2: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2836,17 +2632,18 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 rx1 s2 at2 sc2 c2
+starting permutation: rx1 s1 at1 wx sc1 rx3 s2 at2 sc2 c2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2857,17 +2654,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 step c2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 rx1 s2 at2 c2 sc2
+starting permutation: rx1 s1 at1 wx sc1 rx3 s2 at2 c2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2878,17 +2676,18 @@ step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step c2: COMMIT;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 rx1 s2 c2 at2 sc2
+starting permutation: rx1 s1 at1 wx sc1 rx3 s2 c2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2899,17 +2698,18 @@ step c2: COMMIT;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx sc1 rx1 c2 s2 at2 sc2
+starting permutation: rx1 s1 at1 wx sc1 rx3 c2 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step wx: INSERT INTO b VALUES (0); <waiting ...>
 step sc1: COMMIT;
 step wx: <... completed>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -2920,57 +2720,7 @@ step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 at1 wx rx1 sc1 s2 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 at1 wx rx1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 at1 wx rx1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 at1 wx rx1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 at1 wx rx1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
-step wx: INSERT INTO b VALUES (0); <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 at2 sc2 rx1 c2
+starting permutation: rx1 s1 wx at1 rx3 c2 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
@@ -2978,255 +2728,28 @@ a_id
 step s1: BEGIN;
 step wx: INSERT INTO b VALUES (0);
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 at2 rx1 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 at2 rx1 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 rx1 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 rx1 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 s2 rx1 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 rx1 s2 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 rx1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 rx1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 sc1 rx1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 rx1 sc1 s2 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 rx1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 rx1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 rx1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 s1 wx at1 rx1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 wx rx1 at1 sc1 s2 at2 sc2 c2
+starting permutation: rx1 s1 wx rx3 at1 c2 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx rx1 at1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx rx1 at1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx rx1 at1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 s1 wx rx1 at1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step s1: BEGIN;
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -3234,33 +2757,35 @@ a_id
 3              
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 s1 wx rx1 c2 at1 sc1 s2 at2 sc2
+starting permutation: rx1 s1 wx rx3 c2 at1 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step s1: BEGIN;
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx s1 at1 sc1 s2 at2 sc2 rx1 c2
+starting permutation: rx1 wx s1 at1 rx3 c2 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
@@ -3268,255 +2793,28 @@ a_id
 step wx: INSERT INTO b VALUES (0);
 step s1: BEGIN;
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 s2 at2 rx1 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 s2 at2 rx1 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 s2 rx1 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 s2 rx1 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 s2 rx1 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 rx1 s2 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 rx1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 rx1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 sc1 rx1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 rx1 sc1 s2 at2 sc2 c2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 rx1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 rx1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 rx1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-invalid permutation detected
-
-starting permutation: rx1 wx s1 at1 rx1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx s1 rx1 at1 sc1 s2 at2 sc2 c2
+starting permutation: rx1 wx s1 rx3 at1 c2 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
 step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 rx1 at1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 rx1 at1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 rx1 at1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx s1 rx1 at1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -3524,103 +2822,41 @@ a_id
 3              
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx s1 rx1 c2 at1 sc1 s2 at2 sc2
+starting permutation: rx1 wx s1 rx3 c2 at1 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
 step s1: BEGIN;
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
 3              
 3              
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx rx1 s1 at1 sc1 s2 at2 sc2 c2
+starting permutation: rx1 wx rx3 s1 at1 c2 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx rx1 s1 at1 sc1 s2 at2 c2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx rx1 s1 at1 sc1 s2 c2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx rx1 s1 at1 sc1 c2 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
-a_id           
-
-3              
-3              
-3              
-step s1: BEGIN;
-step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
-invalid permutation detected
-
-starting permutation: rx1 wx rx1 s1 at1 c2 sc1 s2 at2 sc2
-step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
-a_id           
-
-1              
-step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -3629,19 +2865,20 @@ a_id
 step s1: BEGIN;
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID; <waiting ...>
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: <... completed>
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx rx1 s1 c2 at1 sc1 s2 at2 sc2
+starting permutation: rx1 wx rx3 s1 c2 at1 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -3649,19 +2886,20 @@ a_id
 3              
 step s1: BEGIN;
 step c2: COMMIT;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;
 step at2: ALTER TABLE b VALIDATE CONSTRAINT bfk;
 step sc2: COMMIT;
 
-starting permutation: rx1 wx rx1 c2 s1 at1 sc1 s2 at2 sc2
+starting permutation: rx1 wx rx3 c2 s1 at1 sc1 s2 at2 sc2
 step rx1: SELECT * FROM b WHERE a_id = 1 LIMIT 1;
 a_id           
 
 1              
 step wx: INSERT INTO b VALUES (0);
-step rx1: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
+step rx3: SELECT * FROM b WHERE a_id = 3 LIMIT 3;
 a_id           
 
 3              
@@ -3669,6 +2907,7 @@ a_id
 3              
 step c2: COMMIT;
 step s1: BEGIN;
+s1: WARNING:  referential integrity (FOREIGN KEY) constraints are not supported in Greenplum Database, will not be enforced
 step at1: ALTER TABLE b ADD CONSTRAINT bfk FOREIGN KEY (a_id) REFERENCES a (i) NOT VALID;
 step sc1: COMMIT;
 step s2: BEGIN;

@@ -69,6 +69,7 @@ SELECT '' AS five, f1 AS "Correlated Field"
 begin;
 create table join_tab1 ( i integer, j integer, t text);
 INSERT INTO join_tab1 VALUES (1, 4, 'one');
+ANALYZE join_tab1;
 INSERT INTO join_tab1 VALUES (2, 3, 'two');
 INSERT INTO join_tab1 VALUES (3, 2, 'three');
 INSERT INTO join_tab1 VALUES (4, 1, 'four');
@@ -82,6 +83,7 @@ INSERT INTO join_tab1 VALUES (NULL, 0, 'zero');
 
 create table join_tab2 ( i integer, k integer);
 INSERT INTO join_tab2 VALUES (1, -1);
+ANALYZE join_tab2;
 INSERT INTO join_tab2 VALUES (2, 2);
 INSERT INTO join_tab2 VALUES (3, -3);
 INSERT INTO join_tab2 VALUES (2, 4);
@@ -209,7 +211,65 @@ select * from join_tab1 where i = (select i from join_tab4 where t='satday');
                       
 
 select * from join_tab1 where i = (select i from join_tab4);
-         
+
+
+--
+-- Test references to outer query in join quals
+--
+
+-- Single var
+explain (costs off)
+SELECT (SELECT join_tab1.i - join_tab2.i
+        FROM join_tab1, join_tab2 WHERE join_tab1.i = join_tab2.i and out.f1 > 0
+        LIMIT 1) as x
+FROM subselect_tbl1 out;
+
+SELECT (SELECT join_tab1.i - join_tab2.i
+        FROM join_tab1, join_tab2 WHERE join_tab1.i = join_tab2.i and out.f1 > 0
+        LIMIT 1) as x
+FROM subselect_tbl1 out;
+
+-- Two outer vars
+explain (costs off)
+SELECT (SELECT join_tab1.i - join_tab2.i
+        FROM join_tab1, join_tab2 WHERE join_tab1.i = join_tab2.i and out1.i = out2.i
+        LIMIT 1) as x
+FROM join_tab1 out1, join_tab2 out2;
+
+SELECT (SELECT join_tab1.i - join_tab2.i
+        FROM join_tab1, join_tab2 WHERE join_tab1.i = join_tab2.i and out1.i = out2.i
+        LIMIT 1) as x
+FROM join_tab1 out1, join_tab2 out2;
+
+-- Same, in an outer join
+--
+-- NOTE: The order that the rows come out from the subquery is not
+-- deterministic, so we have to use a dummy coalesce() expression that
+-- returns the same result regardless.
+--
+explain (costs off)
+SELECT (SELECT coalesce(join_tab1.i + join_tab2.i, 0) >= 0
+        FROM join_tab1 LEFT JOIN join_tab2 ON join_tab1.i = join_tab2.i and out.f1 > 0
+        LIMIT 1) as x
+FROM subselect_tbl1 out;
+
+SELECT (SELECT coalesce(join_tab1.i + join_tab2.i, 0) >= 0
+        FROM join_tab1 LEFT JOIN join_tab2 ON join_tab1.i = join_tab2.i and out.f1 > 0
+        LIMIT 1) as x
+FROM subselect_tbl1 out;
+
+explain (costs off)
+SELECT (SELECT coalesce(join_tab1.i + join_tab2.i, 0) >= 0
+        FROM join_tab1 LEFT JOIN join_tab2 ON join_tab1.i = join_tab2.i and out1.i = out2.i
+        LIMIT 1) as x
+FROM join_tab1 out1, join_tab2 out2;
+
+SELECT (SELECT coalesce(join_tab1.i + join_tab2.i, 0) >= 0
+        FROM join_tab1 LEFT JOIN join_tab2 ON join_tab1.i = join_tab2.i and out1.i = out2.i
+        LIMIT 1) as x
+FROM join_tab1 out1, join_tab2 out2;
+
+
 --
 -- Testing NOT-IN Subquery
 --
@@ -237,10 +297,12 @@ create table t3(a int, b int);
 create table t4(a int, b int);
 
 insert into t1 values(1,2);
+analyze t1;
 insert into t1 values(3,4);
 insert into t1 values(5,6);
 
 insert into t2 values(1,2);
+analyze t2;
 insert into t2 values(3,4);
 insert into t2 values(7,8);
 
@@ -249,10 +311,12 @@ insert into t3 values(3,4);
 
 insert into t4 values(1,2);
 
+
 create table i1(a int, b int);
 create table i2(a int, b int);
 
 insert into i1 values(1,2);
+analyze i1;
 commit;
 
 --
@@ -329,6 +393,13 @@ create table Tbl08(a int, b int);
 insert into Tbl08 values(1,2),(3,4),(null,null);
 create table Tbl09(a int, b int);
 insert into Tbl09 values(1,2),(5,null),(null,8);
+analyze Tbl04;
+analyze Tbl05;
+analyze Tbl06;
+analyze i3;
+analyze Tbl07;
+analyze Tbl08;
+analyze Tbl09;
 commit;
 
 --
@@ -579,6 +650,7 @@ create table append_rel(att1 int, att2 int);
 create table append_rel1(att3 int) INHERITS (append_rel);
 create table append_rel2(att4 int) INHERITS(append_rel);
 insert into append_rel values(1,10),(2,20),(3,30);
+analyze append_rel;
 explain with test as (select * from (select * from append_rel) p where att1 in (select att1 from append_rel where att2 >= 19) ) select att2 from append_rel where att1 in (select att1 from test where att2 <= 21);
 with test as (select * from (select * from append_rel) p where att1 in (select att1 from append_rel where att2 >= 19) ) select att2 from append_rel where att1 in (select att1 from test where att2 <= 21);
 

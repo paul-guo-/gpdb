@@ -3,6 +3,9 @@
 
 #include "mb/pg_wchar.h"
 
+#include "plperl.h"
+
+
 /*
  * convert from utf8 to database encoding
  *
@@ -63,8 +66,8 @@ sv2cstr(SV *sv)
 	 * SvPVutf8() croaks nastily on certain things, like typeglobs and
 	 * readonly objects such as $^V. That's a perl bug - it's not supposed to
 	 * happen. To avoid crashing the backend, we make a copy of the sv before
-	 * passing it to SvPVutf8(). The copy is garbage collected 
-	 * when we're done with it.
+	 * passing it to SvPVutf8(). The copy is garbage collected when we're done
+	 * with it.
 	 */
 	if (SvREADONLY(sv) ||
 		isGV_with_GP(sv) ||
@@ -162,7 +165,7 @@ croak_cstr(const char *str)
 	sv_setsv(errsv, ssv);
 
 	croak(NULL);
-#endif   /* croak_sv */
+#endif							/* croak_sv */
 }
 
-#endif   /* PL_PERL_HELPERS_H */
+#endif							/* PL_PERL_HELPERS_H */

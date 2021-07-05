@@ -4,7 +4,7 @@
  *	  Internal utility support functions for Greenplum Database/PostgreSQL.
  *
  * Portions Copyright (c) 2005-2011, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -22,15 +22,21 @@
 
 #include "postgres.h"
 
+#ifdef HAVE_SYS_RESOURCE_H
+#include <sys/time.h>
+#include <sys/resource.h>
+#endif
+
 #include <sys/param.h>			/* for MAXHOSTNAMELEN */
+
 #include "access/genam.h"
-#include "catalog/gp_segment_config.h"
+#include "catalog/gp_segment_configuration.h"
+#include "common/ip.h"
 #include "nodes/makefuncs.h"
 #include "utils/builtins.h"
 #include "utils/fmgroids.h"
 #include "utils/memutils.h"
 #include "catalog/gp_id.h"
-#include "catalog/gp_segment_config.h"
 #include "catalog/indexing.h"
 #include "cdb/cdbhash.h"
 #include "cdb/cdbutil.h"
@@ -42,11 +48,12 @@
 #include "cdb/cdbtm.h"
 #include "libpq-fe.h"
 #include "libpq-int.h"
-#include "libpq/ip.h"
 #include "cdb/cdbconn.h"
 #include "cdb/cdbfts.h"
 #include "storage/ipc.h"
+#include "storage/proc.h"
 #include "postmaster/fts.h"
+#include "postmaster/postmaster.h"
 #include "catalog/namespace.h"
 #include "utils/gpexpand.h"
 #include "access/xact.h"
@@ -230,17 +237,18 @@ readGpSegConfigFromCatalog(int *total_dbs)
 	Datum				attr;
 	Relation			gp_seg_config_rel;
 	HeapTuple			gp_seg_config_tuple = NULL;
-	HeapScanDesc		gp_seg_config_scan;
+	SysScanDesc			gp_seg_config_scan;
 	GpSegConfigEntry	*configs;
 	GpSegConfigEntry	*config;
 
 	array_size = 500;
 	configs = palloc0(sizeof(GpSegConfigEntry) * array_size);
 
-	gp_seg_config_rel = heap_open(GpSegmentConfigRelationId, AccessShareLock);
-	gp_seg_config_scan = heap_beginscan_catalog(gp_seg_config_rel, 0, NULL);
+	gp_seg_config_rel = table_open(GpSegmentConfigRelationId, AccessShareLock);
+	gp_seg_config_scan = systable_beginscan(gp_seg_config_rel, InvalidOid, false, NULL,
+											0, NULL);
 
-	while (HeapTupleIsValid(gp_seg_config_tuple = heap_getnext(gp_seg_config_scan, ForwardScanDirection)))
+	while (HeapTupleIsValid(gp_seg_config_tuple = systable_getnext(gp_seg_config_scan)))
 	{
 		config = &configs[idx];
 
@@ -309,8 +317,8 @@ readGpSegConfigFromCatalog(int *total_dbs)
 	 * We're done with the catalog config, clean them up, closing all the
 	 * relations we opened.
 	 */
-	heap_endscan(gp_seg_config_scan);
-	heap_close(gp_seg_config_rel, AccessShareLock);
+	systable_endscan(gp_seg_config_scan);
+	table_close(gp_seg_config_rel, AccessShareLock);
 
 	*total_dbs = idx;
 	return configs;
@@ -703,7 +711,8 @@ cdbcomponent_getCdbComponents()
 	}
 	PG_CATCH();
 	{
-		FtsNotifyProber();
+		if (Gp_role == GP_ROLE_DISPATCH)
+			FtsNotifyProber();
 
 		PG_RE_THROW();
 	}
@@ -742,7 +751,7 @@ cdbcomponent_destroyCdbComponents(void)
 /*
  * Allocated a segdb
  *
- * If thers is idle segdb in the freelist, return it, otherwise, initialize
+ * If there is idle segdb in the freelist, return it, otherwise, initialize
  * a new segdb.
  *
  * idle segdbs has an established connection with segment, but new segdb is
@@ -843,7 +852,10 @@ cleanupQE(SegmentDatabaseDescriptor *segdbDesc)
 
 	/* Note, we cancel all "still running" queries */
 	if (!cdbconn_discardResults(segdbDesc, 20))
-		elog(FATAL, "cleanup called when a segworker is still busy");
+	{
+		elog(LOG, "cleaning up seg%d while it is still busy", segdbDesc->segindex);
+		return false;
+	}
 
 	/* QE is no longer associated with a slice. */
 	cdbconn_setQEIdentifier(segdbDesc, /* slice index */ -1);	
@@ -857,11 +869,13 @@ cdbcomponent_recycleIdleQE(SegmentDatabaseDescriptor *segdbDesc, bool forceDestr
 	CdbComponentDatabaseInfo	*cdbinfo;
 	MemoryContext				oldContext;	
 	int							maxLen;
+	bool						isWriter;
 
 	Assert(cdb_component_dbs);
 	Assert(CdbComponentsContext);
 
 	cdbinfo = segdbDesc->segment_database_info;
+	isWriter = segdbDesc->isWriter;
 
 	/* update num of active QEs */
 	DECR_COUNT(cdbinfo, numActiveQEs);
@@ -874,11 +888,11 @@ cdbcomponent_recycleIdleQE(SegmentDatabaseDescriptor *segdbDesc, bool forceDestr
 	/* If freelist length exceed gp_cached_gang_threshold, destroy it */
 	maxLen = segdbDesc->segindex == -1 ?
 					MAX_CACHED_1_GANGS : gp_cached_gang_threshold;
-	if (!segdbDesc->isWriter && list_length(cdbinfo->freelist) >= maxLen)
+	if (!isWriter && list_length(cdbinfo->freelist) >= maxLen)
 		goto destroy_segdb;
 
 	/* Recycle the QE, put it to freelist */
-	if (segdbDesc->isWriter)
+	if (isWriter)
 	{
 		/* writer is always the header of freelist */
 		segdbDesc->segment_database_info->freelist =
@@ -917,7 +931,7 @@ destroy_segdb:
 
 	cdbconn_termSegmentDescriptor(segdbDesc);
 
-	if (segdbDesc->isWriter)
+	if (isWriter)
 	{
 		markCurrentGxactWriterGangLost();
 	}
@@ -998,6 +1012,52 @@ cdbcomponent_getComponentInfo(int contentId)
 	return cdbInfo;
 }
 
+static void
+ensureInterconnectAddress(void)
+{
+	if (interconnect_address)
+		return;
+
+	if (GpIdentity.segindex >= 0)
+	{
+		Assert(Gp_role == GP_ROLE_EXECUTE);
+		Assert(MyProcPort != NULL);
+		Assert(MyProcPort->laddr.addr.ss_family == AF_INET
+				|| MyProcPort->laddr.addr.ss_family == AF_INET6);
+		/*
+		 * We assume that the QD, using the address in gp_segment_configuration
+		 * as its destination IP address, connects to the segment/QE.
+		 * So, the local address in the PORT can be used for interconnect.
+		 */
+		char local_addr[NI_MAXHOST];
+		getnameinfo((const struct sockaddr *)&MyProcPort->laddr.addr,
+					MyProcPort->laddr.salen,
+					local_addr, sizeof(local_addr),
+					NULL, 0, NI_NUMERICHOST);
+		interconnect_address = MemoryContextStrdup(TopMemoryContext, local_addr);
+	}
+	else if (Gp_role == GP_ROLE_DISPATCH)
+	{
+		/*
+		 * Here, we can only retrieve the ADDRESS in gp_segment_configuration
+		 * from `cdbcomponent*`. We couldn't get it in a way as the QEs.
+		 */
+		CdbComponentDatabaseInfo *qdInfo;
+		qdInfo = cdbcomponent_getComponentInfo(MASTER_CONTENT_ID);
+		interconnect_address = MemoryContextStrdup(TopMemoryContext, qdInfo->config->hostip);
+	}
+	else if (qdHostname && qdHostname[0] != '\0')
+	{
+		Assert(Gp_role == GP_ROLE_EXECUTE);
+		/*
+		 * QE on the master can't get its interconnect address like that on the primary.
+		 * The QD connects to its postmaster via the unix domain socket.
+		 */
+		interconnect_address = qdHostname;
+	}
+	else
+		Assert(false);
+}
 /*
  * performs all necessary setup required for Greenplum Database mode.
  *
@@ -1008,9 +1068,9 @@ cdb_setup(void)
 {
 	elog(DEBUG1, "Initializing Greenplum components...");
 
-	/* If gp_role is UTILITY, skip this call. */
 	if (Gp_role != GP_ROLE_UTILITY)
 	{
+		ensureInterconnectAddress();
 		/* Initialize the Motion Layer IPC subsystem. */
 		InitMotionLayerIPC();
 	}
@@ -1026,15 +1086,12 @@ cdb_setup(void)
 		Gp_role == GP_ROLE_DISPATCH &&
 		!*shmDtmStarted)
 	{
-		while (true)
-		{
-			pg_usleep(100 * 1000); /* 100ms */
-			if (*shmDtmStarted)
-				break;
-		}
+		ereport(FATAL,
+				(errcode(ERRCODE_CANNOT_CONNECT_NOW),
+				 errmsg(POSTMASTER_IN_RECOVERY_MSG),
+				 errdetail("waiting for distributed transaction recovery to complete")));
 	}
 }
-
 
 /*
  * performs all necessary cleanup required when leaving Greenplum
@@ -1186,6 +1243,7 @@ getDnsCachedAddress(char *name, int port, int elevel, bool use_cache)
 		if (use_cache)
 			oldContext = MemoryContextSwitchTo(TopMemoryContext);
 
+		hostinfo[0] = '\0';
 		for (addr = addrs; addr; addr = addr->ai_next)
 		{
 #ifdef HAVE_UNIX_SOCKETS
@@ -1223,11 +1281,9 @@ getDnsCachedAddress(char *name, int port, int elevel, bool use_cache)
 		 * we'd only want to use the IPv6 address if there isn't an IPv4
 		 * address.  All we really need to do is test this.
 		 */
-		if (((!use_cache && !hostinfo) || (use_cache && e == NULL))
+		if (((!use_cache && !hostinfo[0]) || (use_cache && e == NULL))
 			&& addrs->ai_family == AF_INET6)
 		{
-			char		hostinfo[NI_MAXHOST];
-
 			addr = addrs;
 			/* Get a text representation of the IP address */
 			pg_getnameinfo_all((struct sockaddr_storage *) addr->ai_addr, addr->ai_addrlen,
@@ -1409,7 +1465,7 @@ master_standby_dbid(void)
 	 * SELECT * FROM gp_segment_configuration WHERE content = -1 AND role =
 	 * GP_SEGMENT_CONFIGURATION_ROLE_MIRROR
 	 */
-	rel = heap_open(GpSegmentConfigRelationId, AccessShareLock);
+	rel = table_open(GpSegmentConfigRelationId, AccessShareLock);
 	ScanKeyInit(&scankey[0],
 				Anum_gp_segment_configuration_content,
 				BTEqualStrategyNumber, F_INT2EQ,
@@ -1433,7 +1489,7 @@ master_standby_dbid(void)
 
 	systable_endscan(scan);
 	/* no need to hold the lock, it's a catalog */
-	heap_close(rel, AccessShareLock);
+	table_close(rel, AccessShareLock);
 
 	return dbid;
 }
@@ -1683,4 +1739,49 @@ getgpsegmentCount(void)
 	}
 
 	return numsegments;
+}
+
+/*
+ * IsOnConflictUpdate
+ * Return true if a plannedstmt is an upsert: insert ... on conflict do update
+ */
+bool
+IsOnConflictUpdate(PlannedStmt *ps)
+{
+	Plan      *plan;
+
+	if (ps == NULL || ps->commandType != CMD_INSERT)
+		return false;
+
+	plan = ps->planTree;
+
+	if (plan && IsA(plan, Motion))
+		plan = outerPlan(plan);
+
+	if (plan == NULL || !IsA(plan, ModifyTable))
+		return false;
+
+	return ((ModifyTable *)plan)->onConflictAction == ONCONFLICT_UPDATE;
+}
+
+/*
+ * Avoid core file generation for this PANIC. It helps to avoid
+ * filling up disks during tests and also saves time.
+ */
+void
+AvoidCorefileGeneration()
+{
+#if defined(HAVE_GETRLIMIT) && defined(RLIMIT_CORE)
+	struct rlimit lim;
+	getrlimit(RLIMIT_CORE, &lim);
+	lim.rlim_cur = 0;
+	if (setrlimit(RLIMIT_CORE, &lim) != 0)
+	{
+		int			save_errno = errno;
+
+		elog(NOTICE,
+			 "setrlimit failed for RLIMIT_CORE soft limit to zero. errno: %d (%m).",
+			 save_errno);
+	}
+#endif
 }

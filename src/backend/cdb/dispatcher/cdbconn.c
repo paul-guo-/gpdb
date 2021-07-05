@@ -5,7 +5,7 @@
  * SegmentDatabaseDescriptor methods
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -114,6 +114,8 @@ cdbconn_termSegmentDescriptor(SegmentDatabaseDescriptor *segdbDesc)
 		pfree(segdbDesc->whoami);
 		segdbDesc->whoami = NULL;
 	}
+
+	pfree(segdbDesc);
 }								/* cdbconn_termSegmentDescriptor */
 
 /*
@@ -150,7 +152,9 @@ cdbconn_doConnectStart(SegmentDatabaseDescriptor *segdbDesc,
 	/*
 	 * For entry DB connection, we make sure both "hostaddr" and "host" are
 	 * empty string. Or else, it will fall back to environment variables and
-	 * won't use domain socket in function connectDBStart.
+	 * won't use domain socket in function connectDBStart. Also we set the
+	 * connection type for entrydb connection so that QE could change Gp_role
+	 * from DISPATCH to EXECUTE.
 	 *
 	 * For other QE connections, we set "hostaddr". "host" is not used.
 	 */
@@ -225,6 +229,10 @@ cdbconn_doConnectStart(SegmentDatabaseDescriptor *segdbDesc,
 	}
 	nkeywords++;
 
+	keywords[nkeywords] = GPCONN_TYPE;
+	values[nkeywords] = GPCONN_TYPE_INTERNAL;
+	nkeywords++;
+
 	keywords[nkeywords] = NULL;
 	values[nkeywords] = NULL;
 
@@ -283,10 +291,10 @@ cdbconn_disconnect(SegmentDatabaseDescriptor *segdbDesc)
 			if (!sent)
 				elog(LOG, "Unable to cancel: %s", strlen(errbuf) == 0 ? "cannot allocate PGCancel" : errbuf);
 		}
-
-		PQfinish(segdbDesc->conn);
-		segdbDesc->conn = NULL;
 	}
+
+	PQfinish(segdbDesc->conn);
+	segdbDesc->conn = NULL;
 }
 
 /*
@@ -462,7 +470,7 @@ cdbconn_get_motion_listener_port(PGconn *conn)
  *
  * The callback is very limited in what it can do, so it cannot directly
  * forward the Notice to the user->QD connection. Instead, it queues the
- * Notices as a list of QENotice structs. Later, when we are out of of the
+ * Notices as a list of QENotice structs. Later, when we are out of the
  * callback, forwardQENotices() sends the queued Notices to the client.
  *-------------------------------------------------------------------------
  */
@@ -622,7 +630,7 @@ MPPnoticeReceiver(void *arg, const PGresult *res)
 
 /* helper macro for computing the total allocation size */
 #define SIZE_VARLEN_FIELD(fldname) \
-		if (fldname) \
+		if (fldname != NULL) \
 		{ \
 			fldname##_len = strlen(fldname) + 1; \
 			size += fldname##_len; \
@@ -659,7 +667,7 @@ MPPnoticeReceiver(void *arg, const PGresult *res)
 		bufptr = notice->buf;
 
 #define COPY_VARLEN_FIELD(fldname) \
-		if (fldname) \
+		if (fldname != NULL) \
 		{ \
 			notice->fldname = bufptr; \
 			memcpy(bufptr, fldname, fldname##_len); \
@@ -707,7 +715,7 @@ forwardQENotices(void)
 
 	while (qeNotices_head)
 	{
-		QENotice *notice;;
+		QENotice *notice;
 		StringInfoData msgbuf;
 
 		notice = qeNotices_head;
@@ -768,7 +776,7 @@ forwardQENotices(void)
 					pq_sendstring(&msgbuf, notice->file);
 				}
 
-				if (notice->line)
+				if (notice->line[0])
 				{
 					pq_sendbyte(&msgbuf,PG_DIAG_SOURCE_LINE);
 					pq_sendstring(&msgbuf, notice->line);

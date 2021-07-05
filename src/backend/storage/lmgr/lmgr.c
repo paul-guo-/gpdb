@@ -4,8 +4,8 @@
  *	  POSTGRES lock manager code
  *
  * Portions Copyright (c) 2006-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -21,14 +21,19 @@
 #include "access/transam.h"
 #include "access/xact.h"
 #include "catalog/catalog.h"
+#include "commands/progress.h"
 #include "miscadmin.h"
+#include "pgstat.h"
 #include "storage/lmgr.h"
 #include "storage/procarray.h"
+#include "storage/sinvaladt.h"
 #include "utils/inval.h"
+#include "utils/memutils.h"
 
 #include "access/heapam.h"
 #include "catalog/namespace.h"
 #include "cdb/cdbvars.h"
+#include "storage/proc.h"
 #include "utils/lsyscache.h"        /* CDB: get_rel_namespace() */
 #include "utils/guc.h"
 
@@ -41,7 +46,7 @@
  * constraint violations.  It's theoretically possible that a backend sees a
  * tuple that was speculatively inserted by another backend, but before it has
  * started waiting on the token, the other backend completes its insertion,
- * and then then performs 2^32 unrelated insertions.  And after all that, the
+ * and then performs 2^32 unrelated insertions.  And after all that, the
  * first backend finally calls SpeculativeInsertionLockAcquire(), with the
  * intention of waiting for the first insertion to complete, but ends up
  * waiting for the latest unrelated insertion instead.  Even then, nothing
@@ -147,7 +152,7 @@ LockRelationOid(Oid relid, LOCKMODE lockmode)
  *		ConditionalLockRelationOid
  *
  * As above, but only lock if we can get the lock without blocking.
- * Returns TRUE iff the lock was acquired.
+ * Returns true iff the lock was acquired.
  *
  * NOTE: we do not currently need conditional versions of all the
  * LockXXX routines in this file, but they could easily be added if needed.
@@ -325,10 +330,55 @@ UnlockRelation(Relation relation, LOCKMODE lockmode)
 }
 
 /*
+ *		CheckRelationLockedByMe
+ *
+ * Returns true if current transaction holds a lock on 'relation' of mode
+ * 'lockmode'.  If 'orstronger' is true, a stronger lockmode is also OK.
+ * ("Stronger" is defined as "numerically higher", which is a bit
+ * semantically dubious but is OK for the purposes we use this for.)
+ */
+bool
+CheckRelationLockedByMe(Relation relation, LOCKMODE lockmode, bool orstronger)
+{
+	LOCKTAG		tag;
+
+	SET_LOCKTAG_RELATION(tag,
+						 relation->rd_lockInfo.lockRelId.dbId,
+						 relation->rd_lockInfo.lockRelId.relId);
+
+	if (LockHeldByMe(&tag, lockmode))
+		return true;
+
+	if (orstronger)
+	{
+		LOCKMODE	slockmode;
+
+		for (slockmode = lockmode + 1;
+			 slockmode <= MaxLockMode;
+			 slockmode++)
+		{
+			if (LockHeldByMe(&tag, slockmode))
+			{
+#ifdef NOT_USED
+				/* Sometimes this might be useful for debugging purposes */
+				elog(WARNING, "lock mode %s substituted for %s on relation %s",
+					 GetLockmodeName(tag.locktag_lockmethodid, slockmode),
+					 GetLockmodeName(tag.locktag_lockmethodid, lockmode),
+					 RelationGetRelationName(relation));
+#endif
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+/*
  *		LockHasWaitersRelation
  *
- * This is a functiion to check if someone else is waiting on a
- * lock, we are currently holding.
+ * This is a function to check whether someone else is waiting for a
+ * lock which we are currently holding.
  */
 bool
 LockHasWaitersRelation(Relation relation, LOCKMODE lockmode)
@@ -400,6 +450,41 @@ LockRelationForExtension(Relation relation, LOCKMODE lockmode)
 }
 
 /*
+ *		ConditionalLockRelationForExtension
+ *
+ * As above, but only lock if we can get the lock without blocking.
+ * Returns true iff the lock was acquired.
+ */
+bool
+ConditionalLockRelationForExtension(Relation relation, LOCKMODE lockmode)
+{
+	LOCKTAG		tag;
+
+	SET_LOCKTAG_RELATION_EXTEND(tag,
+								relation->rd_lockInfo.lockRelId.dbId,
+								relation->rd_lockInfo.lockRelId.relId);
+
+	return (LockAcquire(&tag, lockmode, false, true) != LOCKACQUIRE_NOT_AVAIL);
+}
+
+/*
+ *		RelationExtensionLockWaiterCount
+ *
+ * Count the number of processes waiting for the given relation extension lock.
+ */
+int
+RelationExtensionLockWaiterCount(Relation relation)
+{
+	LOCKTAG		tag;
+
+	SET_LOCKTAG_RELATION_EXTEND(tag,
+								relation->rd_lockInfo.lockRelId.dbId,
+								relation->rd_lockInfo.lockRelId.relId);
+
+	return LockWaiterCount(&tag);
+}
+
+/*
  *		UnlockRelationForExtension
  */
 void
@@ -413,33 +498,6 @@ UnlockRelationForExtension(Relation relation, LOCKMODE lockmode)
 
 	LockRelease(&tag, lockmode, false);
 }
-
-LockAcquireResult
-LockRelationAppendOnlySegmentFile(RelFileNode *relFileNode, int32 segno, LOCKMODE lockmode, bool dontWait)
-{
-	LOCKTAG		tag;
-
-	SET_LOCKTAG_RELATION_APPENDONLY_SEGMENT_FILE(tag,
-						 relFileNode->dbNode,
-						 relFileNode->relNode,
-						 segno);
-
-	return LockAcquire(&tag, lockmode, false, dontWait);
-}
-
-void
-UnlockRelationAppendOnlySegmentFile(RelFileNode *relFileNode, int32 segno, LOCKMODE lockmode)
-{
-	LOCKTAG		tag;
-
-	SET_LOCKTAG_RELATION_APPENDONLY_SEGMENT_FILE(tag,
-						 relFileNode->dbNode,
-						 relFileNode->relNode,
-						 segno);
-
-	LockRelease(&tag, lockmode, false);
-}
-
 
 /*
  *		LockPage
@@ -464,7 +522,7 @@ LockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode)
  *		ConditionalLockPage
  *
  * As above, but only lock if we can get the lock without blocking.
- * Returns TRUE iff the lock was acquired.
+ * Returns true iff the lock was acquired.
  */
 bool
 ConditionalLockPage(Relation relation, BlockNumber blkno, LOCKMODE lockmode)
@@ -520,7 +578,7 @@ LockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode)
  *		ConditionalLockTuple
  *
  * As above, but only lock if we can get the lock without blocking.
- * Returns TRUE iff the lock was acquired.
+ * Returns true iff the lock was acquired.
  */
 bool
 ConditionalLockTuple(Relation relation, ItemPointer tid, LOCKMODE lockmode)
@@ -611,6 +669,30 @@ XactLockTableWait(TransactionId xid, Relation rel, ItemPointer ctid,
 	bool		first = true;
 
 	/*
+	 * Concurrent update and delete will wait on segment when GDD is enabled (or
+	 * the corner case that utility mode delete|update in segment which does not hold
+	 * gxid), need to report the waited transactions to QD to make sure the they have
+	 * the same transaction order on the master.
+	 */
+	if (Gp_role == GP_ROLE_EXECUTE)
+	{
+		MemoryContext oldContext;
+		DistributedTransactionId gxid = LocalXidGetDistributedXid(xid);
+
+		if (gxid != InvalidDistributedTransactionId)
+		{
+			/*
+			 * allocate waitGxids in TopMemoryContext since it's used in
+			 * 'commit prepared' and the TopTransactionContext has been delete
+			 * after 'prepare'
+			 */
+			oldContext = MemoryContextSwitchTo(TopMemoryContext);
+			MyTmGxactLocal->waitGxids = lappend_int(MyTmGxactLocal->waitGxids, gxid);
+			MemoryContextSwitchTo(oldContext);
+		}
+	}
+
+	/*
 	 * If an operation is specified, set up our verbose error context
 	 * callback.
 	 */
@@ -669,10 +751,49 @@ XactLockTableWait(TransactionId xid, Relation rel, ItemPointer ctid,
 }
 
 /*
+ *		GxactLockTableInsert
+ *
+ * CDB: a copy of XactLockTableInsert
+ * Insert a lock showing that the given distributed transaction ID is running
+ */
+void
+GxactLockTableInsert(DistributedTransactionId gxid)
+{
+	LOCKTAG		tag;
+
+	Assert(Gp_role == GP_ROLE_DISPATCH);
+
+	SET_LOCKTAG_DISTRIB_TRANSACTION(tag, gxid);
+
+	(void) LockAcquire(&tag, ExclusiveLock, false, false);
+}
+
+/*
+ *		GxactLockTableWait
+ *
+ * CDB: a copy of XactLockTableWait, no need to take care of sub-transaction.
+ * Wait for the specified distributed transaction to commit or abort.
+ */
+void
+GxactLockTableWait(DistributedTransactionId gxid)
+{
+	LOCKTAG		tag;
+
+	Assert(gxid != InvalidDistributedTransactionId);
+	Assert(Gp_role == GP_ROLE_DISPATCH);
+
+	SET_LOCKTAG_DISTRIB_TRANSACTION(tag, gxid);
+
+	(void) LockAcquire(&tag, ShareLock, false, false);
+
+	LockRelease(&tag, ShareLock, false);
+}
+
+/*
  *		ConditionalXactLockTableWait
  *
  * As above, but only lock if we can get the lock without blocking.
- * Returns TRUE if the lock was acquired.
+ * Returns true if the lock was acquired.
  */
 bool
 ConditionalXactLockTableWait(TransactionId xid)
@@ -841,10 +962,12 @@ XactLockTableWaitErrorCb(void *arg)
  * after we obtained our initial list of lockers, we will not wait for them.
  */
 void
-WaitForLockersMultiple(List *locktags, LOCKMODE lockmode)
+WaitForLockersMultiple(List *locktags, LOCKMODE lockmode, bool progress)
 {
 	List	   *holders = NIL;
 	ListCell   *lc;
+	int			total = 0;
+	int			done = 0;
 
 	/* Done if no locks to wait for */
 	if (list_length(locktags) == 0)
@@ -854,9 +977,17 @@ WaitForLockersMultiple(List *locktags, LOCKMODE lockmode)
 	foreach(lc, locktags)
 	{
 		LOCKTAG    *locktag = lfirst(lc);
+		int			count;
 
-		holders = lappend(holders, GetLockConflicts(locktag, lockmode));
+		holders = lappend(holders,
+						  GetLockConflicts(locktag, lockmode,
+										   progress ? &count : NULL));
+		if (progress)
+			total += count;
 	}
+
+	if (progress)
+		pgstat_progress_update_param(PROGRESS_WAITFOR_TOTAL, total);
 
 	/*
 	 * Note: GetLockConflicts() never reports our own xid, hence we need not
@@ -871,9 +1002,36 @@ WaitForLockersMultiple(List *locktags, LOCKMODE lockmode)
 
 		while (VirtualTransactionIdIsValid(*lockholders))
 		{
+			/*
+			 * If requested, publish who we're going to wait for.  This is not
+			 * 100% accurate if they're already gone, but we don't care.
+			 */
+			if (progress)
+			{
+				PGPROC	   *holder = BackendIdGetProc(lockholders->backendId);
+
+				pgstat_progress_update_param(PROGRESS_WAITFOR_CURRENT_PID,
+											 holder->pid);
+			}
 			VirtualXactLock(*lockholders, true);
 			lockholders++;
+
+			if (progress)
+				pgstat_progress_update_param(PROGRESS_WAITFOR_DONE, ++done);
 		}
+	}
+	if (progress)
+	{
+		const int	index[] = {
+			PROGRESS_WAITFOR_TOTAL,
+			PROGRESS_WAITFOR_DONE,
+			PROGRESS_WAITFOR_CURRENT_PID
+		};
+		const int64 values[] = {
+			0, 0, 0
+		};
+
+		pgstat_progress_update_multi_param(3, index, values);
 	}
 
 	list_free_deep(holders);
@@ -885,12 +1043,12 @@ WaitForLockersMultiple(List *locktags, LOCKMODE lockmode)
  * Same as WaitForLockersMultiple, for a single lock tag.
  */
 void
-WaitForLockers(LOCKTAG heaplocktag, LOCKMODE lockmode)
+WaitForLockers(LOCKTAG heaplocktag, LOCKMODE lockmode, bool progress)
 {
 	List	   *l;
 
 	l = list_make1(&heaplocktag);
-	WaitForLockersMultiple(l, lockmode);
+	WaitForLockersMultiple(l, lockmode, progress);
 	list_free(l);
 }
 
@@ -1059,16 +1217,14 @@ DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
 							 tag->locktag_field2,
 							 tag->locktag_field1);
 			break;
-		case LOCKTAG_RELATION_APPENDONLY_SEGMENT_FILE:
-			appendStringInfo(buf,
-							 _("segment file %u of appendonly relation %u of database %u"),
-							 tag->locktag_field3,
-							 tag->locktag_field2,
-							 tag->locktag_field1);
-			break;
 		case LOCKTAG_TRANSACTION:
 			appendStringInfo(buf,
 							 _("transaction %u"),
+							 tag->locktag_field1);
+			break;
+		case LOCKTAG_DISTRIB_TRANSACTION:
+			appendStringInfo(buf,
+							 _("distributed transaction %u"),
 							 tag->locktag_field1);
 			break;
 		case LOCKTAG_VIRTUALTRANSACTION:
@@ -1106,6 +1262,11 @@ DescribeLockTag(StringInfo buf, const LOCKTAG *tag)
 							 tag->locktag_field3,
 							 tag->locktag_field4);
 			break;
+		case LOCKTAG_RESOURCE_QUEUE:
+			appendStringInfo(buf,
+							 _("resource queue %u"),
+							 tag->locktag_field1);
+			break;
 		default:
 			appendStringInfo(buf,
 							 _("unrecognized locktag type %d"),
@@ -1137,7 +1298,6 @@ LockTagIsTemp(const LOCKTAG *tag)
 		case LOCKTAG_RELATION_EXTEND:
 		case LOCKTAG_PAGE:
 		case LOCKTAG_TUPLE:
-		case LOCKTAG_RELATION_APPENDONLY_SEGMENT_FILE:
 			/* check for lock on a temp relation */
 			/* field1 is dboid, field2 is reloid for all of these */
 			if ((Oid) tag->locktag_field1 == InvalidOid)
@@ -1166,7 +1326,7 @@ LockTagIsTemp(const LOCKTAG *tag)
  * we have to keep upgrading locks for AO table.
  */
 bool
-CondUpgradeRelLock(Oid relid, bool noWait)
+CondUpgradeRelLock(Oid relid)
 {
 	Relation rel;
 	bool upgrade = false;
@@ -1177,8 +1337,19 @@ CondUpgradeRelLock(Oid relid, bool noWait)
 	/*
 	 * try_relation_open will throw error if
 	 * the relation is invaliad
+	 *
+	 * GPDB_12_MERGE_FIXME: This used to open the relation with NoLock.
+	 * But that's not cool, and there's an assertion in try_table_open()
+	 * that forbids using NoLock if you're not holding some lock
+	 * already. I (Heikki) changed this to take a RowExclusiveLock here,
+	 * as that's what all the callers will acquire at a minimum anyway.
+	 * If we take a RowExclusiveLock here, we should keep it; it's silly
+	 * to acquire the lock, release it, and then re-acquire it in the
+	 * caller. Upgrading the lock if this returns true is problematic,
+	 * of course, so it would be nice to avoid that altogether, but
+	 * that's a harder task.
 	 */
-	rel = try_relation_open(relid, NoLock, noWait);
+	rel = try_table_open(relid, RowExclusiveLock, false);
 
 	if (!rel)
 		return false;
@@ -1187,7 +1358,47 @@ CondUpgradeRelLock(Oid relid, bool noWait)
 	else
 		upgrade = false;
 
-	relation_close(rel, NoLock);
+	table_close(rel, RowExclusiveLock);
 
 	return upgrade;
+}
+
+int UpgradeRelLockIfNecessary(Oid relid, int lockmode, bool *lockUpgraded)
+{
+	/*
+	 * Since we have introduced GDD(global deadlock detector), for heap table
+	 * we do not need to upgrade the requested lock. For ao table, because of
+	 * the design of ao table's visibilitymap, we have to upgrade the lock
+	 * (More details please refer https://groups.google.com/a/greenplum.org/forum/#!topic/gpdb-dev/iDj8WkLus4g)
+	 *
+	 * And we select for update statement's lock is upgraded at addRangeTableEntry.
+	 *
+	 * Note: This code could be improved substantially after we redesign ao table
+	 * and select for update.
+	 */
+	if (lockmode == RowExclusiveLock)
+	{
+		if (Gp_role == GP_ROLE_DISPATCH &&
+			CondUpgradeRelLock(relid))
+		{
+			lockmode = ExclusiveLock;
+			if (lockUpgraded != NULL)
+			*lockUpgraded = true;
+		}
+	}
+
+	return lockmode;
+}
+
+/*
+ * GetLockNameFromTagType
+ *
+ *	Given locktag type, return the corresponding lock name.
+ */
+const char *
+GetLockNameFromTagType(uint16 locktag_type)
+{
+	if (locktag_type > LOCKTAG_LAST_TYPE)
+		return "???";
+	return LockTagTypeNames[locktag_type];
 }

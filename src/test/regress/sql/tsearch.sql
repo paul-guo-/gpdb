@@ -125,15 +125,15 @@ SELECT ts_lexize('english_stem', 'identity');
 
 SELECT * FROM ts_token_type('default');
 
-SELECT * FROM ts_parse('default', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
+SELECT * FROM ts_parse('default', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net teodor@123-stack.net 123_teodor@stack.net 123-teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
 /usr/local/fff /awdf/dwqe/4325 rewt/ewr wefjn /wqe-324/ewr gist.h gist.h.c gist.c. readline 4.2 4.2. 4.2, readline-4.2 readline-4.2. 234
 <i <b> wow  < jqw <> qwerty');
 
-SELECT to_tsvector('english', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
+SELECT to_tsvector('english', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net teodor@123-stack.net 123_teodor@stack.net 123-teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
 /usr/local/fff /awdf/dwqe/4325 rewt/ewr wefjn /wqe-324/ewr gist.h gist.h.c gist.c. readline 4.2 4.2. 4.2, readline-4.2 readline-4.2. 234
 <i <b> wow  < jqw <> qwerty');
 
-SELECT length(to_tsvector('english', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
+SELECT length(to_tsvector('english', '345 qwe@efd.r '' http://www.com/ http://aew.werc.ewr/?ad=qwe&dw 1aew.werc.ewr/?ad=qwe&dw 2aew.werc.ewr http://3aew.werc.ewr/?ad=qwe&dw http://4aew.werc.ewr http://5aew.werc.ewr:8100/?  ad=qwe&dw 6aew.werc.ewr:8100/?ad=qwe&dw 7aew.werc.ewr:8100/?ad=qwe&dw=%20%32 +4.0e-10 qwe qwe qwqwe 234.435 455 5.005 teodor@stack.net teodor@123-stack.net 123_teodor@stack.net 123-teodor@stack.net qwe-wer asdf <fr>qwer jf sdjk<we hjwer <werrwe> ewr1> ewri2 <a href="qwe<qwe>">
 /usr/local/fff /awdf/dwqe/4325 rewt/ewr wefjn /wqe-324/ewr gist.h gist.h.c gist.c. readline 4.2 4.2. 4.2, readline-4.2 readline-4.2. 234
 <i <b> wow  < jqw <> qwerty'));
 
@@ -146,6 +146,10 @@ SELECT * from ts_debug('english', 'http://www.harewoodsolutions.co.uk/press.aspx
 SELECT * from ts_debug('english', 'http://aew.wer0c.ewr/id?ad=qwe&dw<span>');
 SELECT * from ts_debug('english', 'http://5aew.werc.ewr:8100/?');
 SELECT * from ts_debug('english', '5aew.werc.ewr:8100/?xx');
+SELECT token, alias,
+  dictionaries, dictionaries is null as dnull, array_dims(dictionaries) as ddims,
+  lexemes, lexemes is null as lnull, array_dims(lexemes) as ldims
+from ts_debug('english', 'a title');
 
 -- to_tsquery
 
@@ -162,6 +166,55 @@ SELECT plainto_tsquery('english', 'foo bar') && plainto_tsquery('english', 'asd'
 SELECT plainto_tsquery('english', 'foo bar') || plainto_tsquery('english', 'asd fg');
 SELECT plainto_tsquery('english', 'foo bar') || !!plainto_tsquery('english', 'asd fg');
 SELECT plainto_tsquery('english', 'foo bar') && 'asd | fg';
+
+-- Check stop word deletion, a and s are stop-words
+SELECT to_tsquery('english', '!(a & !b) & c');
+SELECT to_tsquery('english', '!(a & !b)');
+
+SELECT to_tsquery('english', '(1 <-> 2) <-> a');
+SELECT to_tsquery('english', '(1 <-> a) <-> 2');
+SELECT to_tsquery('english', '(a <-> 1) <-> 2');
+SELECT to_tsquery('english', 'a <-> (1 <-> 2)');
+SELECT to_tsquery('english', '1 <-> (a <-> 2)');
+SELECT to_tsquery('english', '1 <-> (2 <-> a)');
+
+SELECT to_tsquery('english', '(1 <-> 2) <3> a');
+SELECT to_tsquery('english', '(1 <-> a) <3> 2');
+SELECT to_tsquery('english', '(a <-> 1) <3> 2');
+SELECT to_tsquery('english', 'a <3> (1 <-> 2)');
+SELECT to_tsquery('english', '1 <3> (a <-> 2)');
+SELECT to_tsquery('english', '1 <3> (2 <-> a)');
+
+SELECT to_tsquery('english', '(1 <3> 2) <-> a');
+SELECT to_tsquery('english', '(1 <3> a) <-> 2');
+SELECT to_tsquery('english', '(a <3> 1) <-> 2');
+SELECT to_tsquery('english', 'a <-> (1 <3> 2)');
+SELECT to_tsquery('english', '1 <-> (a <3> 2)');
+SELECT to_tsquery('english', '1 <-> (2 <3> a)');
+
+SELECT to_tsquery('english', '((a <-> 1) <-> 2) <-> s');
+SELECT to_tsquery('english', '(2 <-> (a <-> 1)) <-> s');
+SELECT to_tsquery('english', '((1 <-> a) <-> 2) <-> s');
+SELECT to_tsquery('english', '(2 <-> (1 <-> a)) <-> s');
+SELECT to_tsquery('english', 's <-> ((a <-> 1) <-> 2)');
+SELECT to_tsquery('english', 's <-> (2 <-> (a <-> 1))');
+SELECT to_tsquery('english', 's <-> ((1 <-> a) <-> 2)');
+SELECT to_tsquery('english', 's <-> (2 <-> (1 <-> a))');
+
+SELECT to_tsquery('english', '((a <-> 1) <-> s) <-> 2');
+SELECT to_tsquery('english', '(s <-> (a <-> 1)) <-> 2');
+SELECT to_tsquery('english', '((1 <-> a) <-> s) <-> 2');
+SELECT to_tsquery('english', '(s <-> (1 <-> a)) <-> 2');
+SELECT to_tsquery('english', '2 <-> ((a <-> 1) <-> s)');
+SELECT to_tsquery('english', '2 <-> (s <-> (a <-> 1))');
+SELECT to_tsquery('english', '2 <-> ((1 <-> a) <-> s)');
+SELECT to_tsquery('english', '2 <-> (s <-> (1 <-> a))');
+
+SELECT to_tsquery('english', 'foo <-> (a <-> (the <-> bar))');
+SELECT to_tsquery('english', '((foo <-> a) <-> the) <-> bar');
+SELECT to_tsquery('english', 'foo <-> a <-> the <-> bar');
+SELECT phraseto_tsquery('english', 'PostgreSQL can be extended by the user in many ways');
+
 
 SELECT ts_rank_cd(to_tsvector('english', '
 Day after day, day after day,
@@ -198,6 +251,18 @@ Water, water, every where,
   Nor any drop to drink.
 S. T. Coleridge (1772-1834)
 '), to_tsquery('english', 'ocean'));
+
+SELECT ts_rank_cd(to_tsvector('english', '
+Day after day, day after day,
+  We stuck, nor breath nor motion,
+As idle as a painted Ship
+  Upon a painted Ocean.
+Water, water, every where
+  And all the boards did shrink;
+Water, water, every where,
+  Nor any drop to drink.
+S. T. Coleridge (1772-1834)
+'), to_tsquery('english', 'painted <-> Ship'));
 
 SELECT ts_rank_cd(strip(to_tsvector('both stripped')),
                   to_tsquery('both & stripped'));
@@ -243,6 +308,30 @@ S. T. Coleridge (1772-1834)
 ', to_tsquery('english', 'ocean'));
 
 SELECT ts_headline('english', '
+Day after day, day after day,
+  We stuck, nor breath nor motion,
+As idle as a painted Ship
+  Upon a painted Ocean.
+Water, water, every where
+  And all the boards did shrink;
+Water, water, every where,
+  Nor any drop to drink.
+S. T. Coleridge (1772-1834)
+', phraseto_tsquery('english', 'painted Ocean'));
+
+SELECT ts_headline('english', '
+Day after day, day after day,
+  We stuck, nor breath nor motion,
+As idle as a painted Ship
+  Upon a painted Ocean.
+Water, water, every where
+  And all the boards did shrink;
+Water, water, every where,
+  Nor any drop to drink.
+S. T. Coleridge (1772-1834)
+', phraseto_tsquery('english', 'idle as a painted Ship'));
+
+SELECT ts_headline('english', '
 <html>
 <!-- some comment -->
 <body>
@@ -255,6 +344,10 @@ ff-bg
 </body>
 </html>',
 to_tsquery('english', 'sea&foo'), 'HighlightAll=true');
+
+SELECT ts_headline('simple', '1 2 3 1 3'::text, '1 <-> 3', 'MaxWords=2, MinWords=1');
+SELECT ts_headline('simple', '1 2 3 1 3'::text, '1 & 3', 'MaxWords=4, MinWords=1');
+SELECT ts_headline('simple', '1 2 3 1 3'::text, '1 <-> 3', 'MaxWords=4, MinWords=1');
 
 --Check if headline fragments work
 SELECT ts_headline('english', '
@@ -317,6 +410,8 @@ CREATE TABLE test_tsquery (txtkeyword TEXT, txtsample TEXT);
 Moscow	moskva | moscow
 'Sanct Peter'	Peterburg | peter | 'Sanct Peterburg'
 'foo bar qq'	foo & (bar | qq) & city
+1 & (2 <-> 3)	2 <-> 4
+5 <-> 6	5 <-> 7
 \.
 \set ECHO all
 
@@ -356,6 +451,11 @@ SELECT ts_rewrite( 'moscow', 'SELECT keyword, sample FROM test_tsquery');
 SELECT ts_rewrite( 'moscow & hotel', 'SELECT keyword, sample FROM test_tsquery');
 SELECT ts_rewrite( 'bar & new & qq & foo & york', 'SELECT keyword, sample FROM test_tsquery');
 
+SELECT ts_rewrite('1 & (2 <-> 3)', 'SELECT keyword, sample FROM test_tsquery'::text );
+SELECT ts_rewrite('1 & (2 <2> 3)', 'SELECT keyword, sample FROM test_tsquery'::text );
+SELECT ts_rewrite('5 <-> (1 & (2 <-> 3))', 'SELECT keyword, sample FROM test_tsquery'::text );
+SELECT ts_rewrite('5 <-> (6 | 8)', 'SELECT keyword, sample FROM test_tsquery'::text );
+
 -- Check empty substitution
 SELECT ts_rewrite(to_tsquery('5 & (6 | 5)'), to_tsquery('5'), to_tsquery(''));
 SELECT ts_rewrite(to_tsquery('!5'), to_tsquery('5'), to_tsquery(''));
@@ -384,6 +484,12 @@ SELECT ts_rewrite( query, 'SELECT keyword, sample FROM test_tsquery' ) FROM to_t
 SELECT ts_rewrite( query, 'SELECT keyword, sample FROM test_tsquery' ) FROM to_tsquery('english', 'moscow') AS query;
 SELECT ts_rewrite( query, 'SELECT keyword, sample FROM test_tsquery' ) FROM to_tsquery('english', 'moscow & hotel') AS query;
 SELECT ts_rewrite( query, 'SELECT keyword, sample FROM test_tsquery' ) FROM to_tsquery('english', 'bar &  new & qq & foo & york') AS query;
+
+SELECT ts_rewrite(tsquery_phrase('foo', 'foo'), 'foo', 'bar | baz');
+SELECT to_tsvector('foo bar') @@
+  ts_rewrite(tsquery_phrase('foo', 'foo'), 'foo', 'bar | baz');
+SELECT to_tsvector('bar baz') @@
+  ts_rewrite(tsquery_phrase('foo', 'foo'), 'foo', 'bar | baz');
 
 RESET enable_seqscan;
 
@@ -420,6 +526,119 @@ SELECT count(*) FROM test_tsvector WHERE a @@ to_tsquery('345&qwerty');
 INSERT INTO test_tsvector (t) VALUES ('345 qwerty');
 
 SELECT count(*) FROM test_tsvector WHERE a @@ to_tsquery('345&qwerty');
+
+-- test finding items in GIN's pending list
+create temp table pendtest (ts tsvector);
+create index pendtest_idx on pendtest using gin(ts);
+insert into pendtest values (to_tsvector('Lore ipsam'));
+insert into pendtest values (to_tsvector('Lore ipsum'));
+select * from pendtest where 'ipsu:*'::tsquery @@ ts;
+select * from pendtest where 'ipsa:*'::tsquery @@ ts;
+select * from pendtest where 'ips:*'::tsquery @@ ts;
+select * from pendtest where 'ipt:*'::tsquery @@ ts;
+select * from pendtest where 'ipi:*'::tsquery @@ ts;
+
+--check OP_PHRASE on index
+create temp table phrase_index_test(fts tsvector);
+insert into phrase_index_test values ('A fat cat has just eaten a rat.');
+insert into phrase_index_test values (to_tsvector('english', 'A fat cat has just eaten a rat.'));
+create index phrase_index_test_idx on phrase_index_test using gin(fts);
+set enable_seqscan = off;
+select * from phrase_index_test where fts @@ phraseto_tsquery('english', 'fat cat');
+set enable_seqscan = on;
+
+-- test websearch_to_tsquery function
+select websearch_to_tsquery('simple', 'I have a fat:*ABCD cat');
+select websearch_to_tsquery('simple', 'orange:**AABBCCDD');
+select websearch_to_tsquery('simple', 'fat:A!cat:B|rat:C<');
+select websearch_to_tsquery('simple', 'fat:A : cat:B');
+
+select websearch_to_tsquery('simple', 'fat*rat');
+select websearch_to_tsquery('simple', 'fat-rat');
+select websearch_to_tsquery('simple', 'fat_rat');
+
+-- weights are completely ignored
+select websearch_to_tsquery('simple', 'abc : def');
+select websearch_to_tsquery('simple', 'abc:def');
+select websearch_to_tsquery('simple', 'a:::b');
+select websearch_to_tsquery('simple', 'abc:d');
+select websearch_to_tsquery('simple', ':');
+
+-- these operators are ignored
+select websearch_to_tsquery('simple', 'abc & def');
+select websearch_to_tsquery('simple', 'abc | def');
+select websearch_to_tsquery('simple', 'abc <-> def');
+select websearch_to_tsquery('simple', 'abc (pg or class)');
+
+-- NOT is ignored in quotes
+select websearch_to_tsquery('english', 'My brand new smartphone');
+select websearch_to_tsquery('english', 'My brand "new smartphone"');
+select websearch_to_tsquery('english', 'My brand "new -smartphone"');
+
+-- test OR operator
+select websearch_to_tsquery('simple', 'cat or rat');
+select websearch_to_tsquery('simple', 'cat OR rat');
+select websearch_to_tsquery('simple', 'cat "OR" rat');
+select websearch_to_tsquery('simple', 'cat OR');
+select websearch_to_tsquery('simple', 'OR rat');
+select websearch_to_tsquery('simple', '"fat cat OR rat"');
+select websearch_to_tsquery('simple', 'fat (cat OR rat');
+select websearch_to_tsquery('simple', 'or OR or');
+
+-- OR is an operator here ...
+select websearch_to_tsquery('simple', '"fat cat"or"fat rat"');
+select websearch_to_tsquery('simple', 'fat or(rat');
+select websearch_to_tsquery('simple', 'fat or)rat');
+select websearch_to_tsquery('simple', 'fat or&rat');
+select websearch_to_tsquery('simple', 'fat or|rat');
+select websearch_to_tsquery('simple', 'fat or!rat');
+select websearch_to_tsquery('simple', 'fat or<rat');
+select websearch_to_tsquery('simple', 'fat or>rat');
+select websearch_to_tsquery('simple', 'fat or ');
+
+-- ... but not here
+select websearch_to_tsquery('simple', 'abc orange');
+select websearch_to_tsquery('simple', 'abc OR1234');
+select websearch_to_tsquery('simple', 'abc or-abc');
+select websearch_to_tsquery('simple', 'abc OR_abc');
+
+-- test quotes
+select websearch_to_tsquery('english', '"pg_class pg');
+select websearch_to_tsquery('english', 'pg_class pg"');
+select websearch_to_tsquery('english', '"pg_class pg"');
+select websearch_to_tsquery('english', 'abc "pg_class pg"');
+select websearch_to_tsquery('english', '"pg_class pg" def');
+select websearch_to_tsquery('english', 'abc "pg pg_class pg" def');
+select websearch_to_tsquery('english', ' or "pg pg_class pg" or ');
+select websearch_to_tsquery('english', '""pg pg_class pg""');
+select websearch_to_tsquery('english', 'abc """"" def');
+select websearch_to_tsquery('english', 'cat -"fat rat"');
+select websearch_to_tsquery('english', 'cat -"fat rat" cheese');
+select websearch_to_tsquery('english', 'abc "def -"');
+select websearch_to_tsquery('english', 'abc "def :"');
+
+select websearch_to_tsquery('english', '"A fat cat" has just eaten a -rat.');
+select websearch_to_tsquery('english', '"A fat cat" has just eaten OR !rat.');
+select websearch_to_tsquery('english', '"A fat cat" has just (+eaten OR -rat)');
+
+select websearch_to_tsquery('english', 'this is ----fine');
+select websearch_to_tsquery('english', '(()) )))) this ||| is && -fine, "dear friend" OR good');
+select websearch_to_tsquery('english', 'an old <-> cat " is fine &&& too');
+
+select websearch_to_tsquery('english', '"A the" OR just on');
+select websearch_to_tsquery('english', '"a fat cat" ate a rat');
+
+select to_tsvector('english', 'A fat cat ate a rat') @@
+	websearch_to_tsquery('english', '"a fat cat" ate a rat');
+
+select to_tsvector('english', 'A fat grey cat ate a rat') @@
+	websearch_to_tsquery('english', '"a fat cat" ate a rat');
+
+-- cases handled by gettoken_tsvector()
+select websearch_to_tsquery('''');
+select websearch_to_tsquery('''abc''''def''');
+select websearch_to_tsquery('\abc');
+select websearch_to_tsquery('\');
 
 COPY test_tsvector TO '/tmp/test_tsvector.txt';
 COPY test_tsvector FROM '/tmp/test_tsvector.txt';

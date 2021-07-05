@@ -25,16 +25,62 @@ select substring('asd TO foo' from ' TO (([a-z0-9._]+|"([^"]+|"")+")+)');
 select substring('a' from '((a))+');
 select substring('a' from '((a)+)');
 
+-- Test regexp_match()
+select regexp_match('abc', '');
+select regexp_match('abc', 'bc');
+select regexp_match('abc', 'd') is null;
+select regexp_match('abc', '(B)(c)', 'i');
+select regexp_match('abc', 'Bd', 'ig'); -- error
+
+-- Test lookahead constraints
+select regexp_matches('ab', 'a(?=b)b*');
+select regexp_matches('a', 'a(?=b)b*');
+select regexp_matches('abc', 'a(?=b)b*(?=c)c*');
+select regexp_matches('ab', 'a(?=b)b*(?=c)c*');
+select regexp_matches('ab', 'a(?!b)b*');
+select regexp_matches('a', 'a(?!b)b*');
+select regexp_matches('b', '(?=b)b');
+select regexp_matches('a', '(?=b)b');
+
+-- Test lookbehind constraints
+select regexp_matches('abb', '(?<=a)b*');
+select regexp_matches('a', 'a(?<=a)b*');
+select regexp_matches('abc', 'a(?<=a)b*(?<=b)c*');
+select regexp_matches('ab', 'a(?<=a)b*(?<=b)c*');
+select regexp_matches('ab', 'a*(?<!a)b*');
+select regexp_matches('ab', 'a*(?<!a)b+');
+select regexp_matches('b', 'a*(?<!a)b+');
+select regexp_matches('a', 'a(?<!a)b*');
+select regexp_matches('b', '(?<=b)b');
+select regexp_matches('foobar', '(?<=f)b+');
+select regexp_matches('foobar', '(?<=foo)b+');
+select regexp_matches('foobar', '(?<=oo)b+');
+
+-- Test optimization of single-chr-or-bracket-expression lookaround constraints
+select 'xz' ~ 'x(?=[xy])';
+select 'xy' ~ 'x(?=[xy])';
+select 'xz' ~ 'x(?![xy])';
+select 'xy' ~ 'x(?![xy])';
+select 'x'  ~ 'x(?![xy])';
+select 'xyy' ~ '(?<=[xy])yy+';
+select 'zyy' ~ '(?<=[xy])yy+';
+select 'xyy' ~ '(?<![xy])yy+';
+select 'zyy' ~ '(?<![xy])yy+';
+
 -- Test conversion of regex patterns to indexable conditions
 -- start_ignore
 -- GPDB_93_MERGE_FIXME: the statistics and/or cost estimation code
--- in GPDB, combined with the much higher default random_page_cost
--- setting than PostgreSQL's, means that the planner chooses a seq scan
+-- in GPDB, means that the planner chooses a seq scan
 -- rather than an index scan for these. Force index scans, so that
 -- the test tests what it's supposed to test. But we should investigate
 -- why exactly the cost estimates are so different. There should be no
 -- difference in the true cost of scans on catalog tables - they're not
 -- even distributed.
+-- 
+-- After random_page_cost diminish, this guc still can not rid of.
+-- Our index scan selectivity result have tiny different with upstream,
+-- so that in a small table, e.g. pg_proc, planner will pick seq or bitmap
+-- scan instead.
 set enable_seqscan=off;
 set enable_bitmapscan=off;
 -- end_ignore
@@ -92,6 +138,16 @@ select regexp_matches('Programmer', '(\w)(.*?\1)', 'g');
 -- Test for proper matching of non-greedy iteration (bug #11478)
 select regexp_matches('foo/bar/baz',
                       '^([^/]+?)(?:/([^/]+?))(?:/([^/]+?))?$', '');
+
+-- Test that greediness can be overridden by outer quantifier
+select regexp_matches('llmmmfff', '^(l*)(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*){1,1}(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*){1,1}?(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*){1,1}?(.*){1,1}?(f*)$');
+select regexp_matches('llmmmfff', '^(l*?)(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*?){1,1}(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*?){1,1}?(.*)(f*)$');
+select regexp_matches('llmmmfff', '^(l*?){1,1}?(.*){1,1}?(f*)$');
 
 -- Test for infinite loop in cfindloop with zero-length possible match
 -- but no actual match (can only happen in the presence of backrefs)

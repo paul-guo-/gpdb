@@ -465,8 +465,10 @@ select * from inhdisttest_b;
 --
 create temporary table even (i int4, j int4) distributed by (i);
 insert into even select g*2, g*2 from generate_series(1, 10) g;
+analyze even;
 create temporary table odd (i int4, j int4) distributed by (i);
 insert into odd select g*2+1, g*2+1 from generate_series(1, 10) g;
+analyze odd;
 
 create temporary table ctas_x as
   select even.j, even.i as a, odd.i as b from even full outer join odd on (even.i = odd.i)
@@ -519,5 +521,17 @@ select * from a full join b on (a.i=b.i) full join c on (b.i=c.i);
 --
 create table xidtab (x xid) distributed by (x);
 insert into xidtab select g::text::xid from generate_series(1,5) g;
+insert into xidtab values ('1'); -- insert a duplicate
 select * from xidtab a, xidtab b, xidtab c where a.x=b.x and b.x = c.x;
 select * from xidtab group by x;
+select distinct x from xidtab;
+
+-- Simple sanity tests for gp_dist_random()
+CREATE TEMP TABLE gp_dist_random_table (a int);
+INSERT INTO gp_dist_random_table SELECT generate_series(1,5);
+SELECT * FROM gp_dist_random('gp_dist_random_table');
+CREATE SCHEMA "gp.dist.random.schema";
+CREATE TABLE "gp.dist.random.schema".gp_dist_random_table_with_schema
+    AS SELECT * FROM gp_dist_random('"gp_dist_random_table"');
+SELECT * FROM gp_dist_random('"gp.dist.random.schema".gp_dist_random_table_with_schema');
+DROP SCHEMA "gp.dist.random.schema" CASCADE;

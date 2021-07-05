@@ -3,7 +3,7 @@
  * cdbdistributedsnapshot.h
  *
  * Portions Copyright (c) 2007-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -21,12 +21,6 @@
 
 typedef struct DistributedSnapshot
 {
-	/*
-	 * The unique timestamp for this start of the DTM.  It applies to all of
-	 * the distributed transactions in this snapshot.
-	 */
-	DistributedTransactionTimeStamp	distribTransactionTimeStamp;
-
 	/*
 	 * The lowest distributed transaction being used for distributed snapshots.
 	 */
@@ -68,6 +62,7 @@ typedef enum
 	DISTRIBUTEDSNAPSHOT_COMMITTED_NONE = 0,		
 	DISTRIBUTEDSNAPSHOT_COMMITTED_INPROGRESS,
 	DISTRIBUTEDSNAPSHOT_COMMITTED_VISIBLE,
+	DISTRIBUTEDSNAPSHOT_COMMITTED_UNKNOWN,
 	DISTRIBUTEDSNAPSHOT_COMMITTED_IGNORE
 } DistributedSnapshotCommitted;
 

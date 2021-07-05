@@ -27,7 +27,7 @@
  * always be so; try to be careful to maintain the distinction.)
  *
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  * src/include/nodes/pg_list.h
@@ -71,9 +71,7 @@ struct ListCell
 /*
  * These routines are used frequently. However, we can't implement
  * them as macros, since we want to avoid double-evaluation of macro
- * arguments. Therefore, we implement them using static inline functions
- * if supported by the compiler, or as regular functions otherwise.
- * See STATIC_IF_INLINE in c.h.
+ * arguments.
  */
 static inline ListCell *
 list_head(const List *l)
@@ -142,16 +140,19 @@ list_length(const List *l)
 #define list_make2(x1,x2)			lcons(x1, list_make1(x2))
 #define list_make3(x1,x2,x3)		lcons(x1, list_make2(x2, x3))
 #define list_make4(x1,x2,x3,x4)		lcons(x1, list_make3(x2, x3, x4))
+#define list_make5(x1,x2,x3,x4,x5)	lcons(x1, list_make4(x2, x3, x4, x5))
 
 #define list_make1_int(x1)			lcons_int(x1, NIL)
 #define list_make2_int(x1,x2)		lcons_int(x1, list_make1_int(x2))
 #define list_make3_int(x1,x2,x3)	lcons_int(x1, list_make2_int(x2, x3))
 #define list_make4_int(x1,x2,x3,x4) lcons_int(x1, list_make3_int(x2, x3, x4))
+#define list_make5_int(x1,x2,x3,x4,x5)	lcons_int(x1, list_make4_int(x2, x3, x4, x5))
 
 #define list_make1_oid(x1)			lcons_oid(x1, NIL)
 #define list_make2_oid(x1,x2)		lcons_oid(x1, list_make1_oid(x2))
 #define list_make3_oid(x1,x2,x3)	lcons_oid(x1, list_make2_oid(x2, x3))
 #define list_make4_oid(x1,x2,x3,x4) lcons_oid(x1, list_make3_oid(x2, x3, x4))
+#define list_make5_oid(x1,x2,x3,x4,x5)	lcons_oid(x1, list_make4_oid(x2, x3, x4, x5))
 
 /*
  * foreach -
@@ -188,6 +189,20 @@ list_length(const List *l)
 		 (cell1) = lnext(cell1), (cell2) = lnext(cell2))
 
 /*
+ * for_both_cell -
+ *	  a convenience macro which loops through two lists starting from the
+ *	  specified cells of each. This macro loops through both lists at the same
+ *	  time, stopping when either list runs out of elements.  Depending on the
+ *	  requirements of the call site, it may also be wise to assert that the
+ *	  lengths of the two lists are equal, and initcell1 and initcell2 are at
+ *	  the same position in the respective lists.
+ */
+#define for_both_cell(cell1, initcell1, cell2, initcell2)	\
+	for ((cell1) = (initcell1), (cell2) = (initcell2);		\
+		 (cell1) != NULL && (cell2) != NULL;				\
+		 (cell1) = lnext(cell1), (cell2) = lnext(cell2))
+
+/*
  * forthree -
  *	  the same for three lists
  */
@@ -195,6 +210,32 @@ list_length(const List *l)
 	for ((cell1) = list_head(list1), (cell2) = list_head(list2), (cell3) = list_head(list3); \
 		 (cell1) != NULL && (cell2) != NULL && (cell3) != NULL;		\
 		 (cell1) = lnext(cell1), (cell2) = lnext(cell2), (cell3) = lnext(cell3))
+
+/*
+ * forfour -
+ *	  the same for four lists
+ */
+#define forfour(cell1, list1, cell2, list2, cell3, list3, cell4, list4) \
+	for ((cell1) = list_head(list1), (cell2) = list_head(list2), \
+		 (cell3) = list_head(list3), (cell4) = list_head(list4); \
+		 (cell1) != NULL && (cell2) != NULL && \
+		 (cell3) != NULL && (cell4) != NULL; \
+		 (cell1) = lnext(cell1), (cell2) = lnext(cell2), \
+		 (cell3) = lnext(cell3), (cell4) = lnext(cell4))
+
+/*
+ * forfive -
+ *	  the same for five lists
+ */
+#define forfive(cell1, list1, cell2, list2, cell3, list3, cell4, list4, cell5, list5) \
+	for ((cell1) = list_head(list1), (cell2) = list_head(list2), \
+		 (cell3) = list_head(list3), (cell4) = list_head(list4), \
+		 (cell5) = list_head(list5); \
+		 (cell1) != NULL && (cell2) != NULL && (cell3) != NULL && \
+		 (cell4) != NULL && (cell5) != NULL; \
+		 (cell1) = lnext(cell1), (cell2) = lnext(cell2), \
+		 (cell3) = lnext(cell3), (cell4) = lnext(cell4), \
+		 (cell5) = lnext(cell5))
 
 extern List *lappend(List *list, void *datum);
 extern List *lappend_int(List *list, int datum);
@@ -261,6 +302,9 @@ extern List *list_copy(const List *list);
 extern List *list_copy_tail(const List *list, int nskip);
 
 extern void *list_nth_replace(List *list, int n, void *new_data);
+
+typedef int (*list_qsort_comparator) (const void *a, const void *b);
+extern List *list_qsort(const List *list, list_qsort_comparator cmp);
 
 /*
  * To ease migration to the new list API, a set of compatibility
@@ -329,6 +373,6 @@ extern void *list_nth_replace(List *list, int n, void *new_data);
 #define listCopy(list)				list_copy(list)
 
 extern int	length(List *list);
-#endif   /* ENABLE_LIST_COMPAT */
+#endif							/* ENABLE_LIST_COMPAT */
 
-#endif   /* PG_LIST_H */
+#endif							/* PG_LIST_H */

@@ -3,7 +3,7 @@
  *
  *	information support functions
  *
- *	Copyright (c) 2010-2015, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/info.c
  */
 
@@ -12,15 +12,16 @@
 #include "pg_upgrade.h"
 
 #include "access/transam.h"
-#include "catalog/pg_class.h"
+#include "catalog/pg_class_d.h"
 
+#include "greenplum/pg_upgrade_greenplum.h"
 
 static void create_rel_filename_map(const char *old_data, const char *new_data,
-						const DbInfo *old_db, const DbInfo *new_db,
-						const RelInfo *old_rel, const RelInfo *new_rel,
-						FileNameMap *map);
+									const DbInfo *old_db, const DbInfo *new_db,
+									const RelInfo *old_rel, const RelInfo *new_rel,
+									FileNameMap *map);
 static void report_unmatched_relation(const RelInfo *rel, const DbInfo *db,
-						  bool is_new_db);
+									  bool is_new_db);
 static void free_db_and_rel_infos(DbInfoArr *db_arr);
 static void get_db_infos(ClusterInfo *cluster);
 static void get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo);
@@ -240,10 +241,12 @@ create_rel_filename_map(const char *old_data, const char *new_data,
 	map->gpdb4_heap_conversion_needed = old_rel->gpdb4_heap_conversion_needed;
 	map->type = old_rel->reltype;
 
+#if 0 /* GPDB_12_MERGE_FIXME - replace relstorage check which was removed */
 	/* An AO table doesn't necessarily have segment 0 at all. */
 	map->missing_seg0_ok = relstorage_is_ao(old_rel->relstorage);
+#endif
 
-	/* used only for logging and error reporing, old/new are identical */
+	/* used only for logging and error reporting, old/new are identical */
 	map->nspname = old_rel->nspname;
 	map->relname = old_rel->relname;
 }
@@ -272,7 +275,7 @@ report_unmatched_relation(const RelInfo *rel, const DbInfo *db, bool is_new_db)
 			{
 				snprintf(reldesc + strlen(reldesc),
 						 sizeof(reldesc) - strlen(reldesc),
-						 " which is an index on \"%s.%s\"",
+						 _(" which is an index on \"%s.%s\""),
 						 hrel->nspname, hrel->relname);
 				/* Shift attention to index's table for toast check */
 				rel = hrel;
@@ -282,7 +285,7 @@ report_unmatched_relation(const RelInfo *rel, const DbInfo *db, bool is_new_db)
 		if (i >= db->rel_arr.nrels)
 			snprintf(reldesc + strlen(reldesc),
 					 sizeof(reldesc) - strlen(reldesc),
-					 " which is an index on OID %u", rel->indtable);
+					 _(" which is an index on OID %u"), rel->indtable);
 	}
 	if (rel->toastheap)
 	{
@@ -294,7 +297,7 @@ report_unmatched_relation(const RelInfo *rel, const DbInfo *db, bool is_new_db)
 			{
 				snprintf(reldesc + strlen(reldesc),
 						 sizeof(reldesc) - strlen(reldesc),
-						 " which is the TOAST table for \"%s.%s\"",
+						 _(" which is the TOAST table for \"%s.%s\""),
 						 brel->nspname, brel->relname);
 				break;
 			}
@@ -302,7 +305,7 @@ report_unmatched_relation(const RelInfo *rel, const DbInfo *db, bool is_new_db)
 		if (i >= db->rel_arr.nrels)
 			snprintf(reldesc + strlen(reldesc),
 					 sizeof(reldesc) - strlen(reldesc),
-					 " which is the TOAST table for OID %u", rel->toastheap);
+					 _(" which is the TOAST table for OID %u"), rel->toastheap);
 	}
 
 	if (is_new_db)
@@ -353,7 +356,11 @@ get_db_and_rel_infos(ClusterInfo *cluster)
 	for (dbnum = 0; dbnum < cluster->dbarr.ndbs; dbnum++)
 		get_rel_infos(cluster, &cluster->dbarr.dbs[dbnum]);
 
-	pg_log(PG_VERBOSE, "\n%s databases:\n", CLUSTER_NAME(cluster));
+	if (cluster == &old_cluster)
+		pg_log(PG_VERBOSE, "\nsource databases:\n");
+	else
+		pg_log(PG_VERBOSE, "\ntarget databases:\n");
+
 	if (log_opts.verbose)
 		print_db_infos(&cluster->dbarr);
 }
@@ -429,11 +436,11 @@ get_db_infos(ClusterInfo *cluster)
 /*
  * get_rel_infos()
  *
- * gets the relinfos for all the user tables of the database referred
- * by "db".
+ * gets the relinfos for all the user tables and indexes of the database
+ * referred to by "dbinfo".
  *
- * NOTE: we assume that relations/entities with oids greater than
- * FirstNormalObjectId belongs to the user
+ * Note: the resulting RelInfo array is assumed to be sorted by OID.
+ * This allows later processing to match up old and new databases efficiently.
  */
 static void
 get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo)
@@ -527,109 +534,118 @@ get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo)
 
 		PQclear(res);
 	}
+	query[0] = '\0';			/* initialize query string to empty */
 
 	/*
+	 * Create a CTE that collects OIDs of regular user tables, including
+	 * matviews and sequences, but excluding toast tables and indexes.  We
+	 * assume that relations with OIDs >= FirstNormalObjectId belong to the
+	 * user.  (That's probably redundant with the namespace-name exclusions,
+	 * but let's be safe.)
+	 *
 	 * pg_largeobject contains user data that does not appear in pg_dump
-	 * --schema-only output, so we have to copy that system table heap and
-	 * index.  We could grab the pg_largeobject oids from template1, but it is
-	 * easy to treat it as a normal table. Order by oid so we can join old/new
-	 * structures efficiently.
+	 * output, so we have to copy that system table.  It's easiest to do that
+	 * by treating it as a user table.
 	 */
-
-	snprintf(query, sizeof(query),
-	/* get regular heap */
-			 "WITH regular_heap (reloid, indtable, toastheap) AS ("
-			 "	SELECT c.oid, i.indrelid, 0::oid "
-			 "	FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
-			 "			ON c.relnamespace = n.oid "
-			 "	LEFT OUTER JOIN pg_catalog.pg_index i "
-			 "			ON c.oid = i.indexrelid "
-			 "	WHERE relkind IN ('r', 'o', 'b', 'i'%s%s) AND "
-
-	/*
-	 * pg_dump only dumps valid indexes;  testing indisready is necessary in
-	 * 9.2, and harmless in earlier/later versions.
-	 */
-			 " %s "
+	snprintf(query + strlen(query), sizeof(query) - strlen(query),
+			 "WITH regular_heap (reloid, indtable, toastheap) AS ( "
+			 "  SELECT c.oid, 0::oid, 0::oid "
+			 "  FROM pg_catalog.pg_class c JOIN pg_catalog.pg_namespace n "
+			 "         ON c.relnamespace = n.oid "
+			 "  WHERE relkind IN (" CppAsString2(RELKIND_RELATION) ", "
+			 CppAsString2(RELKIND_AOSEGMENTS) ", "
+			 CppAsString2(RELKIND_AOBLOCKDIR) ", "
+			 CppAsString2(RELKIND_MATVIEW) " %s) AND "
 	/* workaround for Greenplum 4.3 bugs */
 			 " %s "
 	/* exclude possible orphaned temp tables */
-			 "	  ((n.nspname !~ '^pg_temp_' AND "
-			 "	    n.nspname !~ '^pg_toast_temp_' AND "
-	/* skip pg_toast because toast index have relkind == 'i', not 't' */
-			 "    n.nspname NOT IN ('pg_catalog', 'information_schema', "
-			 "						'binary_upgrade', 'pg_toast') AND "
-			 "    n.nspname NOT IN ('gp_toolkit', 'pg_bitmapindex', 'pg_aoseg') AND "
-			 "	  c.oid >= %u) "
-			 "  OR (n.nspname = 'pg_catalog' AND "
-	"    relname IN ('pg_largeobject', 'pg_largeobject_loid_pn_index'%s) ))), "
-
-	/*
-	 * We have to gather the TOAST tables in later steps because we can't
-	 * schema-qualify TOAST tables.
-	 */
-	/* get TOAST heap */
-			 "	toast_heap (reloid, indtable, toastheap) AS ( "
-			 "	SELECT reltoastrelid, 0::oid, c.oid "
-			 "	FROM regular_heap JOIN pg_catalog.pg_class c "
-			 "		ON regular_heap.reloid = c.oid "
-			 "		AND c.reltoastrelid != %u), "
-	/* get indexes on regular and TOAST heap */
-			 "	all_index (reloid, indtable, toastheap) AS ( "
-			 "	SELECT indexrelid, indrelid, 0::oid"
-			 "	FROM pg_index "
-			 "	WHERE indisvalid "
-			 "    AND indrelid IN (SELECT reltoastrelid "
-			 "        FROM (SELECT reloid FROM regular_heap "
-			 "			   UNION ALL "
-			 "			   SELECT reloid FROM toast_heap) all_heap "
-			 "            JOIN pg_catalog.pg_class c "
-			 "            ON all_heap.reloid = c.oid "
-			 "            AND c.reltoastrelid != %u)) "
-	/* get all rels */
-			 "SELECT all_rels.*, n.nspname, c.relname, "
-			 "  c.relstorage, c.relkind, "
-			 "	c.relfilenode, c.reltablespace, %s "
-			 "FROM (SELECT reloid, indtable, toastheap FROM regular_heap "
-			 "	   UNION ALL "
-			 "	   SELECT reloid, indtable, toastheap FROM toast_heap  "
-			 "	   UNION ALL "
-			 "	   SELECT reloid, indtable, toastheap FROM all_index) all_rels "
-			 "  JOIN pg_catalog.pg_class c "
-			 "		ON all_rels.reloid = c.oid "
-			 "  JOIN pg_catalog.pg_namespace n "
-			 "	   ON c.relnamespace = n.oid "
-			 "  LEFT OUTER JOIN pg_catalog.pg_tablespace t "
-			 "	   ON c.reltablespace = t.oid "
-	/* we preserve pg_class.oid so we sort by it to match old/new */
-			 "ORDER BY 1;",
-
-
-	/* Greenplum 4.3/5X use 'm' as aovisimap which is now matview in 6X and above. */
-			 (GET_MAJOR_VERSION(old_cluster.major_version) <= 803) ?
-			 ", 'm'" : ", 'M'",
+			 "    ((n.nspname !~ '^pg_temp_' AND "
+			 "      n.nspname !~ '^pg_toast_temp_' AND "
+			 "      n.nspname NOT IN ('pg_catalog', 'information_schema', "
+			 "                        'gp_toolkit', 'pg_bitmapindex', 'pg_aoseg', "
+			 "                        'binary_upgrade', 'pg_toast') AND "
+			 "      c.oid >= %u::pg_catalog.oid) OR "
+			 "     (n.nspname = 'pg_catalog' AND "
+			 "      relname IN ('pg_largeobject') ))), ",
 	/* see the comment at the top of old_8_3_create_sequence_script() */
 			 (GET_MAJOR_VERSION(old_cluster.major_version) <= 803) ?
-			 "" : ", 'S'",
-	/* Greenplum 4.3 does not have indisvalid nor indisready */
-			 (GET_MAJOR_VERSION(old_cluster.major_version) == 802) ?
-			 "" : " i.indisvalid IS DISTINCT FROM false AND "
-			 	  "i.indisready IS DISTINCT FROM false AND ",
+			 "" : ", " CppAsString2(RELKIND_SEQUENCE),
 	/* workaround for Greenplum 4.3 bugs */
 			 (GET_MAJOR_VERSION(old_cluster.major_version) > 802) ?
-			 "" : "  AND relname NOT IN ('__gp_localid', '__gp_masterid', "
-			 		 "'__gp_log_segment_ext', '__gp_log_master_ext', 'gp_disk_free') ",
-			FirstNormalObjectId,
-	/* does pg_largeobject_metadata need to be migrated? */
-			(GET_MAJOR_VERSION(old_cluster.major_version) <= 804) ?
-	"" : ", 'pg_largeobject_metadata', 'pg_largeobject_metadata_oid_index'",
-			InvalidOid, InvalidOid,
+			 "" : "  relname NOT IN ('__gp_localid', '__gp_masterid', "
+			 		 "'__gp_log_segment_ext', '__gp_log_master_ext', 'gp_disk_free') AND ",
+			 FirstNormalObjectId);
+
+	/*
+	 * Add a CTE that collects OIDs of toast tables belonging to the tables
+	 * selected by the regular_heap CTE.  (We have to do this separately
+	 * because the namespace-name rules above don't work for toast tables.)
+	 */
+	snprintf(query + strlen(query), sizeof(query) - strlen(query),
+			 "  toast_heap (reloid, indtable, toastheap) AS ( "
+			 "  SELECT c.reltoastrelid, 0::oid, c.oid "
+			 "  FROM regular_heap JOIN pg_catalog.pg_class c "
+			 "      ON regular_heap.reloid = c.oid "
+			 "  WHERE c.reltoastrelid != 0), ");
+
+	/*
+	 * Add a CTE that collects OIDs of all valid indexes on the previously
+	 * selected tables.  We can ignore invalid indexes since pg_dump does.
+	 * Testing indisready is necessary in 9.2, and harmless in earlier/later
+	 * versions.
+	 */
+	snprintf(query + strlen(query), sizeof(query) - strlen(query),
+			 "  all_index (reloid, indtable, toastheap) AS ( "
+			 "  SELECT indexrelid, indrelid, 0::oid "
+			 "  FROM pg_catalog.pg_index "
+			 "  WHERE indisvalid AND indisready "
+			 "    AND indrelid IN "
+			 "        (SELECT reloid FROM regular_heap "
+			 "         UNION ALL "
+			 "         SELECT reloid FROM toast_heap)) ");
+
+	/*
+	 * And now we can write the query that retrieves the data we want for each
+	 * heap and index relation.  Make sure result is sorted by OID.
+	 */
+	snprintf(query + strlen(query), sizeof(query) - strlen(query),
+			 "SELECT all_rels.*, n.nspname, c.relname, "
+			 "  %s as relstorage, c.relkind, "
+			 "  c.relfilenode, c.reltablespace, %s "
+			 "FROM (SELECT * FROM regular_heap "
+			 "      UNION ALL "
+			 "      SELECT * FROM toast_heap "
+			 "      UNION ALL "
+			 "      SELECT * FROM all_index) all_rels "
+			 "  JOIN pg_catalog.pg_class c "
+			 "      ON all_rels.reloid = c.oid "
+			 "  JOIN pg_catalog.pg_namespace n "
+			 "     ON c.relnamespace = n.oid "
+			 "  %s"
+			 "  LEFT OUTER JOIN pg_catalog.pg_tablespace t "
+			 "     ON c.reltablespace = t.oid "
+			 "ORDER BY 1;",
+	/*
+	 * GPDB 7 with PostgreSQL v12 merge removed the relstorage column.
+	 * It was replaced with the upstream 'relam'.
+	 */
+			 (GET_MAJOR_VERSION(cluster->major_version) <= 906) ?
+			 "c.relstorage" :
+			 "(CASE WHEN am.amname = 'ao_row' THEN 'a'"
+			 " WHEN am.amname = 'ao_column' THEN 'c'"
+			 " WHEN am.amname = 'heap' THEN 'h'"
+			 " WHEN c.relkind = 'f' THEN 'x'"
+			 " ELSE '' END)",
+
 	/*
 	 * 9.2 removed the spclocation column in upstream postgres, in GPDB it was
 	 * removed in 6.0.0 during the 8.4 merge
 	 */
 			(GET_MAJOR_VERSION(cluster->major_version) <= 803) ?
-			 "t.spclocation" : "pg_catalog.pg_tablespace_location(t.oid) AS spclocation");
+			 "t.spclocation" : "pg_catalog.pg_tablespace_location(t.oid) AS spclocation",
+
+			(GET_MAJOR_VERSION(cluster->major_version) <= 1000) ?
+			 "" : "LEFT OUTER JOIN pg_catalog.pg_am am ON c.relam = am.oid");
 
 	res = executeQueryOrDie(conn, "%s", query);
 
@@ -689,7 +705,7 @@ get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo)
 		curr->relfilenode = atooid(PQgetvalue(res, relnum, i_relfilenode));
 		curr->tblsp_alloc = false;
 
-		/* Is the tablespace oid non-zero? */
+		/* Is the tablespace oid non-default? */
 		if (atooid(PQgetvalue(res, relnum, i_reltablespace)) != 0)
 		{
 			/*
@@ -718,11 +734,11 @@ get_rel_infos(ClusterInfo *cluster, DbInfo *dbinfo)
 		relkind = PQgetvalue(res, relnum, i_relkind) [0];
 
 		/*
-		 * RELSTORAGE_AOROWS and RELSTORAGE_AOCOLS. The structure of append
+		 * The structure of append
 		 * optimized tables is similar enough for row and column oriented
 		 * tables so we can handle them both here.
 		 */
-		if (relstorage == RELSTORAGE_AOROWS || relstorage == RELSTORAGE_AOCOLS)
+		if (is_appendonly(relstorage))
 		{
 			char	   *segrel;
 			char	   *visimaprel;

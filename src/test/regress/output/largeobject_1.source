@@ -10,11 +10,11 @@ CREATE TABLE lotest_stash_values (loid oid, fd integer);
 -- returns the large object id
 INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42);
 -- Test ALTER LARGE OBJECT
-CREATE ROLE regresslo;
+CREATE ROLE regress_lo_user;
 DO $$
   BEGIN
     EXECUTE 'ALTER LARGE OBJECT ' || (select loid from lotest_stash_values)
-		|| ' OWNER TO regresslo';
+		|| ' OWNER TO regress_lo_user';
   END
 $$;
 SELECT
@@ -23,9 +23,9 @@ FROM
 	lotest_stash_values s
 	JOIN pg_largeobject_metadata lo ON s.loid = lo.oid
 	JOIN pg_authid rol ON lo.lomowner = rol.oid;
-  rolname  
------------
- regresslo
+     rolname     
+-----------------
+ regress_lo_user
 (1 row)
 
 -- NOTE: large objects require transactions
@@ -385,10 +385,10 @@ SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_va
          1
 (1 row)
 
-\lo_import 'results/lotest.txt'
+\lo_import '@abs_builddir@/results/lotest.txt'
 \set newloid :LASTOID
 -- just make sure \lo_export does not barf
-\lo_export :newloid 'results/lotest2.txt'
+\lo_export :newloid '@abs_builddir@/results/lotest2.txt'
 -- This is a hack to test that export/import are reversible
 -- This uses knowledge about the inner workings of large object mechanism
 -- which should not be used outside it.  This makes it a HACK
@@ -407,7 +407,7 @@ SELECT lo_unlink(loid) FROM lotest_stash_values;
 
 TRUNCATE lotest_stash_values;
 \lo_unlink :newloid
-\lo_import 'results/lotest.txt'
+\lo_import '@abs_builddir@/results/lotest.txt'
 \set newloid_1 :LASTOID
 SELECT lo_from_bytea(0, lo_get(:newloid_1)) AS newloid_2
 \gset
@@ -478,4 +478,4 @@ SELECT lo_create(3001);
 COMMENT ON LARGE OBJECT 3001 IS 'testing comments';
 -- Clean up
 DROP TABLE lotest_stash_values;
-DROP ROLE regresslo;
+DROP ROLE regress_lo_user;

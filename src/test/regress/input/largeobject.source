@@ -13,11 +13,11 @@ CREATE TABLE lotest_stash_values (loid oid, fd integer) DISTRIBUTED BY (loid);
 INSERT INTO lotest_stash_values (loid) SELECT lo_creat(42);
 
 -- Test ALTER LARGE OBJECT
-CREATE ROLE regresslo;
+CREATE ROLE regress_lo_user;
 DO $$
   BEGIN
     EXECUTE 'ALTER LARGE OBJECT ' || (select loid from lotest_stash_values)
-		|| ' OWNER TO regresslo';
+		|| ' OWNER TO regress_lo_user';
   END
 $$;
 SELECT
@@ -203,12 +203,12 @@ END;
 
 SELECT lo_export(loid, '@abs_builddir@/results/lotest.txt') FROM lotest_stash_values;
 
-\lo_import 'results/lotest.txt'
+\lo_import '@abs_builddir@/results/lotest.txt'
 
 \set newloid :LASTOID
 
 -- just make sure \lo_export does not barf
-\lo_export :newloid 'results/lotest2.txt'
+\lo_export :newloid '@abs_builddir@/results/lotest2.txt'
 
 -- This is a hack to test that export/import are reversible
 -- This uses knowledge about the inner workings of large object mechanism
@@ -223,7 +223,7 @@ TRUNCATE lotest_stash_values;
 
 \lo_unlink :newloid
 
-\lo_import 'results/lotest.txt'
+\lo_import '@abs_builddir@/results/lotest.txt'
 
 \set newloid_1 :LASTOID
 
@@ -260,4 +260,4 @@ COMMENT ON LARGE OBJECT 3001 IS 'testing comments';
 -- Clean up
 DROP TABLE lotest_stash_values;
 
-DROP ROLE regresslo;
+DROP ROLE regress_lo_user;

@@ -1,36 +1,27 @@
-import codecs
 import math
 import fnmatch
-import getpass
 import glob
 import json
-import yaml
 import os
 import re
 import pipes
-import platform
 import shutil
 import socket
-import tarfile
 import tempfile
-import thread
-import json
-try:
-    from subprocess32 import Popen, PIPE
-except:
-    from subprocess import Popen, PIPE
-import commands
-import signal
+import _thread
+import time
+from subprocess import check_output, Popen, PIPE
+import subprocess
 from collections import defaultdict
 
 import psutil
 from behave import given, when, then
 from datetime import datetime, timedelta
-from time import sleep
 from os import path
+from contextlib import closing
 
 from gppylib.gparray import GpArray, ROLE_PRIMARY, ROLE_MIRROR
-from gppylib.commands.gp import SegmentStart, GpStandbyStart, MasterStop
+from gppylib.commands.gp import SegmentStart, GpStandbyStart, CoordinatorStop
 from gppylib.commands import gp
 from gppylib.commands.unix import findCmdInPath, Scp
 from gppylib.operations.startSegments import MIRROR_MODE_MIRRORLESS
@@ -42,24 +33,25 @@ from test.behave_utils.cluster_expand import Gpexpand
 from test.behave_utils.gpexpand_dml import TestDML
 from gppylib.commands.base import Command, REMOTE
 from gppylib import pgconf
+from gppylib.operations.package import linux_distribution_id, linux_distribution_version
 
 
-master_data_dir = os.environ.get('MASTER_DATA_DIRECTORY')
-if master_data_dir is None:
-    raise Exception('Please set MASTER_DATA_DIRECTORY in environment')
+coordinator_data_dir = gp.get_coordinatordatadir()
+if coordinator_data_dir is None:
+    raise Exception('Please set COORDINATOR_DATA_DIRECTORY in environment')
 
 def show_all_installed(gphome):
-    x = platform.linux_distribution()
+    x = linux_distribution_id(), linux_distribution_version()
     name = x[0].lower()
     if 'ubuntu' in name:
-        return "dpkg --get-selections --admindir=%s/share/packages/database/deb | awk '{print \$1}'" % gphome
+        return "dpkg --get-selections --admindir=%s/share/packages/database/deb | awk '{print $1}'" % gphome
     elif 'centos' in name:
         return "rpm -qa --dbpath %s/share/packages/database" % gphome
     else:
         raise Exception('UNKNOWN platform: %s' % str(x))
 
 def remove_native_package_command(gphome, full_gppkg_name):
-    x = platform.linux_distribution()
+    x = linux_distribution_id(), linux_distribution_version()
     name = x[0].lower()
     if 'ubuntu' in name:
         return 'fakeroot dpkg --force-not-root --log=/dev/null --instdir=%s --admindir=%s/share/packages/database/deb -r %s' % (gphome, gphome, full_gppkg_name)
@@ -77,23 +69,16 @@ def create_local_demo_cluster(context, extra_config='', with_mirrors='true', wit
     if num_primaries is None:
         num_primaries = os.getenv('NUM_PRIMARY_MIRROR_PAIRS', 3)
 
-    standby_port = ''
-    if with_standby == 'true':
-        standby_port=os.getenv('STANDBY_DEMO_PORT', 16432)
-
+    os.environ['PGPORT'] = '15432'
     cmd = """
         cd ../gpAux/gpdemo &&
-        export MASTER_DEMO_PORT={master_port} &&
         export DEMO_PORT_BASE={port_base} &&
-        export STANDBY_DEMO_PORT={standby_port} &&
         export NUM_PRIMARY_MIRROR_PAIRS={num_primary_mirror_pairs} &&
         export WITH_STANDBY={with_standby} &&
         export WITH_MIRRORS={with_mirrors} &&
         ./demo_cluster.sh -d && ./demo_cluster.sh -c &&
         {extra_config} ./demo_cluster.sh
-    """.format(master_port=os.getenv('MASTER_PORT', 15432),
-               port_base=os.getenv('PORT_BASE', 25432),
-               standby_port=standby_port,
+    """.format(port_base=os.getenv('PORT_BASE', 15432),
                num_primary_mirror_pairs=num_primaries,
                with_mirrors=with_mirrors,
                with_standby=with_standby,
@@ -105,7 +90,7 @@ def create_local_demo_cluster(context, extra_config='', with_mirrors='true', wit
 
 def _cluster_contains_standard_demo_segments():
     """
-    Returns True iff a cluster contains a master, a standby, and three
+    Returns True iff a cluster contains a coordinator, a standby, and three
     primary/mirror pairs, and each segment is in the correct role.
     """
     # We expect four pairs -- one for each demo cluster content ID. The set
@@ -128,7 +113,7 @@ def _cluster_contains_standard_demo_segments():
 @given('a standard local demo cluster is running')
 def impl(context):
     if (check_database_is_running(context)
-        and master_data_dir.endswith("demoDataDir-1")
+        and coordinator_data_dir.endswith("demoDataDir-1")
         and _cluster_contains_standard_demo_segments()
         and are_segments_running()):
         return
@@ -138,6 +123,10 @@ def impl(context):
 @given('a standard local demo cluster is created')
 def impl(context):
     create_local_demo_cluster(context, num_primaries=3)
+
+@given('create demo cluster config')
+def impl(context):
+    create_local_demo_cluster(context, extra_config='ONLY_PREPARE_CLUSTER_ENV=true')
 
 @given('the cluster config is generated with HBA_HOSTNAMES "{hba_hostnames_toggle}"')
 def impl(context, hba_hostnames_toggle):
@@ -153,7 +142,7 @@ def impl(context, checksum_toggle):
 def impl(context, num_primaries):
     os.environ['PGPORT'] = '15432'
     demoDir = os.path.abspath("%s/../gpAux/gpdemo" % os.getcwd())
-    os.environ['MASTER_DATA_DIRECTORY'] = "%s/datadirs/qddir/demoDataDir-1" % demoDir
+    os.environ['COORDINATOR_DATA_DIRECTORY'] = "%s/datadirs/qddir/demoDataDir-1" % demoDir
 
     create_local_demo_cluster(context, with_mirrors='false', with_standby='false', num_primaries=num_primaries)
 
@@ -161,6 +150,8 @@ def impl(context, num_primaries):
 
 
 @given('the user runs psql with "{psql_cmd}" against database "{dbname}"')
+@when('the user runs psql with "{psql_cmd}" against database "{dbname}"')
+@then('the user runs psql with "{psql_cmd}" against database "{dbname}"')
 def impl(context, dbname, psql_cmd):
     cmd = "psql -d %s %s" % (dbname, psql_cmd)
 
@@ -182,17 +173,29 @@ def impl(context, dbname, cname):
 @given('the user create a writable external table with name "{tabname}"')
 def impl(conetxt, tabname):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         sql = ("create writable external table {tabname}(a int) location "
                "('gpfdist://host.invalid:8000/file') format 'text'").format(tabname=tabname)
         dbconn.execSQL(conn, sql)
+
+@given('the user create an external table with name "{tabname}" in partition table t')
+def impl(conetxt, tabname):
+    dbname = 'gptest'
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
+        sql = ("create external table {tabname}(i int, j int) location "
+               "('gpfdist://host.invalid:8000/file') format 'text'").format(tabname=tabname)
+        dbconn.execSQL(conn, sql)
+        sql = "create table t(i int, j int) partition by list(i) (values(2018), values(1218))"
+        dbconn.execSQL(conn, sql)
+        sql = ("alter table t exchange partition for (2018) with table {tabname} without validation").format(tabname=tabname)
+        dbconn.execSQL(conn, sql)
         conn.commit()
+
 
 @given('the user executes "{sql}" with named connection "{cname}"')
 def impl(context, cname, sql):
     conn = context.named_conns[cname]
     dbconn.execSQL(conn, sql)
-    conn.commit()
 
 
 @then('the user drops the named connection "{cname}"')
@@ -222,27 +225,25 @@ def impl(context, checksum_toggle):
         try:
             # will throw
             check_stdout_msg(context, "Values on all segments are consistent")
-            check_stdout_msg(context, "Master  value: %s" % checksum_toggle)
-            check_stdout_msg(context, "Segment value: %s" % checksum_toggle)
+            check_stdout_msg(context, "Coordinator value: %s" % checksum_toggle)
+            check_stdout_msg(context, "Segment     value: %s" % checksum_toggle)
         except:
             is_ok = False
 
     if not is_ok:
         stop_database(context)
 
-        master_port = os.getenv('PGPORT', 15432)
-        port_base = str(int(master_port) + 10000)
+        os.environ['PGPORT'] = '15432'
+        port_base = os.getenv('PORT_BASE', 15432)
 
         cmd = """
         cd ../gpAux/gpdemo; \
-            export MASTER_DEMO_PORT={master_port} && \
             export DEMO_PORT_BASE={port_base} && \
             export NUM_PRIMARY_MIRROR_PAIRS={num_primary_mirror_pairs} && \
             export WITH_MIRRORS={with_mirrors} && \
             ./demo_cluster.sh -d && ./demo_cluster.sh -c && \
             env EXTRA_CONFIG="HEAP_CHECKSUM={checksum_toggle}" ./demo_cluster.sh
-        """.format(master_port=master_port,
-                   port_base=port_base,
+        """.format(port_base=port_base,
                    num_primary_mirror_pairs=os.getenv('NUM_PRIMARY_MIRROR_PAIRS', 3),
                    with_mirrors='true',
                    checksum_toggle=checksum_toggle)
@@ -299,7 +300,7 @@ def impl(context, dbname, HOST, PORT, USER):
 
 def get_segment_hostlist():
     gparray = GpArray.initFromCatalog(dbconn.DbURL())
-    segment_hostlist = sorted(gparray.get_hostlist(includeMaster=False))
+    segment_hostlist = sorted(gparray.get_hostlist(includeCoordinator=False))
     if not segment_hostlist:
         raise Exception('segment_hostlist was empty')
     return segment_hostlist
@@ -388,11 +389,11 @@ def impl(context, ret_code):
 @when('a user runs "{command}" with gphome "{gphome}"')
 @then('a user runs "{command}" with gphome "{gphome}"')
 def impl(context, command, gphome):
-    masterhost = get_master_hostname()[0][0]
+    coordinatorhost = get_coordinator_hostname()[0][0]
     cmd = Command(name='Remove archive gppkg',
                   cmdStr=command,
                   ctxt=REMOTE,
-                  remoteHost=masterhost,
+                  remoteHost=coordinatorhost,
                   gphome=gphome)
     cmd.run()
     context.ret_code = cmd.get_return_code()
@@ -403,6 +404,18 @@ def impl(context, command, gphome):
 @then('the user runs command "{command}"')
 def impl(context, command):
     run_command(context, command)
+    if has_exception(context):
+        raise context.exception
+
+@given('the user runs remote command "{command}" on host "{hostname}"')
+@when('the user runs remote command "{command}" on host "{hostname}"')
+@then('the user runs remote command "{command}" on host "{hostname}"')
+def impl(context, command, hostname):
+    run_command_remote(context,
+                       command,
+                       hostname,
+                       os.getenv("GPHOME") + '/greenplum_path.sh',
+                       'export COORDINATOR_DATA_DIRECTORY=%s' % coordinator_data_dir)
     if has_exception(context):
         raise context.exception
 
@@ -491,6 +504,34 @@ def impl(context, command, out_msg, num):
         raise Exception("Expected %s to occur %s times. Found %d" % (out_msg, num, count))
 
 
+def lines_matching_both(in_str, str_1, str_2):
+    lines = [x.strip() for x in in_str.split('\n')]
+    return [x for x in lines if x.count(str_1) and x.count(str_2)]
+
+
+@then('check if {command} ran "{called_command}" {num} times with args "{args}"')
+def impl(context, command, called_command, num, args):
+    run_cmd_out = "Running Command: %s" % called_command
+    matches = lines_matching_both(context.stdout_message, run_cmd_out, args)
+
+    if len(matches) != int(num):
+        raise Exception("Expected %s to occur with %s args %s times. Found %d. \n %s"
+                        % (called_command, args, num, len(matches), context.stdout_message))
+
+
+@then('{command} should only spawn up to {num} workers in WorkerPool')
+def impl(context, command, num):
+    workerPool_out = "WorkerPool() initialized with"
+    matches = lines_matching_both(context.stdout_message, workerPool_out, command)
+
+    for matched_line in matches:
+        iw_re = re.search('initialized with (\d+) workers', matched_line)
+        init_workers = int(iw_re.group(1))
+        if init_workers > int(num):
+            raise Exception("Expected Workerpool for %s to be initialized with %d workers. Found %d. \n %s"
+                            % (command, num, init_workers, context.stdout_message))
+
+
 @given('{command} should return a return code of {ret_code}')
 @when('{command} should return a return code of {ret_code}')
 @then('{command} should return a return code of {ret_code}')
@@ -530,15 +571,18 @@ def impl(context, table_type, tablename, dbname):
 def impl(context, table_type, tablename, dbname, numrows):
     if not check_table_exists(context, dbname=dbname, table_name=tablename, table_type=table_type):
         raise Exception("Table '%s' of type '%s' does not exist when expected" % (tablename, table_type))
-        with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
-            rowcount = dbconn.execSQLForSingleton(conn, "SELECT count(*) FROM %s" % tablename)
-            if rowcount != numrows:
-                raise Exception("Expected to find %d rows in table %s, found %d" % (numrows, tablename, rowcount))
+    conn = dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)
+    try:
+        rowcount = dbconn.querySingleton(conn, "SELECT count(*) FROM %s" % tablename)
+        if rowcount != int(numrows):
+            raise Exception("Expected to find %d rows in table %s, found %d" % (int(numrows), tablename, rowcount))
+    finally:
+        conn.close()
 
 @then(
-    'data for partition table "{table_name}" with partition level "{part_level}" is distributed across all segments on "{dbname}"')
-def impl(context, table_name, part_level, dbname):
-    validate_part_table_data_on_segments(context, table_name, part_level, dbname)
+    'data for partition table "{table_name}" with leaf partition distributed across all segments on "{dbname}"')
+def impl(context, table_name, dbname):
+    validate_part_table_data_on_segments(context, table_name, dbname)
 
 @then('verify that table "{tname}" in "{dbname}" has "{nrows}" rows')
 def impl(context, tname, dbname, nrows):
@@ -581,21 +625,24 @@ def impl(context, row_values, table, dbname):
 
 @then('verify that database "{dbname}" does not exist')
 def impl(context, dbname):
-    with dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False) as conn:
+    conn = dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False)
+    try:
         sql = """SELECT datname FROM pg_database"""
-        dbs = dbconn.execSQL(conn, sql)
+        dbs = dbconn.query(conn, sql)
         if dbname in dbs:
             raise Exception('Database exists when it shouldnt "%s"' % dbname)
+    finally:
+        conn.close()
 
 
-@given('the file "{filepath}" exists under master data directory')
+@given('the file "{filepath}" exists under coordinator data directory')
 def impl(context, filepath):
-    fullfilepath = os.path.join(master_data_dir, filepath)
+    fullfilepath = os.path.join(coordinator_data_dir, filepath)
     if not os.path.isdir(os.path.dirname(fullfilepath)):
         os.makedirs(os.path.dirname(fullfilepath))
     open(fullfilepath, 'a').close()
 
-@then('the file "{filepath}" does not exist under standby master data directory')
+@then('the file "{filepath}" does not exist under standby coordinator data directory')
 def impl(context, filepath):
     fullfilepath = os.path.join(context.standby_data_dir, filepath)
     cmd = "ls -al %s" % fullfilepath
@@ -604,22 +651,24 @@ def impl(context, filepath):
                            cmd,
                            context.standby_hostname,
                            os.getenv("GPHOME") + '/greenplum_path.sh',
-                           'export MASTER_DATA_DIRECTORY=%s' % context.standby_data_dir,
+                           'export COORDINATOR_DATA_DIRECTORY=%s' % context.standby_data_dir,
                            validateAfter=True)
     except:
         pass
     else:
-        raise Exception("file '%s' should not exist in standby master data directory" % fullfilepath)
+        raise Exception("file '%s' should not exist in standby coordinator data directory" % fullfilepath)
 
 @given('results of the sql "{sql}" db "{dbname}" are stored in the context')
 @when( 'results of the sql "{sql}" db "{dbname}" are stored in the context')
 def impl(context, sql, dbname):
     context.stored_sql_results = []
 
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
-        curs = dbconn.execSQL(conn, sql)
+    conn = dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)
+    try:
+        curs = dbconn.query(conn, sql)
         context.stored_sql_results = curs.fetchall()
-
+    finally:
+        conn.close()
 
 @then('validate that following rows are in the stored rows')
 def impl(context):
@@ -644,7 +693,7 @@ def impl(context):
                 break
 
         if not found_match:
-            print context.stored_rows
+            print(context.stored_rows)
             raise Exception("'%s' not found in stored rows" % row)
 
 
@@ -659,9 +708,9 @@ def impl(context, numlines):
 def get_standby_host():
     gparray = GpArray.initFromCatalog(dbconn.DbURL())
     segments = gparray.getDbList()
-    standby_master = [seg.getSegmentHostName() for seg in segments if seg.isSegmentStandby()]
-    if len(standby_master) > 0:
-        return standby_master[0]
+    standby_coordinator = [seg.getSegmentHostName() for seg in segments if seg.isSegmentStandby()]
+    if len(standby_coordinator) > 0:
+        return standby_coordinator[0]
     else:
         return []
 
@@ -681,103 +730,180 @@ def run_gpinitstandby(context, hostname, port, standby_data_dir, options='', rem
 
     run_gpcommand(context, cmd + ' ' + options)
 
-@when('the user initializes a standby on the same host as master with same port')
+
+@when('the user initializes a standby on the same host as coordinator with same port')
 def impl(context):
-    hostname = get_master_hostname('postgres')[0][0]
+    hostname = get_coordinator_hostname('postgres')[0][0]
     temp_data_dir = tempfile.mkdtemp() + "/standby_datadir"
     run_gpinitstandby(context, hostname, os.environ.get("PGPORT"), temp_data_dir)
 
-@when('the user initializes a standby on the same host as master and the same data directory')
+@when('the user initializes a standby on the same host as coordinator and the same data directory')
 def impl(context):
-    hostname = get_master_hostname('postgres')[0][0]
-    master_port = int(os.environ.get("PGPORT"))
+    hostname = get_coordinator_hostname('postgres')[0][0]
+    coordinator_port = int(os.environ.get("PGPORT"))
 
-    cmd = "gpinitstandby -a -s %s -P %d" % (hostname, master_port + 1)
+    cmd = "gpinitstandby -a -s %s -P %d" % (hostname, coordinator_port + 1)
     run_gpcommand(context, cmd)
+
+def init_standby(context, coordinator_hostname, options, segment_hostname):
+    remote = (coordinator_hostname != segment_hostname)
+    # -n option assumes gpinitstandby already ran and put standby in catalog
+    if "-n" not in options:
+        if remote:
+            context.standby_data_dir = coordinator_data_dir
+        else:
+            context.standby_data_dir = tempfile.mkdtemp() + "/standby_datadir"
+    run_gpinitstandby(context, context.standby_hostname, context.standby_port, context.standby_data_dir, options,
+                      remote)
+    context.coordinator_hostname = coordinator_hostname
+    context.coordinator_port = os.environ.get("PGPORT")
+    context.standby_was_initialized = True
+
+@when('running gpinitstandby on host "{coordinator}" to create a standby on host "{standby}"')
+@given('running gpinitstandby on host "{coordinator}" to create a standby on host "{standby}"')
+def impl(context, coordinator, standby):
+    # XXX This code was cribbed from init_standby and modified to support remote
+    # execution.
+    context.coordinator_hostname = coordinator
+    context.standby_hostname = standby
+    context.standby_port = os.environ.get("PGPORT")
+    context.standby_data_dir = coordinator_data_dir
+
+    remove_dir(standby, context.standby_data_dir)
+    create_dir(standby, os.path.dirname(context.standby_data_dir))
+
+    # We do not set port nor data dir here to test gpinitstandby's ability to autogather that info
+    cmd = "gpinitstandby -a -s %s" % standby
+
+    run_command_remote(context,
+                       cmd,
+                       context.coordinator_hostname,
+                       os.getenv("GPHOME") + '/greenplum_path.sh',
+                       'export COORDINATOR_DATA_DIRECTORY=%s' % context.standby_data_dir)
+
+    context.stdout_position = 0
+    context.coordinator_port = os.environ.get("PGPORT")
+    context.standby_was_initialized = True
+
+def get_standby_variables_and_set_on_context(context):
+    dbname = 'postgres'
+    with closing(dbconn.connect(dbconn.DbURL(port=os.environ.get("PGPORT"), dbname=dbname), unsetSearchPath=False)) as conn:
+        query = """select distinct content, hostname from gp_segment_configuration order by content limit 2;"""
+        cursor = dbconn.query(conn, query)
+
+        try:
+            _, coordinator_hostname = cursor.fetchone()
+            _, segment_hostname = cursor.fetchone()
+        except:
+            raise Exception("Did not get two rows from query: %s" % query)
+
+    if coordinator_hostname != segment_hostname:
+        context.standby_hostname = segment_hostname
+        context.standby_port = os.environ.get("PGPORT")
+    else:
+        context.standby_hostname = coordinator_hostname
+        context.standby_port = get_open_port()
+
+    return coordinator_hostname, segment_hostname
 
 @when('the user runs gpinitstandby with options "{options}"')
 @then('the user runs gpinitstandby with options "{options}"')
 @given('the user runs gpinitstandby with options "{options}"')
 def impl(context, options):
-    dbname = 'postgres'
-    with dbconn.connect(dbconn.DbURL(port=os.environ.get("PGPORT"), dbname=dbname), unsetSearchPath=False) as conn:
-        query = """select distinct content, hostname from gp_segment_configuration order by content limit 2;"""
-        cursor = dbconn.execSQL(conn, query)
+    coordinator_hostname, standby_hostname = get_standby_variables_and_set_on_context(context)
+    init_standby(context, coordinator_hostname, options, standby_hostname)
 
-    try:
-        _, master_hostname = cursor.fetchone()
-        _, segment_hostname = cursor.fetchone()
-    except:
-        raise Exception("Did not get two rows from query: %s" % query)
+def _handle_sigpipe():
+    signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-    # if we have two hosts, assume we're testing on a multinode cluster
-    if master_hostname != segment_hostname:
-        context.standby_hostname = segment_hostname
-        context.standby_port = os.environ.get("PGPORT")
-        remote = True
-    else:
-        context.standby_hostname = master_hostname
-        context.standby_port = get_open_port()
-        remote = False
-
-    # -n option assumes gpinitstandby already ran and put standby in catalog
-    if "-n" not in options:
-        if remote:
-            context.standby_data_dir = master_data_dir
-        else:
-            context.standby_data_dir = tempfile.mkdtemp() + "/standby_datadir"
-
-    run_gpinitstandby(context, context.standby_hostname, context.standby_port, context.standby_data_dir, options, remote)
-    context.master_hostname = master_hostname
-    context.master_port = os.environ.get("PGPORT")
+@when('the user runs gpinitstandby and {action} the unreachable host prompt')
+def impl(context, action):
+    coordinator_hostname, standby_hostname = get_standby_variables_and_set_on_context(context)
+    remote = (coordinator_hostname != standby_hostname)
+    context.coordinator_hostname = coordinator_hostname
+    context.coordinator_port = os.environ.get("PGPORT")
     context.standby_was_initialized = True
+
+    if action == "accepts":
+        answers = "y\ny\n"
+    elif action == "rejects":
+        answers = "y\nn\n"
+    else:
+        raise Exception('Invalid action for the unreachable host prompt (valid options are "accepts" and "rejects"')
+
+    if remote:
+        context.standby_data_dir = coordinator_data_dir
+        cmd = ["ssh", standby_hostname]
+    else:
+        context.standby_data_dir = tempfile.mkdtemp() + "/standby_datadir"
+        cmd = ["bash", "-c"]
+
+    cmd.append("printf '%s' | gpinitstandby -s %s -S %s -P %s" % (answers, standby_hostname, context.standby_data_dir, context.standby_port))
+
+    p = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        preexec_fn=_handle_sigpipe,
+    )
+    context.stdout_message, context.stderr_message = p.communicate()
+    context.ret_code = p.returncode
+    if context.ret_code != 0:
+        context.error_message = context.stderr_message
 
 @when('the user runs gpactivatestandby with options "{options}"')
 @then('the user runs gpactivatestandby with options "{options}"')
 def impl(context, options):
-    context.execute_steps(u'''Then the user runs command "gpactivatestandby -a %s" from standby master''' % options)
+    context.execute_steps('''Then the user runs command "gpactivatestandby -a %s" from standby coordinator''' % options)
     context.standby_was_activated = True
 
-@then('the user runs command "{command}" from standby master')
+@when('the user runs command "{command}" from standby coordinator')
+@then('the user runs command "{command}" from standby coordinator')
 def impl(context, command):
     cmd = "PGPORT=%s %s" % (context.standby_port, command)
     run_command_remote(context,
                        cmd,
                        context.standby_hostname,
                        os.getenv("GPHOME") + '/greenplum_path.sh',
-                       'export MASTER_DATA_DIRECTORY=%s' % context.standby_data_dir,
+                       'export COORDINATOR_DATA_DIRECTORY=%s' % context.standby_data_dir,
                        validateAfter=False)
 
-@when('the master goes down')
-@then('the master goes down')
+@when('the coordinator goes down')
+@then('the coordinator goes down')
 def impl(context):
-	master = MasterStop("Stopping Master", master_data_dir, mode='immediate')
-	master.run()
+    coordinator = CoordinatorStop("Stopping Coordinator", coordinator_data_dir, mode='immediate')
+    coordinator.run()
 
-@when('the standby master goes down')
+@when('the standby coordinator goes down')
 def impl(context):
-	master = MasterStop("Stopping Master Standby", context.standby_data_dir, mode='immediate', ctxt=REMOTE,
+    coordinator = CoordinatorStop("Stopping Coordinator Standby", context.standby_data_dir, mode='immediate', ctxt=REMOTE,
                         remoteHost=context.standby_hostname)
-	master.run(validateAfter=True)
+    coordinator.run(validateAfter=True)
 
-@then('clean up and revert back to original master')
+@when('the coordinator goes down on "{host}"')
+def impl(context, host):
+    coordinator = CoordinatorStop("Stopping Coordinator Standby", coordinator_data_dir, mode='immediate', ctxt=REMOTE,
+                        remoteHost=host)
+    coordinator.run(validateAfter=True)
+
+@then('clean up and revert back to original coordinator')
 def impl(context):
-    # TODO: think about preserving the master data directory for debugging
-    shutil.rmtree(master_data_dir, ignore_errors=True)
+    # TODO: think about preserving the coordinator data directory for debugging
+    shutil.rmtree(coordinator_data_dir, ignore_errors=True)
 
-    if context.master_hostname != context.standby_hostname:
+    if context.coordinator_hostname != context.standby_hostname:
         # We do not set port nor data dir here to test gpinitstandby's ability to autogather that info
-        cmd = "gpinitstandby -a -s %s" % context.master_hostname
+        cmd = "gpinitstandby -a -s %s" % context.coordinator_hostname
     else:
-        cmd = "gpinitstandby -a -s %s -P %s -S %s" % (context.master_hostname, context.master_port, master_data_dir)
+        cmd = "gpinitstandby -a -s %s -P %s -S %s" % (context.coordinator_hostname, context.coordinator_port, coordinator_data_dir)
 
-    context.execute_steps(u'''Then the user runs command "%s" from standby master''' % cmd)
+    context.execute_steps('''Then the user runs command "%s" from standby coordinator''' % cmd)
 
-    master = MasterStop("Stopping current master", context.standby_data_dir, mode='immediate', ctxt=REMOTE,
+    coordinator = CoordinatorStop("Stopping current coordinator", context.standby_data_dir, mode='immediate', ctxt=REMOTE,
                         remoteHost=context.standby_hostname)
-    master.run()
+    coordinator.run()
 
-    cmd = "gpactivatestandby -a -d %s" % master_data_dir
+    cmd = "gpactivatestandby -a -d %s" % coordinator_data_dir
     run_gpcommand(context, cmd)
 
 # from https://stackoverflow.com/questions/2838244/get-open-tcp-port-in-python/2838309#2838309
@@ -804,7 +930,7 @@ def impl(context, path, perm):
 
 @then('rely on environment.py to restore path permissions')
 def impl(context):
-    print "go look in environment.py to see how it uses the path and permissions on context to make sure it's cleaned up"
+    print("go look in environment.py to see how it uses the path and permissions on context to make sure it's cleaned up")
 
 
 @when('the user runs pg_controldata against the standby data directory')
@@ -814,7 +940,7 @@ def impl(context):
                        cmd,
                        context.standby_hostname,
                        os.getenv("GPHOME") + '/greenplum_path.sh',
-                       'export MASTER_DATA_DIRECTORY=%s' % context.standby_data_dir)
+                       'export COORDINATOR_DATA_DIRECTORY=%s' % context.standby_data_dir)
 
 
 def _process_exists(pid, host):
@@ -840,14 +966,28 @@ def _process_exists(pid, host):
 @given('user stops all {segment_type} processes')
 @when('user stops all {segment_type} processes')
 @then('user stops all {segment_type} processes')
-def stop_segments(context, segment_type):
+def stop_all_primary_or_mirror_segments(context, segment_type):
     if segment_type not in ("primary", "mirror"):
         raise Exception("Expected segment_type to be 'primary' or 'mirror', but found '%s'." % segment_type)
 
-    gparray = GpArray.initFromCatalog(dbconn.DbURL())
     role = ROLE_PRIMARY if segment_type == 'primary' else ROLE_MIRROR
+    stop_segments(context, lambda seg: seg.getSegmentRole() == role and seg.content != -1)
 
-    segments = filter(lambda seg: seg.getSegmentRole() == role and seg.content != -1, gparray.getDbList())
+
+@given('the {role} on content {contentID} is stopped')
+def stop_segments_on_contentID(context, role, contentID):
+    if role not in ("primary", "mirror"):
+        raise Exception("Expected segment_type to be 'primary' or 'mirror', but found '%s'." % role)
+
+    role = ROLE_PRIMARY if role == 'primary' else ROLE_MIRROR
+    stop_segments(context, lambda seg: seg.getSegmentRole() == role and seg.content == int(contentID))
+
+
+# where_clause is a lambda that takes a segment to select what segments to stop
+def stop_segments(context, where_clause):
+    gparray = GpArray.initFromCatalog(dbconn.DbURL())
+
+    segments = filter(where_clause, gparray.getDbList())
     for seg in segments:
         # For demo_cluster tests that run on the CI gives the error 'bash: pg_ctl: command not found'
         # Thus, need to add pg_ctl to the path when ssh'ing to a demo cluster.
@@ -887,8 +1027,8 @@ def impl(context, sql, dbname):
 def impl(context, dbname):
     context.stored_rows = []
 
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
-        curs = dbconn.execSQL(conn, context.text)
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
+        curs = dbconn.query(conn, context.text)
         context.stored_rows = curs.fetchall()
 
 
@@ -896,8 +1036,8 @@ def impl(context, dbname):
 def impl(context, sql, dbname):
     context.stored_rows = []
 
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
-        curs = dbconn.execSQL(conn, sql)
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
+        curs = dbconn.query(conn, sql)
         context.stored_rows = curs.fetchall()
 
 
@@ -908,8 +1048,8 @@ def impl(context, message):
             if message in column:
                 return
 
-    print context.stored_rows
-    print message
+    print(context.stored_rows)
+    print(message)
     raise Exception("'%s' not found in stored rows" % message)
 
 
@@ -932,7 +1072,7 @@ def impl(context, second):
 def get_opened_files(filename, pidfile):
     cmd = "PATH=$PATH:/usr/bin:/usr/sbin lsof -p `cat %s` | grep %s | wc -l" % (
     pidfile, filename)
-    return commands.getstatusoutput(cmd)
+    return subprocess.getstatusoutput(cmd)
 
 
 @when('table "{tablename}" is dropped in "{dbname}"')
@@ -972,6 +1112,40 @@ def impl(context, seg):
         context.mseg_data_dir = context.mseg.getSegmentDataDirectory()
 
 
+@given('the cluster configuration has no segments where "{filter}"')
+def impl(context, filter):
+    SLEEP_PERIOD = 5
+    MAX_DURATION = 300
+    MAX_TRIES = MAX_DURATION // SLEEP_PERIOD
+
+    num_tries = 0
+    num_matching = 10
+    while num_matching and num_tries < MAX_TRIES:
+        num_tries += 1
+        time.sleep(SLEEP_PERIOD)
+        context.execute_steps(u'''
+        Given the user runs psql with "-c 'SELECT gp_request_fts_probe_scan()'" against database "postgres"
+    ''')
+        with closing(dbconn.connect(dbconn.DbURL(), unsetSearchPath=False)) as conn:
+            sql = "SELECT count(*) FROM gp_segment_configuration WHERE %s" % filter
+            num_matching = dbconn.querySingleton(conn, sql)
+
+    if num_matching:
+        raise Exception("could not achieve desired state")
+
+    context.execute_steps(u'''
+    Given the user runs psql with "-c 'BEGIN; CREATE TEMP TABLE tempt(a int); COMMIT'" against database "postgres"
+    ''')
+
+
+@given('the cluster configuration is saved for "{when}"')
+@then('the cluster configuration is saved for "{when}"')
+def impl(context, when):
+    if not hasattr(context, 'saved_array'):
+        context.saved_array = {}
+    context.saved_array[when] = GpArray.initFromCatalog(dbconn.DbURL())
+
+
 @when('we run a sample background script to generate a pid on "{seg}" segment')
 def impl(context, seg):
     if seg == "primary":
@@ -993,12 +1167,14 @@ def impl(context, seg):
     cmd.run(validateAfter=True)
 
     cmd = Command(name="Run Bg process to save pid",
-                  cmdStr='sh -c "python /tmp/pid_background_script.py" &>/dev/null &', remoteHost=hostname, ctxt=REMOTE)
+                  cmdStr='sh -c "/tmp/pid_background_script.py /tmp/bgpid" &>/dev/null &', remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
 
-    cmd = Command(name="get bg pid", cmdStr="ps ux | grep pid_background_script.py | grep -v grep | awk '{print \$2}'",
-                  remoteHost=hostname, ctxt=REMOTE)
+    cmd = Command(name="get Bg process PID",
+                  cmdStr='until [ -f /tmp/bgpid ]; do sleep 1; done; cat /tmp/bgpid', remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
+
+
     context.bg_pid = cmd.get_stdout()
     if not context.bg_pid:
         raise Exception("Unable to obtain the pid of the background script. Seg Host: %s, get_results: %s" %
@@ -1017,13 +1193,8 @@ def impl(context, seg):
             raise Exception("Standby host is not saved in the context")
         hostname = context.standby_host
 
-    cmd = Command(name="get bg pid", cmdStr="ps ux | grep pid_background_script.py | grep -v grep | awk '{print \$2}'",
-                  remoteHost=hostname, ctxt=REMOTE)
+    cmd = Command(name="killbg pid", cmdStr='kill -9 %s' % context.bg_pid, remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
-    pids = cmd.get_stdout().splitlines()
-    for pid in pids:
-        cmd = Command(name="killbg pid", cmdStr='kill -9 %s' % pid, remoteHost=hostname, ctxt=REMOTE)
-        cmd.run(validateAfter=True)
 
 
 @when('we generate the postmaster.pid file with the background pid on "{seg}" segment')
@@ -1045,7 +1216,7 @@ def impl(context, seg):
     cmd = Command(name="Copy pid file", cmdStr='cp %s %s' % (pid_file_orig, pid_file), remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
 
-    cpCmd = Command(name='copy pid file to master for editing', cmdStr='scp %s:%s /tmp' % (hostname, pid_file))
+    cpCmd = Command(name='copy pid file to coordinator for editing', cmdStr='scp %s:%s /tmp' % (hostname, pid_file))
 
     cpCmd.run(validateAfter=True)
 
@@ -1082,7 +1253,7 @@ def impl(context, seg):
     cmd = Command(name="Copy pid file", cmdStr='cp %s %s' % (pid_file_orig, pid_file), remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
 
-    cpCmd = Command(name='copy pid file to master for editing', cmdStr='scp %s:%s /tmp' % (hostname, pid_file))
+    cpCmd = Command(name='copy pid file to coordinator for editing', cmdStr='scp %s:%s /tmp' % (hostname, pid_file))
 
     cpCmd.run(validateAfter=True)
 
@@ -1092,7 +1263,7 @@ def impl(context, seg):
     # This pid is no longer associated with a
     # running process and won't be recycled for long enough that tests
     # have finished.
-    cmd = Command(name="get non-existing pid", cmdStr="echo \$\$", remoteHost=hostname, ctxt=REMOTE)
+    cmd = Command(name="get non-existing pid", cmdStr="echo $$", remoteHost=hostname, ctxt=REMOTE)
     cmd.run(validateAfter=True)
     pid = cmd.get_results().stdout.strip()
 
@@ -1180,30 +1351,30 @@ def impl(context):
         context.standby_host = standby
         run_gpcommand(context, 'gpinitstandby -ra')
 
-@then('verify the standby master entries in catalog')
+@given('the catalog has a standby coordinator entry')
+@then('verify the standby coordinator entries in catalog')
 def impl(context):
-	check_segment_config_query = "SELECT * FROM gp_segment_configuration WHERE content = -1 AND role = 'm'"
-	check_stat_replication_query = "SELECT * FROM pg_stat_replication"
-	with dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False) as conn:
-		segconfig = dbconn.execSQL(conn, check_segment_config_query).fetchall()
-		statrep = dbconn.execSQL(conn, check_stat_replication_query).fetchall()
+    check_segment_config_query = "SELECT * FROM gp_segment_configuration WHERE content = -1 AND role = 'm'"
+    check_stat_replication_query = "SELECT * FROM pg_stat_replication"
+    with closing(dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False)) as conn:
+        segconfig = dbconn.query(conn, check_segment_config_query).fetchall()
+        statrep = dbconn.query(conn, check_stat_replication_query).fetchall()
 
-	context.standby_dbid = segconfig[0][0]
+    if len(segconfig) != 1:
+        raise Exception("gp_segment_configuration did not have standby coordinator")
 
-	if len(segconfig) != 1:
-		raise Exception("gp_segment_configuration did not have standby master")
+    if len(statrep) != 1:
+        raise Exception("pg_stat_replication did not have standby coordinator")
 
-	if len(statrep) != 1:
-		raise Exception("pg_stat_replication did not have standby master")
+    context.standby_dbid = segconfig[0][0]
 
-@then('verify the standby master is now acting as master')
+@then('verify the standby coordinator is now acting as coordinator')
 def impl(context):
-	check_segment_config_query = "SELECT * FROM gp_segment_configuration WHERE content = -1 AND role = 'p' AND preferred_role = 'p' AND dbid = %s" % context.standby_dbid
-	with dbconn.connect(dbconn.DbURL(hostname=context.standby_hostname, dbname='postgres', port=context.standby_port), unsetSearchPath=False) as conn:
-		segconfig = dbconn.execSQL(conn, check_segment_config_query).fetchall()
-
-	if len(segconfig) != 1:
-		raise Exception("gp_segment_configuration did not have standby master acting as new master")
+    check_segment_config_query = "SELECT * FROM gp_segment_configuration WHERE content = -1 AND role = 'p' AND preferred_role = 'p' AND dbid = %s" % context.standby_dbid
+    with closing(dbconn.connect(dbconn.DbURL(hostname=context.standby_hostname, dbname='postgres', port=context.standby_port), unsetSearchPath=False)) as conn:
+        segconfig = dbconn.query(conn, check_segment_config_query).fetchall()
+    if len(segconfig) != 1:
+        raise Exception("gp_segment_configuration did not have standby coordinator acting as new coordinator")
 
 @then('verify that the schema "{schema_name}" exists in "{dbname}"')
 def impl(context, schema_name, dbname):
@@ -1268,14 +1439,14 @@ def impl(context, seq_name, last_value, dbname):
 @given('the user runs the command "{cmd}" in the background')
 @when('the user runs the command "{cmd}" in the background')
 def impl(context, cmd):
-    thread.start_new_thread(run_command, (context, cmd))
+    _thread.start_new_thread(run_command, (context, cmd))
     time.sleep(10)
 
 
 @given('the user runs the command "{cmd}" in the background without sleep')
 @when('the user runs the command "{cmd}" in the background without sleep')
 def impl(context, cmd):
-    thread.start_new_thread(run_command, (context, cmd))
+    _thread.start_new_thread(run_command, (context, cmd))
 
 
 # For any pg_hba.conf line with `host ... trust`, its address should only contain FQDN
@@ -1320,37 +1491,41 @@ def impl(context, filename, output):
     with open(filename) as fr:
         for line in fr:
             contents = line.strip()
-    print contents
+    print(contents)
     check_stdout_msg(context, output)
 
-@then('verify that the last line of the file "{filename}" in the master data directory contains the string "{output}" escaped')
-def impl(context, filename, output):
-    find_string_in_master_data_directory(context, filename, output, True)
+@then('verify that the last line of the file "{filename}" in the coordinator data directory {contain} the string "{output}"{escape}')
+def impl(context, filename, contain, output, escape):
+    if contain == 'should contain':
+        valuesShouldExist = True
+    elif contain == 'should not contain':
+        valuesShouldExist = False
+    else:
+        raise Exception("only 'contains' and 'does not contain' are valid inputs")
 
+    find_string_in_coordinator_data_directory(context, filename, output, valuesShouldExist, (escape == ' escaped'))
 
-@then('verify that the last line of the file "{filename}" in the master data directory contains the string "{output}"')
-def impl(context, filename, output):
-    find_string_in_master_data_directory(context, filename, output)
-
-
-def find_string_in_master_data_directory(context, filename, output, escapeStr=False):
+def find_string_in_coordinator_data_directory(context, filename, output, valuesShouldExist, escapeStr=False):
     contents = ''
-    file_path = os.path.join(master_data_dir, filename)
+    file_path = os.path.join(coordinator_data_dir, filename)
 
-    with codecs.open(file_path, encoding='utf-8') as f:
+    with open(file_path) as f:
         for line in f:
             contents = line.strip()
 
     if escapeStr:
         output = re.escape(output)
     pat = re.compile(output)
-    if not pat.search(contents):
+    if valuesShouldExist and (not pat.search(contents)):
         err_str = "Expected stdout string '%s' and found: '%s'" % (output, contents)
+        raise Exception(err_str)
+    if (not valuesShouldExist) and pat.search(contents):
+        err_str = "Did not expect stdout string '%s' but found: '%s'" % (output, contents)
         raise Exception(err_str)
 
 
-@given('verify that the file "{filename}" in the master data directory has "{some}" line starting with "{output}"')
-@then('verify that the file "{filename}" in the master data directory has "{some}" line starting with "{output}"')
+@given('verify that the file "{filename}" in the coordinator data directory has "{some}" line starting with "{output}"')
+@then('verify that the file "{filename}" in the coordinator data directory has "{some}" line starting with "{output}"')
 def impl(context, filename, some, output):
     if (some == 'some'):
         valuesShouldExist = True
@@ -1360,7 +1535,7 @@ def impl(context, filename, some, output):
         raise Exception("only 'some' and 'no' are valid inputs")
     regexStr = "%s%s" % ("^[\s]*", output)
     pat = re.compile(regexStr)
-    file_path = os.path.join(master_data_dir, filename)
+    file_path = os.path.join(coordinator_data_dir, filename)
     with open(file_path) as fr:
         for line in fr:
             contents = line.strip()
@@ -1380,13 +1555,15 @@ def impl(context, filename, some, output):
 @given('verify that the file "{filename}" in each segment data directory has "{some}" line starting with "{output}"')
 @then('verify that the file "{filename}" in each segment data directory has "{some}" line starting with "{output}"')
 def impl(context, filename, some, output):
+    conn = dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False)
     try:
-        with dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False) as conn:
-            curs = dbconn.execSQL(conn, "SELECT hostname, datadir FROM gp_segment_configuration WHERE role='p' AND content > -1;")
-            result = curs.fetchall()
-            segment_info = [(result[s][0], result[s][1]) for s in range(len(result))]
+        curs = dbconn.query(conn, "SELECT hostname, datadir FROM gp_segment_configuration WHERE role='p' AND content > -1;")
+        result = curs.fetchall()
+        segment_info = [(result[s][0], result[s][1]) for s in range(len(result))]
     except Exception as e:
         raise Exception("Could not retrieve segment information: %s" % e.message)
+    finally:
+        conn.close()
 
     if (some == 'some'):
         valuesShouldExist = True
@@ -1415,16 +1592,24 @@ def impl(context, filename, some, output):
 
 
 
-@then('verify that the last line of the file "{filename}" in each segment data directory contains the string "{output}"')
-def impl(context, filename, output):
+@then('verify that the last line of the file "{filename}" in each segment data directory {contain} the string "{output}"')
+def impl(context, filename, contain, output):
+    if contain == 'should contain':
+        valuesShouldExist = True
+    elif contain == 'should not contain':
+        valuesShouldExist = False
+    else:
+        raise Exception("only 'should contain' and 'should not contain' are valid inputs")
     segment_info = []
+    conn = dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False)
     try:
-        with dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False) as conn:
-            curs = dbconn.execSQL(conn, "SELECT hostname, datadir FROM gp_segment_configuration WHERE role='p' AND content > -1;")
-            result = curs.fetchall()
-            segment_info = [(result[s][0], result[s][1]) for s in range(len(result))]
+        curs = dbconn.query(conn, "SELECT hostname, datadir FROM gp_segment_configuration WHERE role='p' AND content > -1;")
+        result = curs.fetchall()
+        segment_info = [(result[s][0], result[s][1]) for s in range(len(result))]
     except Exception as e:
         raise Exception("Could not retrieve segment information: %s" % e.message)
+    finally:
+        conn.close()
 
     for info in segment_info:
         host, datadir = info
@@ -1433,9 +1618,12 @@ def impl(context, filename, output):
         cmd = Command(name='Running remote command: %s' % cmd_str, cmdStr=cmd_str)
         cmd.run(validateAfter=True)
 
-        actual = cmd.get_stdout().decode('utf-8')
-        if output not in actual:
-            raise Exception('File %s on host %s does not contain "%s"' % (filepath, host, output))
+        actual = cmd.get_stdout()
+        if valuesShouldExist and (output not in actual):
+                raise Exception('File %s on host %s does not contain "%s"' % (filepath, host, output))
+        if (not valuesShouldExist) and (output in actual):
+            raise Exception('File %s on host %s contains "%s"' % (filepath, host, output))
+
 
 @given('the gpfdists occupying port {port} on host "{hostfile}"')
 def impl(context, port, hostfile):
@@ -1500,7 +1688,7 @@ def impl(context, dbname):
 
 @then('validate and run gpcheckcat repair')
 def impl(context):
-    context.execute_steps(u'''
+    context.execute_steps('''
         Then gpcheckcat should print "repair script\(s\) generated in dir gpcheckcat.repair.*" to stdout
         Then the path "gpcheckcat.repair.*" is found in cwd "1" times
         Then run all the repair scripts in the dir "gpcheckcat.repair.*"
@@ -1551,6 +1739,7 @@ def impl(context, filename):
 
 
 @then('an attribute of table "{table}" in database "{dbname}" is deleted on segment with content id "{segid}"')
+@when('an attribute of table "{table}" in database "{dbname}" is deleted on segment with content id "{segid}"')
 def impl(context, table, dbname, segid):
     local_cmd = 'psql %s -t -c "SELECT port,hostname FROM gp_segment_configuration WHERE content=%s and role=\'p\';"' % (
     dbname, segid)
@@ -1562,7 +1751,7 @@ def impl(context, table, dbname, segid):
     source_file = os.path.join(os.environ.get('GPHOME'), 'greenplum_path.sh')
     # Yes, the below line is ugly.  It looks much uglier when done with separate strings, given the multiple levels of escaping required.
     remote_cmd = """
-ssh %s "source %s; export PGUSER=%s; export PGPORT=%s; export PGOPTIONS=\\\"-c gp_session_role=utility\\\"; psql -d %s -c \\\"SET allow_system_table_mods=true; DELETE FROM pg_attribute where attrelid=\'%s\'::regclass::oid;\\\""
+ssh %s "source %s; export PGUSER=%s; export PGPORT=%s; export PGOPTIONS=\\\"-c gp_role=utility\\\"; psql -d %s -c \\\"SET allow_system_table_mods=true; DELETE FROM pg_attribute where attrelid=\'%s\'::regclass::oid;\\\""
 """ % (host, source_file, user, port, dbname, table)
     run_command(context, remote_cmd.strip())
 
@@ -1572,7 +1761,7 @@ ssh %s "source %s; export PGUSER=%s; export PGPORT=%s; export PGOPTIONS=\\\"-c g
 @given('The user runs sql "{query}" in "{dbname}" on first primary segment')
 def impl(context, query, dbname):
     host, port = get_primary_segment_host_port()
-    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_session_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
+    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
     dbname, host, port, query)
     Command(name='Running Remote command: %s' % psql_cmd, cmdStr=psql_cmd).run(validateAfter=True)
 
@@ -1584,9 +1773,9 @@ def impl(context, query, dbname):
     segments = gparray.getDbList()
     for seg in segments:
         host = seg.getSegmentHostName()
-        if seg.isSegmentPrimary() or seg.isSegmentMaster():
+        if seg.isSegmentPrimary() or seg.isSegmentCoordinator():
             port = seg.getSegmentPort()
-            psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_session_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
+            psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
             dbname, host, port, query)
             Command(name='Running Remote command: %s' % psql_cmd, cmdStr=psql_cmd).run(validateAfter=True)
 
@@ -1601,9 +1790,9 @@ def impl(context, file, dbname):
     segments = gparray.getDbList()
     for seg in segments:
         host = seg.getSegmentHostName()
-        if seg.isSegmentPrimary() or seg.isSegmentMaster():
+        if seg.isSegmentPrimary() or seg.isSegmentCoordinator():
             port = seg.getSegmentPort()
-            psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_session_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
+            psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
             dbname, host, port, query)
             Command(name='Running Remote command: %s' % psql_cmd, cmdStr=psql_cmd).run(validateAfter=True)
 
@@ -1611,7 +1800,7 @@ def impl(context, file, dbname):
 @when('The user runs sql "{query}" in "{dbname}" on specified segment {host}:{port} in utility mode')
 @given('The user runs sql "{query}" in "{dbname}" on specified segment {host}:{port} in utility mode')
 def impl(context, query, dbname, host, port):
-    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_session_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
+    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
     dbname, host, port, query)
     cmd = Command(name='Running Remote command: %s' % psql_cmd, cmdStr=psql_cmd)
     cmd.run(validateAfter=True)
@@ -1622,7 +1811,7 @@ def impl(context, query, dbname, host, port):
 @given('table {table_name} exists in "{dbname}" on specified segment {host}:{port}')
 def impl(context, table_name, dbname, host, port):
     query = "SELECT COUNT(*) FROM pg_class WHERE relname = '%s'" % table_name
-    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_session_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
+    psql_cmd = "PGDATABASE=\'%s\' PGOPTIONS=\'-c gp_role=utility\' psql -h %s -p %s -c \"%s\"; " % (
     dbname, host, port, query)
     cmd = Command(name='Running Remote command: %s' % psql_cmd, cmdStr=psql_cmd)
     cmd.run(validateAfter=True)
@@ -1661,11 +1850,9 @@ def impl(context, dir):
     'the entry for the table "{user_table}" is removed from "{catalog_table}" with key "{primary_key}" in the database "{db_name}"')
 def impl(context, user_table, catalog_table, primary_key, db_name):
     delete_qry = "delete from %s where %s='%s'::regclass::oid;" % (catalog_table, primary_key, user_table)
-    with dbconn.connect(dbconn.DbURL(dbname=db_name), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=db_name), unsetSearchPath=False)) as conn:
         for qry in ["set allow_system_table_mods=true;", "set allow_segment_dml=true;", delete_qry]:
             dbconn.execSQL(conn, qry)
-            conn.commit()
-
 
 @when('the entry for the table "{user_table}" is removed from "{catalog_table}" with key "{primary_key}" in the database "{db_name}" on the first primary segment')
 @given('the entry for the table "{user_table}" is removed from "{catalog_table}" with key "{primary_key}" in the database "{db_name}" on the first primary segment')
@@ -1673,12 +1860,10 @@ def impl(context, user_table, catalog_table, primary_key, db_name):
     host, port = get_primary_segment_host_port()
     delete_qry = "delete from %s where %s='%s'::regclass::oid;" % (catalog_table, primary_key, user_table)
 
-    with dbconn.connect(dbconn.DbURL(dbname=db_name, port=port, hostname=host), utility=True,
-                        allowSystemTableMods=True, unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=db_name, port=port, hostname=host), utility=True,
+                        allowSystemTableMods=True, unsetSearchPath=False)) as conn:
         for qry in [delete_qry]:
             dbconn.execSQL(conn, qry)
-            conn.commit()
-
 
 @given('the timestamps in the repair dir are consistent')
 @when('the timestamps in the repair dir are consistent')
@@ -1731,36 +1916,6 @@ def impl(context, proc):
     check_return_code(context, 0)  # 0 means one or more processes were matched
 
 
-@when('wait until the results from boolean sql "{sql}" is "{boolean}"')
-@then('wait until the results from boolean sql "{sql}" is "{boolean}"')
-@given('wait until the results from boolean sql "{sql}" is "{boolean}"')
-def impl(context, sql, boolean):
-    cmd = Command(name='psql', cmdStr='psql --tuples-only -d gpperfmon -c "%s"' % sql)
-    start_time = current_time = datetime.now()
-    result = None
-    while (current_time - start_time).seconds < 120:
-        cmd.run()
-        if cmd.get_return_code() != 0:
-            break
-        result = cmd.get_stdout()
-        if _str2bool(result) == _str2bool(boolean):
-            break
-        time.sleep(2)
-        current_time = datetime.now()
-
-    if cmd.get_return_code() != 0:
-        context.ret_code = cmd.get_return_code()
-        context.error_message = 'psql internal error: %s' % cmd.get_stderr()
-        check_return_code(context, 0)
-    else:
-        if _str2bool(result) != _str2bool(boolean):
-            raise Exception("sql output '%s' is not same as '%s'" % (result, boolean))
-
-
-def _str2bool(string):
-    return string.lower().strip() in ['t', 'true', '1', 'yes', 'y']
-
-
 @given('the user creates an index for table "{table_name}" in database "{db_name}"')
 @when('the user creates an index for table "{table_name}" in database "{db_name}"')
 @then('the user creates an index for table "{table_name}" in database "{db_name}"')
@@ -1768,102 +1923,8 @@ def impl(context, table_name, db_name):
     index_qry = "create table {0}(i int primary key, j varchar); create index test_index on index_table using bitmap(j)".format(
         table_name)
 
-    with dbconn.connect(dbconn.DbURL(dbname=db_name), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=db_name), unsetSearchPath=False)) as conn:
         dbconn.execSQL(conn, index_qry)
-        conn.commit()
-
-@when("the user installs gpperfmon")
-def impl(context):
-    master_port = os.getenv('PGPORT', 15432)
-    cmd = "gpperfmon_install --port {master_port} --enable --password foo".format(master_port=master_port)
-    run_command(context, cmd)
-
-@given('gpperfmon is configured and running in qamode')
-@then('gpperfmon is configured and running in qamode')
-def impl(context):
-    master_port = os.getenv('PGPORT', 15432)
-    target_line = 'qamode = 1'
-    gpperfmon_config_file = "%s/gpperfmon/conf/gpperfmon.conf" % os.getenv("MASTER_DATA_DIRECTORY")
-    if not check_db_exists("gpperfmon", "localhost"):
-        context.execute_steps(u'''
-                              When the user runs "gpperfmon_install --port {master_port} --enable --password foo"
-                              Then gpperfmon_install should return a return code of 0
-                              '''.format(master_port=master_port))
-
-    if not file_contains_line(gpperfmon_config_file, target_line):
-        context.execute_steps(u'''
-                              When the user runs command "echo 'qamode = 1' >> $MASTER_DATA_DIRECTORY/gpperfmon/conf/gpperfmon.conf"
-                              Then echo should return a return code of 0
-                              When the user runs command "echo 'verbose = 1' >> $MASTER_DATA_DIRECTORY/gpperfmon/conf/gpperfmon.conf"
-                              Then echo should return a return code of 0
-                              When the user runs command "echo 'min_query_time = 0' >> $MASTER_DATA_DIRECTORY/gpperfmon/conf/gpperfmon.conf"
-                              Then echo should return a return code of 0
-                              When the user runs command "echo 'quantum = 10' >> $MASTER_DATA_DIRECTORY/gpperfmon/conf/gpperfmon.conf"
-                              Then echo should return a return code of 0
-                              When the user runs command "echo 'harvest_interval = 5' >> $MASTER_DATA_DIRECTORY/gpperfmon/conf/gpperfmon.conf"
-                              Then echo should return a return code of 0
-                              ''')
-
-    if not is_process_running("gpsmon"):
-        context.execute_steps(u'''
-                              When the database is not running
-                              Then wait until the process "postgres" goes down
-                              When the user runs "gpstart -a"
-                              Then gpstart should return a return code of 0
-                              And verify that a role "gpmon" exists in database "gpperfmon"
-                              And verify that the last line of the file "postgresql.conf" in the master data directory contains the string "gpperfmon_log_alert_level=warning"
-                              And verify that there is a "heap" table "database_history" in "gpperfmon"
-                              Then wait until the process "gpmmon" is up
-                              And wait until the process "gpsmon" is up
-                              ''')
-
-
-@given('the setting "{variable_name}" is NOT set in the configuration file "{path_to_file}"')
-@when('the setting "{variable_name}" is NOT set in the configuration file "{path_to_file}"')
-def impl(context, variable_name, path_to_file):
-    path = os.path.join(os.getenv("MASTER_DATA_DIRECTORY"), path_to_file)
-    temp_file = "/tmp/gpperfmon_temp_config"
-    with open(path) as oldfile, open(temp_file, 'w') as newfile:
-        for line in oldfile:
-            if variable_name not in line:
-                newfile.write(line)
-    shutil.move(temp_file, path)
-
-
-@given('the setting "{setting_string}" is placed in the configuration file "{path_to_file}"')
-@when('the setting "{setting_string}" is placed in the configuration file "{path_to_file}"')
-def impl(context, setting_string, path_to_file):
-    path = os.path.join(os.getenv("MASTER_DATA_DIRECTORY"), path_to_file)
-    with open(path, 'a') as f:
-        f.write(setting_string)
-        f.write("\n")
-
-
-@given('the latest gpperfmon gpdb-alert log is copied to a file with a fake (earlier) timestamp')
-@when('the latest gpperfmon gpdb-alert log is copied to a file with a fake (earlier) timestamp')
-def impl(context):
-    gpdb_alert_file_path_src = sorted(glob.glob(os.path.join(os.getenv("MASTER_DATA_DIRECTORY"),
-                                    "gpperfmon",
-                                       "logs",
-                                       "gpdb-alert*")))[-1]
-    # typical filename would be gpdb-alert-2017-04-26_155335.csv
-    # setting the timestamp to a string that starts with `-` (em-dash)
-    #   will be sorted (based on ascii) before numeric timestamps
-    #   without colliding with a real timestamp
-    dest = re.sub(r"_\d{6}\.csv$", "_-takeme.csv", gpdb_alert_file_path_src)
-
-    # Let's wait until there's actually something in the file before actually
-    # doing a copy of the log...
-    for _ in range(60):
-        if os.stat(gpdb_alert_file_path_src).st_size != 0:
-            shutil.copy(gpdb_alert_file_path_src, dest)
-            context.fake_timestamp_file = dest
-            return
-        sleep(1)
-
-    raise Exception("File: %s is empty" % gpdb_alert_file_path_src)
-
-
 
 @then('the file with the fake timestamp no longer exists')
 def impl(context):
@@ -1891,6 +1952,19 @@ def impl(context, gppkg_name):
             raise Exception( '"%s" gppkg is not installed on host: %s. \nInstalled packages: %s' % (gppkg_name, hostname, cmd.get_stdout()))
 
 
+@given('the user runs command "{command}" on all hosts without validation')
+@when('the user runs command "{command}" on all hosts without validation')
+@then('the user runs command "{command}" on all hosts without validation')
+def impl(context, command):
+    hostlist = get_all_hostnames_as_list(context, 'template1')
+
+    for hostname in set(hostlist):
+        cmd = Command(name='running command:%s' % command,
+                      cmdStr=command,
+                      ctxt=REMOTE,
+                      remoteHost=hostname)
+        cmd.run(validateAfter=False)
+
 @given('"{gppkg_name}" gppkg files do not exist on any hosts')
 @when('"{gppkg_name}" gppkg files do not exist on any hosts')
 @then('"{gppkg_name}" gppkg files do not exist on any hosts')
@@ -1912,11 +1986,11 @@ def impl(context, gppkg_name):
             raise Exception( '"%s" gppkg is installed on host: %s. \nInstalled packages: %s' % (gppkg_name, hostname, cmd.get_stdout()))
 
 
-def _remove_gppkg_from_host(context, gppkg_name, is_master_host):
+def _remove_gppkg_from_host(context, gppkg_name, is_coordinator_host):
     remote_gphome = os.environ.get('GPHOME')
 
-    if is_master_host:
-        hostname = get_master_hostname()[0][0] # returns a list of list
+    if is_coordinator_host:
+        hostname = get_coordinator_hostname()[0][0] # returns a list of list
     else:
         hostlist = get_segment_hostlist()
         if not hostlist:
@@ -1958,12 +2032,12 @@ def _remove_gppkg_from_host(context, gppkg_name, is_master_host):
 
 @when('gppkg "{gppkg_name}" is removed from a segment host')
 def impl(context, gppkg_name):
-    _remove_gppkg_from_host(context, gppkg_name, is_master_host=False)
+    _remove_gppkg_from_host(context, gppkg_name, is_coordinator_host=False)
 
 
-@when('gppkg "{gppkg_name}" is removed from master host')
+@when('gppkg "{gppkg_name}" is removed from coordinator host')
 def impl(context, gppkg_name):
-    _remove_gppkg_from_host(context, gppkg_name, is_master_host=True)
+    _remove_gppkg_from_host(context, gppkg_name, is_coordinator_host=True)
 
 
 @given('a gphome copy is created at {location} on all hosts')
@@ -2074,7 +2148,7 @@ def step_impl(context, abbreviated_timezone):
 
 @then('the startup timezone is saved')
 def step_impl(context):
-    logfile = "%s/pg_log/startup.log" % os.getenv("MASTER_DATA_DIRECTORY")
+    logfile = "%s/log/startup.log" % gp.get_coordinatordatadir()
     timezone = ""
     with open(logfile) as l:
         first_line = l.readline()
@@ -2112,48 +2186,52 @@ def _create_working_directory(context, working_directory, mode=''):
         os.mkdir(context.working_directory)
 
 
-def _create_cluster(context, master_host, segment_host_list, hba_hostnames='0', with_mirrors=False, mirroring_configuration='group'):
+def _create_cluster(context, coordinator_host, segment_host_list, hba_hostnames='0', with_mirrors=False, mirroring_configuration='group'):
     if segment_host_list == "":
         segment_host_list = []
     else:
         segment_host_list = segment_host_list.split(",")
-    del os.environ['MASTER_DATA_DIRECTORY']
-    os.environ['MASTER_DATA_DIRECTORY'] = os.path.join(context.working_directory,
-                                                       'data/master/gpseg-1')
+
+    global coordinator_data_dir
+    coordinator_data_dir = os.path.join(context.working_directory, 'data/coordinator/gpseg-1')
+    os.environ['COORDINATOR_DATA_DIRECTORY'] = coordinator_data_dir
+
     try:
-        with dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False) as conn:
-            curs = dbconn.execSQL(conn, "select count(*) from gp_segment_configuration where role='m';")
-            count = curs.fetchall()[0][0]
-            if not with_mirrors and count == 0:
-                print "Skipping creating a new cluster since the cluster is primary only already."
-                return
-            elif with_mirrors and count > 0:
-                print "Skipping creating a new cluster since the cluster has mirrors already."
-                return
+        with closing(dbconn.connect(dbconn.DbURL(dbname='template1'), unsetSearchPath=False)) as conn:
+            count = dbconn.querySingleton(conn, "select count(*) from gp_segment_configuration where role='m';")
+        if not with_mirrors and count == 0:
+            print("Skipping creating a new cluster since the cluster is primary only already.")
+            return
+        elif with_mirrors and count > 0:
+            print("Skipping creating a new cluster since the cluster has mirrors already.")
+            return
     except:
         pass
 
-    testcluster = TestCluster(hosts=[master_host]+segment_host_list, base_dir=context.working_directory,hba_hostnames=hba_hostnames)
+    testcluster = TestCluster(hosts=[coordinator_host]+segment_host_list, base_dir=context.working_directory,hba_hostnames=hba_hostnames)
     testcluster.reset_cluster()
     testcluster.create_cluster(with_mirrors=with_mirrors, mirroring_configuration=mirroring_configuration)
     context.gpexpand_mirrors_enabled = with_mirrors
 
-@then('a cluster is created with no mirrors on "{master_host}" and "{segment_host_list}"')
-@given('a cluster is created with no mirrors on "{master_host}" and "{segment_host_list}"')
-def impl(context, master_host, segment_host_list):
-    _create_cluster(context, master_host, segment_host_list, with_mirrors=False)
+@then('a cluster is created with no mirrors on "{coordinator_host}" and "{segment_host_list}"')
+@given('a cluster is created with no mirrors on "{coordinator_host}" and "{segment_host_list}"')
+def impl(context, coordinator_host, segment_host_list):
+    _create_cluster(context, coordinator_host, segment_host_list, with_mirrors=False)
 
-@given('with HBA_HOSTNAMES "{hba_hostnames}" a cluster is created with no mirrors on "{master_host}" and "{segment_host_list}"')
-def impl(context, master_host, segment_host_list, hba_hostnames):
-    _create_cluster(context, master_host, segment_host_list, hba_hostnames, with_mirrors=False)
+@given('with HBA_HOSTNAMES "{hba_hostnames}" a cluster is created with no mirrors on "{coordinator_host}" and "{segment_host_list}"')
+@when('with HBA_HOSTNAMES "{hba_hostnames}" a cluster is created with no mirrors on "{coordinator_host}" and "{segment_host_list}"')
+@when('with HBA_HOSTNAMES "{hba_hostnames}" a cross-subnet cluster without a standby is created with no mirrors on "{coordinator_host}" and "{segment_host_list}"')
+def impl(context, coordinator_host, segment_host_list, hba_hostnames):
+    _create_cluster(context, coordinator_host, segment_host_list, hba_hostnames, with_mirrors=False)
 
-@given('a cluster is created with mirrors on "{master_host}" and "{segment_host_list}"')
-def impl(context, master_host, segment_host_list):
-    _create_cluster(context, master_host, segment_host_list, with_mirrors=True, mirroring_configuration='group')
+@given('a cross-subnet cluster without a standby is created with mirrors on "{coordinator_host}" and "{segment_host_list}"')
+@given('a cluster is created with mirrors on "{coordinator_host}" and "{segment_host_list}"')
+def impl(context, coordinator_host, segment_host_list):
+    _create_cluster(context, coordinator_host, segment_host_list, with_mirrors=True, mirroring_configuration='group')
 
-@given('a cluster is created with "{mirroring_configuration}" segment mirroring on "{master_host}" and "{segment_host_list}"')
-def impl(context, mirroring_configuration, master_host, segment_host_list):
-    _create_cluster(context, master_host, segment_host_list, with_mirrors=True, mirroring_configuration=mirroring_configuration)
+@given('a cluster is created with "{mirroring_configuration}" segment mirroring on "{coordinator_host}" and "{segment_host_list}"')
+def impl(context, mirroring_configuration, coordinator_host, segment_host_list):
+    _create_cluster(context, coordinator_host, segment_host_list, with_mirrors=True, mirroring_configuration=mirroring_configuration)
 
 @given('the user runs gpexpand interview to add {num_of_segments} new segment and {num_of_hosts} new host "{hostnames}"')
 @when('the user runs gpexpand interview to add {num_of_segments} new segment and {num_of_hosts} new host "{hostnames}"')
@@ -2192,7 +2270,7 @@ def impl(context, num_of_segments, num_of_hosts, hostnames):
 
 @given('there are no gpexpand_inputfiles')
 def impl(context):
-    map(os.remove, glob.glob("gpexpand_inputfile*"))
+    list(map(os.remove, glob.glob("gpexpand_inputfile*")))
 
 @when('the user runs gpexpand with the latest gpexpand_inputfile with additional parameters {additional_params}')
 def impl(context, additional_params=''):
@@ -2281,29 +2359,28 @@ sdw1|sdw1|21502|/data/gpdata/gpexpand/data/mirror/gpseg2|8|2|m"""
     gpexpand = Gpexpand(context, working_directory=context.working_directory)
     gpexpand.initialize_segments()
 
-@given('the master pid has been saved')
+@given('the coordinator pid has been saved')
 def impl(context):
     data_dir = os.path.join(context.working_directory,
-                            'data/master/gpseg-1')
-    context.master_pid = gp.get_postmaster_pid_locally(data_dir)
+                            'data/coordinator/gpseg-1')
+    context.coordinator_pid = gp.get_postmaster_pid_locally(data_dir)
 
-@then('verify that the master pid has not been changed')
+@then('verify that the coordinator pid has not been changed')
 def impl(context):
     data_dir = os.path.join(context.working_directory,
-                            'data/master/gpseg-1')
-    current_master_pid = gp.get_postmaster_pid_locally(data_dir)
-    if context.master_pid == current_master_pid:
+                            'data/coordinator/gpseg-1')
+    current_coordinator_pid = gp.get_postmaster_pid_locally(data_dir)
+    if context.coordinator_pid == current_coordinator_pid:
         return
 
-    raise Exception("The master pid has been changed.\nprevious: %s\ncurrent: %s" % (context.master_pid, current_master_pid))
+    raise Exception("The coordinator pid has been changed.\nprevious: %s\ncurrent: %s" % (context.coordinator_pid, current_coordinator_pid))
 
 @then('the numsegments of table "{tabname}" is {numsegments}')
 def impl(context, tabname, numsegments):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = "select numsegments from gp_distribution_policy where localoid = '{tabname}'::regclass".format(tabname=tabname)
-        ns = dbconn.execSQLForSingleton(conn, query)
-
+        ns = dbconn.querySingleton(conn, query)
     if ns == int(numsegments):
         return
 
@@ -2315,9 +2392,9 @@ def impl(context, tabname, numsegments):
 @then('the number of segments have been saved')
 def impl(context):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = """SELECT count(*) from gp_segment_configuration where -1 < content"""
-        context.start_data_segments = dbconn.execSQLForSingleton(conn, query)
+        context.start_data_segments = dbconn.querySingleton(conn, query)
 
 @given('the gp_segment_configuration have been saved')
 @when('the gp_segment_configuration have been saved')
@@ -2325,11 +2402,11 @@ def impl(context):
 def impl(context):
     dbname = 'gptest'
     gp_segment_conf_backup = {}
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = """SELECT count(*) from gp_segment_configuration where -1 < content"""
-        segment_count = int(dbconn.execSQLForSingleton(conn, query))
+        segment_count = int(dbconn.querySingleton(conn, query))
         query = """SELECT * from gp_segment_configuration where -1 < content order by dbid"""
-        cursor = dbconn.execSQL(conn, query)
+        cursor = dbconn.query(conn, query)
         for i in range(0, segment_count):
             dbid, content, role, preferred_role, mode, status,\
             port, hostname, address, datadir = cursor.fetchone();
@@ -2351,11 +2428,11 @@ def impl(context):
 def impl(context):
     dbname = 'gptest'
     gp_segment_conf_backup = {}
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = """SELECT count(*) from gp_segment_configuration where -1 < content"""
-        segment_count = int(dbconn.execSQLForSingleton(conn, query))
+        segment_count = int(dbconn.querySingleton(conn, query))
         query = """SELECT * from gp_segment_configuration where -1 < content order by dbid"""
-        cursor = dbconn.execSQL(conn, query)
+        cursor = dbconn.query(conn, query)
         for i in range(0, segment_count):
             dbid, content, role, preferred_role, mode, status,\
             port, hostname, address, datadir = cursor.fetchone();
@@ -2375,10 +2452,9 @@ def impl(context):
 @given('user has created {table_name} table')
 def impl(context, table_name):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = """CREATE TABLE %s(a INT)""" % table_name
         dbconn.execSQL(conn, query)
-        conn.commit()
 
 @given('a long-run read-only transaction exists on {table_name}')
 def impl(context, table_name):
@@ -2387,11 +2463,11 @@ def impl(context, table_name):
     context.long_run_select_only_conn = conn
 
     query = """SELECT gp_segment_id, * from %s order by 1, 2""" % table_name
-    data_result = dbconn.execSQL(conn, query).fetchall()
+    data_result = dbconn.query(conn, query).fetchall()
     context.long_run_select_only_data_result = data_result
 
     query = """SELECT txid_current()"""
-    xid = dbconn.execSQLForSingleton(conn, query)
+    xid = dbconn.querySingleton(conn, query)
     context.long_run_select_only_xid = xid
 
 @then('verify that long-run read-only transaction still exists on {table_name}')
@@ -2400,10 +2476,10 @@ def impl(context, table_name):
     conn = context.long_run_select_only_conn
 
     query = """SELECT gp_segment_id, * from %s order by 1, 2""" % table_name
-    data_result = dbconn.execSQL(conn, query).fetchall()
+    data_result = dbconn.query(conn, query).fetchall()
 
     query = """SELECT txid_current()"""
-    xid = dbconn.execSQLForSingleton(conn, query)
+    xid = dbconn.querySingleton(conn, query)
 
     if (xid != context.long_run_select_only_xid or
         data_result != context.long_run_select_only_data_result):
@@ -2418,7 +2494,7 @@ def impl(context):
     context.long_run_conn = conn
 
     query = """SELECT txid_current()"""
-    xid = dbconn.execSQLForSingleton(conn, query)
+    xid = dbconn.querySingleton(conn, query)
     context.long_run_xid = xid
 
 @then('verify that long-run transaction aborted for changing the catalog by creating table {table_name}')
@@ -2427,16 +2503,16 @@ def impl(context, table_name):
     conn = context.long_run_conn
 
     query = """SELECT txid_current()"""
-    xid = dbconn.execSQLForSingleton(conn, query)
+    xid = dbconn.querySingleton(conn, query)
     if context.long_run_xid != xid:
         raise Exception("Incorrect xid of long run transaction: before %s, after %s" %
                         (context.long_run_xid, xid));
 
     query = """CREATE TABLE %s (a INT)""" % table_name
     try:
-        data_result = dbconn.execSQL(conn, query)
-    except Exception, msg:
-        key_msg = "FATAL:  cluster is expaneded"
+        data_result = dbconn.query(conn, query)
+    except Exception as msg:
+        key_msg = "FATAL:  cluster is expanded"
         if key_msg not in msg.__str__():
             raise Exception("transaction not abort correctly, errmsg:%s" % msg)
     else:
@@ -2446,16 +2522,15 @@ def impl(context, table_name):
 @then('verify that the cluster has {num_of_segments} new segments')
 def impl(context, num_of_segments):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = """SELECT dbid, content, role, preferred_role, mode, status, port, hostname, address, datadir from gp_segment_configuration;"""
-        rows = dbconn.execSQL(conn, query).fetchall()
+        rows = dbconn.query(conn, query).fetchall()
         end_data_segments = 0
         for row in rows:
             content = row[1]
             status = row[5]
             if content > -1 and status == 'u':
                 end_data_segments += 1
-
     if int(num_of_segments) == int(end_data_segments - context.start_data_segments):
         return
 
@@ -2503,38 +2578,41 @@ def impl(context, hostnames):
 @then('user has created expansiontest tables')
 def impl(context):
     dbname = 'gptest'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         for i in range(3):
             query = """drop table if exists expansiontest%s""" % (i)
             dbconn.execSQL(conn, query)
             query = """create table expansiontest%s(a int)""" % (i)
             dbconn.execSQL(conn, query)
-        conn.commit()
 
 @then('the tables have finished expanding')
 def impl(context):
     dbname = 'postgres'
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    conn = dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)
+    try:
         query = """select fq_name from gpexpand.status_detail WHERE expansion_finished IS NULL"""
-        cursor = dbconn.execSQL(conn, query)
+        cursor = dbconn.query(conn, query)
 
         row = cursor.fetchone()
         if row:
             raise Exception("table %s has not finished expanding" % row[0])
+    finally:
+        conn.close()
 
 @given('an FTS probe is triggered')
 @when('an FTS probe is triggered')
+@then('an FTS probe is triggered')
 def impl(context):
-    with dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False) as conn:
-        dbconn.execSQLForSingleton(conn, "SELECT gp_request_fts_probe_scan()")
+    with closing(dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False)) as conn:
+        dbconn.querySingleton(conn, "SELECT gp_request_fts_probe_scan()")
 
-@then('verify that gpstart on original master fails due to lower Timeline ID')
+@then('verify that gpstart on original coordinator fails due to lower Timeline ID')
 def step_impl(context):
-    ''' This assumes that gpstart still checks for Timeline ID if a standby master is present '''
-    context.execute_steps(u'''
+    ''' This assumes that gpstart still checks for Timeline ID if a standby coordinator is present '''
+    context.execute_steps('''
                             When the user runs "gpstart -a"
                             Then gpstart should return a return code of 2
-                            And gpstart should print "Standby activated, this node no more can act as master." to stdout
+                            And gpstart should print "Standby activated, this node no more can act as coordinator." to stdout
                             ''')
 
 @then('verify gpstate with options "{options}" output is correct')
@@ -2543,12 +2621,12 @@ def step_impl(context, options):
         if context.standby_hostname not in context.stdout_message or \
                 context.standby_data_dir not in context.stdout_message or \
                 str(context.standby_port) not in context.stdout_message:
-            raise Exception("gpstate -f output is missing expected standby master information")
+            raise Exception("gpstate -f output is missing expected standby coordinator information")
     elif '-s' in options:
         if context.standby_hostname not in context.stdout_message or \
                 context.standby_data_dir not in context.stdout_message or \
                 str(context.standby_port) not in context.stdout_message:
-            raise Exception("gpstate -s output is missing expected master information")
+            raise Exception("gpstate -s output is missing expected coordinator information")
     elif '-Q' in options:
         for stdout_line in context.stdout_message.split('\n'):
             if 'up segments, from configuration table' in stdout_line:
@@ -2563,26 +2641,29 @@ def step_impl(context, options):
                 break ## down segments comes after up segments, so we can break here
     elif '-m' in options:
         dbname = 'postgres'
-        with dbconn.connect(dbconn.DbURL(hostname=context.standby_hostname, port=context.standby_port, dbname=dbname), unsetSearchPath=False) as conn:
+        conn = dbconn.connect(dbconn.DbURL(hostname=context.standby_hostname, port=context.standby_port, dbname=dbname), unsetSearchPath=False)
+        try:
             query = """select datadir, port from pg_catalog.gp_segment_configuration where role='m' and content <> -1;"""
-            cursor = dbconn.execSQL(conn, query)
+            cursor = dbconn.query(conn, query)
 
-        for i in range(cursor.rowcount):
-            datadir, port = cursor.fetchone()
-            if datadir not in context.stdout_message or \
-                str(port) not in context.stdout_message:
-                    raise Exception("gpstate -m output missing expected mirror info, datadir %s port %d" %(datadir, port))
+            for i in range(cursor.rowcount):
+                datadir, port = cursor.fetchone()
+                if datadir not in context.stdout_message or \
+                    str(port) not in context.stdout_message:
+                        raise Exception("gpstate -m output missing expected mirror info, datadir %s port %d" %(datadir, port))
+        finally:
+            conn.close()
     else:
         raise Exception("no verification for gpstate option given")
 
 @given('ensure the standby directory does not exist')
 def impl(context):
-    run_command(context, 'rm -rf $MASTER_DATA_DIRECTORY/newstandby')
+    run_command(context, 'rm -rf $COORDINATOR_DATA_DIRECTORY/newstandby')
     run_command(context, 'rm -rf /tmp/gpinitsystemtest && mkdir /tmp/gpinitsystemtest')
 
 @when('initialize a cluster with standby using "{config_file}"')
 def impl(context, config_file):
-    run_gpcommand(context, 'gpinitsystem -a -I %s -l /tmp/gpinitsystemtest -s localhost -P 21100 -S $MASTER_DATA_DIRECTORY/newstandby -h ../gpAux/gpdemo/hostfile' % config_file)
+    run_gpcommand(context, 'gpinitsystem -a -I %s -l /tmp/gpinitsystemtest -s localhost -P 21100 -S $COORDINATOR_DATA_DIRECTORY/newstandby -h ../gpAux/gpdemo/hostfile' % config_file)
     check_return_code(context, 0)
 
 @when('initialize a cluster using "{config_file}"')
@@ -2600,7 +2681,7 @@ def impl(context, config_file):
 def step_impl(context):
     query = "select dbid, port, hostname, datadir from gp_segment_configuration where content >= 0"
     conn = dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False)
-    segments = dbconn.execSQL(conn, query).fetchall()
+    segments = dbconn.query(conn, query).fetchall()
     for segment in segments:
         dbid = "'%s'" % segment[0]
         port = "'%s'" % segment[1]
@@ -2609,7 +2690,7 @@ def step_impl(context):
 
         ## check postgresql.conf
         remote_postgresql_conf = "%s/%s" % (datadir, 'postgresql.conf')
-        local_conf_copy = os.path.join(os.getenv("MASTER_DATA_DIRECTORY"), "%s.%s" % ('postgresql.conf', hostname))
+        local_conf_copy = os.path.join(gp.get_coordinatordatadir(), "%s.%s" % ('postgresql.conf', hostname))
         cmd = Command(name="Copy remote conf to local to diff",
                     cmdStr='scp %s:%s %s' % (hostname, remote_postgresql_conf, local_conf_copy))
         cmd.run(validateAfter=True)
@@ -2640,12 +2721,20 @@ def impl(context):
 @then('verify the dml results again in a new transaction')
 def impl(context):
     dbname = 'gptest'
-    conn = dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
+        for dml, job in context.dml_jobs:
+            code, message = job.reverify(conn)
+            if not code:
+                raise Exception(message)
 
-    for dml, job in context.dml_jobs:
-        code, message = job.reverify(conn)
-        if not code:
-            raise Exception(message)
+
+@given('the "{table_name}" table row count in "{dbname}" is saved')
+def impl(context, table_name, dbname):
+    if 'table_row_count' not in context:
+        context.table_row_count = {}
+    if table_name not in context.table_row_count:
+        context.table_row_count[table_name] = _get_row_count_per_segment(table_name, dbname)
+
 @given('distribution information from table "{table}" with data in "{dbname}" is saved')
 def impl(context, table, dbname):
     context.pre_redistribution_row_count = _get_row_count_per_segment(table, dbname)
@@ -2659,9 +2748,9 @@ def impl(context, table, dbname):
         raise Exception("Failed to redistribute table. Expected to have more than %d segments, got %d segments" % (len(pre_distribution_row_count), len(post_distribution_row_count)))
 
     post_distribution_num_segments = 0
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         query = "SELECT count(DISTINCT content) FROM gp_segment_configuration WHERE content != -1;"
-        cursor = dbconn.execSQL(conn, query)
+        cursor = dbconn.query(conn, query)
         post_distribution_num_segments = cursor.fetchone()[0]
 
     if len(post_distribution_row_count) != post_distribution_num_segments:
@@ -2680,24 +2769,29 @@ def impl(context, table, dbname):
         raise Exception("Unexpected variance for redistributed data in table %s. Relative standard error %f exceeded tolerance factor of %f." %
                 (table, relative_std_error, tolerance))
 
+
+@then('the row count from table "{table_name}" in "{dbname}" is verified against the saved data')
+def impl(context, table_name, dbname):
+    saved_row_count = context.table_row_count[table_name]
+    current_row_count = _get_row_count_per_segment(table_name, dbname)
+
+    if saved_row_count != current_row_count:
+        raise Exception("%s table in %s has %d rows, expected %d rows." % (table_name, dbname, current_row_count, saved_row_count))
+
+
+@then('distribution information from table "{table1}" and "{table2}" in "{dbname}" are the same')
+def impl(context, table1, table2, dbname):
+    distribution_row_count_tbl1 = _get_row_count_per_segment(table1, dbname)
+    distribution_row_count_tbl2 = _get_row_count_per_segment(table2, dbname)
+    if distribution_row_count_tbl1 != distribution_row_count_tbl2:
+        raise Exception("%s and %s have different distribution. Row count of %s is %s and row count of %s is %s" % (table1, table2, table1, distribution_row_count_tbl1, table2, distribution_row_count_tbl2)) 
+
 def _get_row_count_per_segment(table, dbname):
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
-        query = "SELECT gp_segment_id,COUNT(i) FROM %s GROUP BY gp_segment_id;" % table
-        cursor = dbconn.execSQL(conn, query)
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
+        query = "SELECT gp_segment_id,COUNT(i) FROM %s GROUP BY gp_segment_id ORDER BY gp_segment_id;" % table
+        cursor = dbconn.query(conn, query)
         rows = cursor.fetchall()
-        return [row[1] for row in rows] # indices are the gp segment id's, so no need to store them explicitly
-
-@given('set fault inject "{fault}"')
-@then('set fault inject "{fault}"')
-@when('set fault inject "{fault}"')
-def impl(context, fault):
-    os.environ['GPMGMT_FAULT_POINT'] = fault
-
-@given('unset fault inject')
-@then('unset fault inject')
-@when('unset fault inject')
-def impl(context):
-    os.environ['GPMGMT_FAULT_POINT'] = ""
+    return [row[1] for row in rows] # indices are the gp segment id's, so no need to store them explicitly
 
 @given('run rollback')
 @then('run rollback')
@@ -2716,7 +2810,7 @@ def impl(context):
     createdb_cmd = "createdb \"%s\"" % escape_dbname
     run_command(context, createdb_cmd)
 
-    with dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(dbconn.DbURL(dbname=dbname), unsetSearchPath=False)) as conn:
         #special char table
         query = 'create table " a b.""\'\\\\"(c1 int);'
         dbconn.execSQL(conn, query)
@@ -2756,7 +2850,6 @@ PARTITION BY RANGE (year)
   DEFAULT PARTITION outlying_years);
 """
         dbconn.execSQL(conn, query)
-        conn.commit()
 
 @given('the database "{dbname}" is broken with "{broken}" orphaned toast tables only on segments with content IDs "{contentIDs}"')
 def break_orphaned_toast_tables(context, dbname, broken, contentIDs=None):
@@ -2869,9 +2962,8 @@ UPDATE pg_class SET reltoastrelid = 0 WHERE relname = 'double_orphan_invalid_par
 
     for dbURL in dbURLs:
         utility = True if contentIDs else False
-        with dbconn.connect(dbURL, allowSystemTableMods=True, utility=utility, unsetSearchPath=False) as conn:
+        with closing(dbconn.connect(dbURL, allowSystemTableMods=True, utility=utility, unsetSearchPath=False)) as conn:
             dbconn.execSQL(conn, sql)
-            conn.commit()
 
 @given('the database "{dbname}" is broken with "{broken}" orphaned toast tables')
 def impl(context, dbname, broken):
@@ -2882,8 +2974,8 @@ def impl(context, dbname):
     drop_database_if_exists(context, dbname)
     create_database(context, dbname)
 
-    master = dbconn.DbURL(dbname=dbname)
-    gparray = GpArray.initFromCatalog(master)
+    coordinator = dbconn.DbURL(dbname=dbname)
+    gparray = GpArray.initFromCatalog(coordinator)
 
     primary0 = gparray.segmentPairs[0].primaryDB
     primary1 = gparray.segmentPairs[1].primaryDB
@@ -2891,24 +2983,21 @@ def impl(context, dbname):
     seg0 = dbconn.DbURL(dbname=dbname, hostname=primary0.hostname, port=primary0.port)
     seg1 = dbconn.DbURL(dbname=dbname, hostname=primary1.hostname, port=primary1.port)
 
-    with dbconn.connect(master, allowSystemTableMods=True, unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(coordinator, allowSystemTableMods=True, unsetSearchPath=False)) as conn:
         dbconn.execSQL(conn, """
             DROP TABLE IF EXISTS borked;
             CREATE TABLE borked (a text);
         """)
-        conn.commit()
 
-    with dbconn.connect(seg0, utility=True, allowSystemTableMods=True, unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(seg0, utility=True, allowSystemTableMods=True, unsetSearchPath=False)) as conn:
         dbconn.execSQL(conn, """
             DELETE FROM pg_depend WHERE refobjid = 'borked'::regclass;
         """)
-        conn.commit()
 
-    with dbconn.connect(seg1, utility=True, allowSystemTableMods=True, unsetSearchPath=False) as conn:
+    with closing(dbconn.connect(seg1, utility=True, allowSystemTableMods=True, unsetSearchPath=False)) as conn:
         dbconn.execSQL(conn, """
             UPDATE pg_class SET reltoastrelid = 0 WHERE oid = 'borked'::regclass;
         """)
-        conn.commit()
 
 @then('verify status file and gp_segment_configuration backup file exist on standby')
 def impl(context):
@@ -2917,25 +3006,25 @@ def impl(context):
 
     query = "select hostname, datadir from gp_segment_configuration where content = -1 order by dbid"
     conn = dbconn.connect(dbconn.DbURL(dbname='postgres'), unsetSearchPath=False)
-    res = dbconn.execSQL(conn, query).fetchall()
-    master = res[0]
+    res = dbconn.query(conn, query).fetchall()
+    coordinator = res[0]
     standby = res[1]
 
-    master_datadir = master[1]
+    coordinator_datadir = coordinator[1]
     standby_host = standby[0]
     standby_datadir = standby[1]
 
     standby_remote_statusfile = "%s:%s/%s" % (standby_host, standby_datadir, status_file)
-    standby_local_statusfile = "%s/%s.standby" % (master_datadir, status_file)
+    standby_local_statusfile = "%s/%s.standby" % (coordinator_datadir, status_file)
     standby_remote_gp_segment_configuration_file = "%s:%s/%s" % \
             (standby_host, standby_datadir, gp_segment_configuration_backup)
     standby_local_gp_segment_configuration_file = "%s/%s.standby" % \
-            (master_datadir, gp_segment_configuration_backup)
+            (coordinator_datadir, gp_segment_configuration_backup)
 
-    cmd = Command(name="Copy standby file to master", cmdStr='scp %s %s' % \
+    cmd = Command(name="Copy standby file to coordinator", cmdStr='scp %s %s' % \
             (standby_remote_statusfile, standby_local_statusfile))
     cmd.run(validateAfter=True)
-    cmd = Command(name="Copy standby file to master", cmdStr='scp %s %s' % \
+    cmd = Command(name="Copy standby file to coordinator", cmdStr='scp %s %s' % \
             (standby_remote_gp_segment_configuration_file, standby_local_gp_segment_configuration_file))
     cmd.run(validateAfter=True)
 
@@ -2948,10 +3037,110 @@ def impl(context):
 @when('the user runs {command} and selects {input}')
 def impl(context, command, input):
     p = Popen(command.split(), stdout=PIPE, stdin=PIPE, stderr=PIPE)
-    stdout, stderr = p.communicate(input=input)
+    stdout, stderr = p.communicate(input=input.encode())
 
     p.stdin.close()
 
     context.ret_code = p.returncode
-    context.stdout_message = stdout
-    context.error_message = stderr
+    context.stdout_message = stdout.decode()
+    context.error_message = stderr.decode()
+
+def are_on_different_subnets(primary_hostname, mirror_hostname):
+    primary_broadcast = check_output(['ssh', '-n', primary_hostname, "/sbin/ip addr show eth0 | grep 'inet .* brd' | awk '{ print $4 }'"])
+    mirror_broadcast = check_output(['ssh', '-n', mirror_hostname,  "/sbin/ip addr show eth0 | grep 'inet .* brd' | awk '{ print $4 }'"])
+    if not primary_broadcast:
+        raise Exception("primary hostname %s has no broadcast address" % primary_hostname)
+    if not mirror_broadcast:
+        raise Exception("mirror hostname %s has no broadcast address" % mirror_hostname)
+
+    return primary_broadcast != mirror_broadcast
+
+@then('the primaries and mirrors {including} coordinatorStandby are on different subnets')
+def impl(context, including):
+    gparray = GpArray.initFromCatalog(dbconn.DbURL())
+
+    if including == "including":
+        if not gparray.standbyCoordinator:
+            raise Exception("no standby found for coordinator")
+        if not are_on_different_subnets(gparray.coordinator.hostname, gparray.standbyCoordinator.hostname):
+            raise Exception("coordinator %s and its standby %s are on same the subnet" % (gparray.coordinator, gparray.standbyCoordinator))
+
+    for segPair in gparray.segmentPairs:
+        if not segPair.mirrorDB:
+            raise Exception("no mirror found for segPair: %s" % segPair)
+        if not are_on_different_subnets(segPair.primaryDB.hostname, segPair.mirrorDB.hostname):
+            raise Exception("segmentPair on same subnet: %s" % segPair)
+
+@then('content {content} is {desired_state}')
+def impl(context, content, desired_state):
+    acceptable_states = ["balanced", "unbalanced"]
+    if desired_state not in acceptable_states:
+        raise Exception("expected desired state to be one of %s", acceptable_states)
+
+    role_operator = "=" if desired_state == "balanced" else "<>"
+    with closing(dbconn.connect(dbconn.DbURL(dbname="template1"), unsetSearchPath=False)) as conn:
+        rows = dbconn.query(conn, "SELECT role, preferred_role FROM gp_segment_configuration WHERE content = %s and preferred_role %s role" % (content, role_operator)).fetchall()
+
+    if len(rows) == 0:
+        raise Exception("Expected content %s to be %s." % (content, desired_state))
+
+@given('the system locale is saved')
+def impl(context):
+    if "LANG" in os.environ:
+        context.system_locale = os.environ["LANG"]
+        return
+
+    cmd = Command(name='Get system locale', cmdStr='locale -a | head -1')
+    cmd.run(validateAfter=True)
+    context.system_locale = cmd.get_stdout()
+
+@then('the database locales are saved')
+def impl(context):
+    with closing(dbconn.connect(dbconn.DbURL())) as conn:
+        rows = dbconn.query(conn, "SELECT name, setting FROM pg_settings WHERE name LIKE 'lc_%'").fetchall()
+        context.database_locales = {row.name: row.setting for row in rows}
+
+def check_locales(database_locales, locale_names, expected):
+    locale_names = locale_names.split(',')
+    for name in locale_names:
+        if name not in database_locales:
+            raise Exception("Locale %s is invalid" % name)
+        locale = database_locales[name]
+        if locale != expected:
+            raise Exception("Expected %s to be %s, but it was %s" % (name, expected, locale))
+
+def get_en_utf_locale():
+    cmd = Command(name='Get installed US UTF locale', cmdStr='locale -a | grep -i "en[_-]..\.utf.*8" | head -1')
+    cmd.run(validateAfter=True)
+    locale = cmd.get_stdout()
+    if locale == "":
+        raise Exception("This test requires at least one English UTF-8 locale to be installed on this system")
+    return locale
+
+@then('the database locales "{locale_names}" match the locale "{expected}"')
+def step_impl(context, locale_names, expected):
+    check_locales(context.database_locales, locale_names, expected)
+
+@then('the database locales "{locale_names}" match the system locale')
+def step_impl(context, locale_names):
+    check_locales(context.database_locales, locale_names, context.system_locale)
+
+@then('the database locales "{locale_names}" match the installed UTF locale')
+def step_impl(context, locale_names):
+    locale = get_en_utf_locale()
+    check_locales(context.database_locales, locale_names, locale)
+
+@when('a demo cluster is created using gpinitsystem args "{args}"')
+def impl(context, args):
+    context.execute_steps('''
+    Given the user runs command "rm -rf ../gpAux/gpdemo/datadirs/*"
+      And the user runs command "mkdir ../gpAux/gpdemo/datadirs/qddir; mkdir ../gpAux/gpdemo/datadirs/dbfast1; mkdir ../gpAux/gpdemo/datadirs/dbfast2; mkdir ../gpAux/gpdemo/datadirs/dbfast3"
+      And the user runs command "mkdir ../gpAux/gpdemo/datadirs/dbfast_mirror1; mkdir ../gpAux/gpdemo/datadirs/dbfast_mirror2; mkdir ../gpAux/gpdemo/datadirs/dbfast_mirror3"
+      And the user runs command "rm -rf /tmp/gpinitsystemtest && mkdir /tmp/gpinitsystemtest"
+     When the user runs "gpinitsystem -a %s -c ../gpAux/gpdemo/clusterConfigFile -l /tmp/gpinitsystemtest -P 21100 -h ../gpAux/gpdemo/hostfile"
+    ''' % args)
+
+@when('a demo cluster is created using the installed UTF locale')
+def impl(context):
+    locale = get_en_utf_locale()
+    context.execute_steps('''When a demo cluster is created using gpinitsystem args "--lc-ctype=%s"''' % locale)

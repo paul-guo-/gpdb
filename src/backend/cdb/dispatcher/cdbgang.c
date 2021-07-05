@@ -4,7 +4,7 @@
  *	  Query Executor Factory for gangs of QEs
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -21,6 +21,7 @@
 #include "access/xact.h"
 #include "catalog/namespace.h"
 #include "commands/variable.h"
+#include "common/ip.h"
 #include "nodes/execnodes.h"	/* CdbProcess, Slice, SliceTable */
 #include "postmaster/postmaster.h"
 #include "tcop/tcopprot.h"
@@ -40,7 +41,6 @@
 #include "cdb/cdbvars.h"		/* Gp_role, etc. */
 #include "cdb/cdbconn.h"		/* cdbconn_* */
 #include "libpq/libpq-be.h"
-#include "libpq/ip.h"
 
 #include "utils/guc_tables.h"
 
@@ -195,6 +195,29 @@ segment_failure_due_to_recovery(const char *error_message)
 	return false;
 }
 
+/* Check if the segment failure is due to missing writer process on QE node. */
+bool
+segment_failure_due_to_missing_writer(const char *error_message)
+{
+	char	   *fatal = NULL,
+			   *ptr = NULL;
+	int			fatal_len = 0;
+
+	if (error_message == NULL)
+		return false;
+
+	fatal = _("FATAL");
+	fatal_len = strlen(fatal);
+
+	ptr = strstr(error_message, fatal);
+	if ((ptr != NULL) && ptr[fatal_len] == ':' &&
+		strstr(error_message, _(WRITER_IS_MISSING_MSG)))
+		return true;
+
+	return false;
+}
+
+
 /*
  * Reads the GP catalog tables and build a CdbComponentDatabases structure.
  * It then converts this to a Gang structure and initializes all the non-connection related fields.
@@ -207,7 +230,7 @@ buildGangDefinition(List *segments, SegmentType segmentType)
 {
 	Gang *newGangDefinition = NULL;
 	ListCell *lc;
-	int	i = 0;
+	volatile int i = 0;
 	int	size;
 	int contentId;
 
@@ -237,6 +260,7 @@ buildGangDefinition(List *segments, SegmentType segmentType)
 	}
 	PG_CATCH();
 	{
+		newGangDefinition->size = i;
 		RecycleGang(newGangDefinition, true /* destroy */);
 		PG_RE_THROW();
 	}
@@ -320,8 +344,6 @@ addOneOption(StringInfo string, struct config_generic *guc)
 				}
 				break;
 			}
-		default:
-			Insist(false);
 	}
 }
 
@@ -422,9 +444,6 @@ cdbgang_parse_gpqeid_params(struct Port *port pg_attribute_unused(),
 	char	   *cp;
 	char	   *np = gpqeid;
 
-	/* The presence of an gpqeid string means this backend is a qExec. */
-	SetConfigOption("gp_session_role", "execute", PGC_POSTMASTER, PGC_S_OVERRIDE);
-
 	/* gp_session_id */
 	if (gpqeid_next_param(&cp, &np))
 		SetConfigOption("gp_session_id", cp, PGC_POSTMASTER, PGC_S_OVERRIDE);
@@ -510,11 +529,13 @@ makeCdbProcess(SegmentDatabaseDescriptor *segdbDesc)
 
 	if (Gp_interconnect_type == INTERCONNECT_TYPE_UDPIFC)
 		process->listenerPort = (segdbDesc->motionListener >> 16) & 0x0ffff;
-	else if (Gp_interconnect_type == INTERCONNECT_TYPE_TCP)
+	else if (Gp_interconnect_type == INTERCONNECT_TYPE_TCP ||
+			 Gp_interconnect_type == INTERCONNECT_TYPE_PROXY)
 		process->listenerPort = (segdbDesc->motionListener & 0x0ffff);
 
 	process->pid = segdbDesc->backendPid;
 	process->contentid = segdbDesc->segindex;
+	process->dbid = qeinfo->config->dbid;
 	return process;
 }
 
@@ -528,7 +549,7 @@ makeCdbProcess(SegmentDatabaseDescriptor *segdbDesc)
  * @directDispatch: might be null
  */
 void
-setupCdbProcessList(Slice *slice)
+setupCdbProcessList(ExecSlice *slice)
 {
 	int			i = 0;
 	Gang		*gang = slice->primaryGang;
@@ -553,9 +574,10 @@ setupCdbProcessList(Slice *slice)
 		slice->primaryProcesses = lappend(slice->primaryProcesses, process);
 		slice->processesMap = bms_add_member(slice->processesMap, segdbDesc->identifier);
 
-		ELOG_DISPATCHER_DEBUG("Gang assignment (gang_id %d): slice%d seg%d %s:%d pid=%d",
-							  gang->gang_id, slice->sliceIndex, process->contentid,
-							  process->listenerAddr, process->listenerPort, process->pid);
+		ELOG_DISPATCHER_DEBUG("Gang assignment: slice%d seg%d %s:%d pid=%d",
+							  slice->sliceIndex, process->contentid,
+							  process->listenerAddr, process->listenerPort,
+							  process->pid);
 	}
 }
 
@@ -589,18 +611,26 @@ getCdbProcessesForQD(int isPrimary)
 	proc = makeNode(CdbProcess);
 
 	/*
-	 * Set QD listener address to NULL. This will be filled during starting up
-	 * outgoing interconnect connection.
+	 * Set QD listener address to the ADDRESS of the master, so the motions that connect to
+	 * the master knows what the interconnect address of the peer is. `adjustMasterRouting()`
+	 * is not necessary, and it could be wrong if the QD/QE on the master binds a single IP
+	 * address for interconnection instead of the wildcard address. Binding the wildcard address
+	 * for interconnection has some flaws:
+	 * 1. All the QD/QE in the same node share the same port space(for a same AF_INET/AF_INET6),
+	 *    which contributes to run out of port.
+	 * 2. When the segments have their own ADDRESS, the connection address could be confusing.
 	 */
-	proc->listenerAddr = NULL;
+	proc->listenerAddr = pstrdup(qdinfo->config->hostip);
 
 	if (Gp_interconnect_type == INTERCONNECT_TYPE_UDPIFC)
 		proc->listenerPort = (Gp_listener_port >> 16) & 0x0ffff;
-	else if (Gp_interconnect_type == INTERCONNECT_TYPE_TCP)
+	else if (Gp_interconnect_type == INTERCONNECT_TYPE_TCP ||
+			 Gp_interconnect_type == INTERCONNECT_TYPE_PROXY)
 		proc->listenerPort = (Gp_listener_port & 0x0ffff);
 
 	proc->pid = MyProcPid;
 	proc->contentid = -1;
+	proc->dbid = qdinfo->config->dbid;
 
 	list = lappend(list, proc);
 	return list;
@@ -814,31 +844,6 @@ gangTypeToString(GangType type)
 	return ret;
 }
 
-bool
-GangOK(Gang *gp)
-{
-	int			i;
-
-	if (gp == NULL)
-		return false;
-
-	/*
-	 * Gang is direct-connect (no agents).
-	 */
-
-	for (i = 0; i < gp->size; i++)
-	{
-		SegmentDatabaseDescriptor *segdbDesc = gp->db_descriptors[i];
-
-		if (cdbconn_isBadConnection(segdbDesc))
-			return false;
-		if (FtsIsSegmentDown(segdbDesc->segment_database_info))
-			return false;
-	}
-
-	return true;
-}
-
 void
 RecycleGang(Gang *gp, bool forceDestroy)
 {
@@ -860,4 +865,11 @@ RecycleGang(Gang *gp, bool forceDestroy)
 
 		cdbcomponent_recycleIdleQE(segdbDesc, forceDestroy);
 	}
+}
+
+void
+ResetAllGangs(void)
+{
+	DisconnectAndDestroyAllGangs(true);
+	CheckForResetSession();
 }

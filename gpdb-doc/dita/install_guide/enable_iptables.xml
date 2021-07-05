@@ -10,12 +10,14 @@
         <codeph>iptables</codeph> is enabled. You should test the performance of your application
       with <codeph>iptables</codeph> enabled to ensure that performance is acceptable.</note>
     <p>For more information about <codeph>iptables</codeph> see the <codeph>iptables</codeph> and
-      firewall documentation for your operating system. </p>
+      firewall documentation for your operating system. See also <xref
+        href="prep_os.xml#topic_sqj_lt1_nfb" type="topic" format="dita">Disabling SELinux and
+        Firewall Software</xref>.</p>
     <section id="ji163124">
       <title>How to Enable iptables</title>
       <ol id="ol_akk_knz_thb">
         <li id="ji163128">As <codeph>gpadmin</codeph>, run this command on the Greenplum Database
-          master host to stop Greenplum Database:<codeblock>$ gpstop -a</codeblock></li>
+          coordinator host to stop Greenplum Database:<codeblock>$ gpstop -a</codeblock></li>
         <li id="ji163139">On the Greenplum Database hosts:<ol id="ol_bkk_knz_thb">
             <li id="ji163142">Update the file <codeph>/etc/sysconfig/iptables</codeph> based on the
                 <xref href="#topic16" type="topic" format="dita"/>. </li>
@@ -23,7 +25,7 @@
               <codeph>iptables</codeph>:<codeblock># chkconfig iptables on
 # service iptables start</codeblock></li>
           </ol></li>
-        <li id="ji163149">As gpadmin, run this command on the Greenplum Database master host to
+        <li id="ji163149">As gpadmin, run this command on the Greenplum Database coordinator host to
           start Greenplum Database:<codeblock>$ gpstart -a</codeblock></li>
       </ol>
       <note type="warning">After enabling <codeph>iptables</codeph>, this error in the
@@ -31,14 +33,14 @@
           <codeph>iptables</codeph> table is too low and needs to be
           increased.<codeblock>ip_conntrack: table full, dropping packet.</codeblock><p>As root, run
           this command to view the <codeph>iptables</codeph> table
-          value:</p><codeblock># sysctl net.ipv4.netfilter.ip_conntrack_max</codeblock><p>The
-          following is the recommended setting to ensure that the Greenplum Database workload does
-          not overflow the <codeph>iptables</codeph> table. The value might need to be adjusted for
-          your hosts: <codeph>net.ipv4.netfilter.ip_conntrack_max=6553600</codeph></p><p>You can
-          update the <codeph>/etc/sysctl.conf</codeph> file with the value. See also <xref
-            href="prep_os.xml#topic3" type="topic" format="dita"/>.</p><p>To set the value until the next
-          reboot run this command as
-        root.</p><codeblock># sysctl net.ipv4.netfilter.ip_conntrack_max=6553600</codeblock></note>
+          value:</p><codeblock># sysctl net.ipv4.netfilter.ip_conntrack_max</codeblock><p>To ensure
+          that the Greenplum Database workload does not overflow the <codeph>iptables</codeph>
+          table, as root, set it to the following value:
+          </p><codeblock># sysctl net.ipv4.netfilter.ip_conntrack_max=6553600</codeblock><p>The
+          value might need to be adjusted for your hosts. To maintain the value after reboot, you
+          can update the <codeph>/etc/sysctl.conf</codeph> file as discussed in <xref
+            href="prep_os.xml#topic3" format="dita" type="topic">Setting the Greenplum Recommended
+            OS Parameters</xref>. </p></note>
     </section>
   </body>
   <topic id="topic16" xml:lang="en">
@@ -46,8 +48,8 @@
     <body>
       <p>When <codeph>iptables</codeph> is enabled, <codeph>iptables</codeph> manages the IP
         communication on the host system based on configuration settings (rules). The example rules
-        are used to configure <codeph>iptables</codeph> for Greenplum Database master host, standby
-        master host, and segment hosts. </p>
+        are used to configure <codeph>iptables</codeph> for Greenplum Database coordinator host, standby
+        coordinator host, and segment hosts. </p>
       <ul id="ul_ckk_knz_thb">
         <li id="ji163179">
           <xref href="#topic17" type="topic" format="dita"/>
@@ -57,12 +59,12 @@
         </li>
       </ul>
       <p>The two sets of rules account for the different types of communication Greenplum Database
-        expects on the master (primary and standby) and segment hosts. The rules should be added to
+        expects on the coordinator (primary and standby) and segment hosts. The rules should be added to
         the <codeph>/etc/sysconfig/iptables</codeph> file of the Greenplum Database hosts. For
         Greenplum Database, <codeph>iptables</codeph> rules should allow the following
         communication: </p>
       <ul id="ul_dkk_knz_thb">
-        <li id="ji163197">For customer facing communication with the Greenplum Database master,
+        <li id="ji163197">For customer facing communication with the Greenplum Database coordinator,
           allow at least <codeph>postgres</codeph> and <codeph>28080</codeph> (<codeph>eth1</codeph>
           interface in the example). </li>
         <li id="ji163201">For Greenplum Database system interconnect, allow communication using
@@ -90,11 +92,11 @@
       </ul>
     </body>
     <topic id="topic17" xml:lang="en">
-      <title id="ji163218">Example Master and Standby Master iptables Rules</title>
+      <title id="ji163218">Example Coordinator and Standby Coordinator iptables Rules</title>
       <body>
         <p>Example <codeph>iptables</codeph> rules with comments for the
-            <codeph>/etc/sysconfig/iptables</codeph> file on the Greenplum Database master host and
-          standby master host.</p>
+            <codeph>/etc/sysconfig/iptables</codeph> file on the Greenplum Database coordinator host and
+          standby coordinator host.</p>
         <codeblock>*filter
 # Following 3 are default rules. If the packet passes through
 # the rule set it gets these rule.
@@ -142,7 +144,7 @@ COMMIT</codeblock>
       <body>
         <p>Example <codeph>iptables</codeph> rules for the <codeph>/etc/sysconfig/iptables</codeph>
           file on the Greenplum Database segment hosts. The rules for segment hosts are similar to
-          the master rules with fewer interfaces and fewer <codeph>udp</codeph> and
+          the coordinator rules with fewer interfaces and fewer <codeph>udp</codeph> and
             <codeph>tcp</codeph> services. </p>
         <codeblock>*filter
 :INPUT DROP

@@ -1,6 +1,6 @@
 //---------------------------------------------------------------------------
 //	Greenplum Database
-//	Copyright (C) 2019 Pivotal, Inc.
+//	Copyright (C) 2019 VMware, Inc. or its affiliates.
 //
 //	@filename:
 //		CMemoryPoolPallocManager.cpp
@@ -23,9 +23,9 @@ extern "C" {
 using namespace gpos;
 
 // ctor
-CMemoryPoolPallocManager::CMemoryPoolPallocManager(CMemoryPool *internal, EMemoryPoolType)
-	:
-	CMemoryPoolManager(internal, EMemoryPoolExternal)
+CMemoryPoolPallocManager::CMemoryPoolPallocManager(CMemoryPool *internal,
+												   EMemoryPoolType)
+	: CMemoryPoolManager(internal, EMemoryPoolExternal)
 {
 }
 
@@ -36,9 +36,25 @@ CMemoryPoolPallocManager::NewMemoryPool()
 	return GPOS_NEW(GetInternalMemoryPool()) CMemoryPoolPalloc();
 }
 
+void
+CMemoryPoolPallocManager::DeleteImpl(void *ptr,
+									 CMemoryPool::EAllocationType eat)
+{
+	CMemoryPoolPalloc::DeleteImpl(ptr, eat);
+}
+
+// get user requested size of allocation
+ULONG
+CMemoryPoolPallocManager::UserSizeOfAlloc(const void *ptr)
+{
+	return CMemoryPoolPalloc::UserSizeOfAlloc(ptr);
+}
+
 GPOS_RESULT
 CMemoryPoolPallocManager::Init()
 {
-	return CMemoryPoolManager::SetupMemoryPoolManager<CMemoryPoolPallocManager, CMemoryPoolPalloc>();
+	return CMemoryPoolManager::SetupGlobalMemoryPoolManager<
+		CMemoryPoolPallocManager, CMemoryPoolPalloc>();
 }
+
 // EOF

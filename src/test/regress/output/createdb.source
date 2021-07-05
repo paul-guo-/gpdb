@@ -6,38 +6,17 @@
 20190709:16:49:48:083167 gpstop:Weinan-Pivotal-Mac:wwang-[INFO]:-Obtaining Segment details from master...
 20190709:16:49:48:083167 gpstop:Weinan-Pivotal-Mac:wwang-[INFO]:-Greenplum Version: 'postgres (Greenplum Database) 7.0.0-alpha.0+dev.487.gc712d6d8b0 build dev'
 20190709:16:49:48:083167 gpstop:Weinan-Pivotal-Mac:wwang-[INFO]:-Signalling all postmaster processes to reload
-create language plpythonu;
+create language plpython3u;
 -- end_ignore
 --list all database oid relevant directories in all node(master, segments, mirrors, etc.)
 CREATE OR REPLACE FUNCTION db_dirs(dboid oid) RETURNS setof text
-  STRICT STABLE LANGUAGE plpythonu
+  STRICT STABLE LANGUAGE plpython3u
 as $$
 import os
 bash_cmd = "find " + os.getcwd() + "/../../ " + "-name %d -type d"
 p = os.popen(bash_cmd % dboid)
 return p.readlines()
 $$;
---this group udf help test case wait mirror catch up
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record_master() RETURNS VOID AS
-'@abs_builddir@/regress.so', 'insert_noop_xlog_record'
-    LANGUAGE C EXECUTE ON MASTER;
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record_all_segments() RETURNS SETOF VOID AS
-'@abs_builddir@/regress.so', 'insert_noop_xlog_record'
-    LANGUAGE C EXECUTE ON ALL SEGMENTS;
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record() RETURNS VOID AS $$
-BEGIN
-    PERFORM insert_noop_xlog_record_master();
-    PERFORM insert_noop_xlog_record_all_segments();
-END;
-$$LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION force_mirrors_to_catch_up() RETURNS VOID AS $$
-BEGIN
-    PERFORM gp_inject_fault('after_xlog_redo_noop', 'sleep', dbid) FROM gp_segment_configuration WHERE role='m';
-    PERFORM insert_noop_xlog_record();
-    PERFORM gp_wait_until_triggered_fault('after_xlog_redo_noop', 1, dbid) FROM gp_segment_configuration WHERE role='m';
-    PERFORM gp_inject_fault('after_xlog_redo_noop', 'reset', dbid) FROM gp_segment_configuration WHERE role='m';
-END;
-$$ LANGUAGE plpgsql;
 --
 --CASE 0: createdb do well
 --
@@ -99,7 +78,7 @@ from gp_segment_configuration where content=0 and role='p';
 -- should fail
 create database db_with_leftover_files;
 ERROR:  fault triggered, fault name:'create_db_after_file_copy' fault type:'error'  (seg0 10.34.49.130:25432 pid=83183)
--- Wait until replay_location = flush_location.
+-- Wait until replay_lsn = flush_lsn.
 select force_mirrors_to_catch_up();
  force_mirrors_to_catch_up 
 ---------------------------

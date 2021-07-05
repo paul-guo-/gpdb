@@ -2,7 +2,7 @@
 <!DOCTYPE topic
   PUBLIC "-//OASIS//DTD DITA Composite//EN" "ditabase.dtd">
 <topic id="topic1" xml:lang="en">
-  <title id="kh138244">Migrating Data from Greenplum 4.3 or 5</title>
+  <title id="kh138244">Migrating Data from Greenplum 4.3 or 5 to Greenplum 6</title>
   <shortdesc>You can migrate data from Greenplum Database 4.3 or 5 to Greenplum 6 using the standard
     backup and restore procedures, <codeph>gpbackup</codeph> and <codeph>gprestore</codeph><ph
       otherprops="pivotal">, or by using <codeph>gpcopy</codeph></ph>.</shortdesc>
@@ -10,8 +10,10 @@
     <p>
       <note otherprops="oss-only">Open source Greenplum Database is available only for Greenplum
         Database 5 and later. </note>
-      <note>Currently, you cannot upgrade a Greenplum Database 4.3 or 5 system directly to Greenplum
-        Database 6.</note>
+      <note>You can upgrade a Greenplum Database 5.28 system directly to Greenplum 6.9 or later
+        using <xref href="https://greenplum.docs.pivotal.io/upgrade/" format="html" scope="external"
+          >gpupgrade</xref>. You cannot upgrade a Greenplum Database 4.3 system directly to
+        Greenplum 6.</note>
     </p>
     <p>This topic identifies known issues you may encounter when moving data from Greenplum 4.3 to
       Greenplum 6. You can work around these problems by making needed changes to your Greenplum 4.3
@@ -42,7 +44,7 @@
         <li>Install the latest release of the Greenplum Backup and Restore utilities, available to
           download from <ph otherprops="pivotal"><xref
               href="https://network.pivotal.io/products/pivotal-gpdb-backup-restore" format="html"
-              scope="external">Pivotal Network</xref></ph><ph otherprops="oss-only"><xref
+              scope="external">VMware Tanzu Network</xref></ph><ph otherprops="oss-only"><xref
               href="https://github.com/greenplum-db/gpbackup/releases" format="html"
               scope="external">github</xref></ph>.</li>
         <li>If you intend to install Greenplum Database 6 on the same hardware as your 4.3 system,
@@ -64,6 +66,16 @@
           before you restore the backup, for example MADlib or PostGIS. If versions of the external
           modules are not compatible, you may need to exclude tables that reference them when
           restoring the Greenplum 4.3 backup to Greenplum 6.</li>
+        <li>The Greenplum 4.3 Oracle Compatibility Functions module is not compatible with Greenplum
+          6. Uninstall the module from Greenplum 4.3 by running the
+            <codeph>uninstall_orafunc.sql</codeph> script before you back up your
+          databases:<codeblock>$ $GPHOME/share/postgresql/contrib/uninstall_orafunc.sql</codeblock>You
+          will also need to drop any dependent database objects that reference compatibility
+          functions.<p>Install the Oracle Compatibility Functions in Greenplum 6 by creating the
+              <codeph>orafce</codeph> module in each database where you require the
+            functions:<codeblock>$ psql -d <varname>dbname</varname> -c 'CREATE EXTENSION orafce'</codeblock>See
+              <xref href="install_modules.xml#topic_d45_wcw_pgb"/> for information about installing
+              <codeph>orafce</codeph> and other modules.</p></li>
         <li>When restoring language-based user-defined functions, the shared object file must be in
           the location specified in the <codeph>CREATE FUNCTION</codeph> SQL command and must have
           been recompiled on the Greenplum 6 system. This applies to user-defined functions,
@@ -81,6 +93,11 @@
             href="../admin_guide/workload_mgmt_resgroups.xml" format="dita" scope="peer">Using
             Resource Groups</xref> for information about enabling and configuring resource
           groups.</li>
+        <li>Filespaces are removed in Greenplum 6. When creating a tablespace, note that different
+          tablespace locations for a primary-mirror pair is no longer supported in Greenplum 6. See
+            <xref href="../admin_guide/ddl/ddl-tablespace.xml" format="dita" scope="peer">Creating
+            and Managing Tablespaces</xref> for information about creating and configuring
+          tablespaces. </li>
       </ul>
     </body>
   </topic>
@@ -92,7 +109,7 @@
         must be at least version 5.5. Be sure to use the latest release of the backup and restore
         utilities, available for download from <ph otherprops="pivotal"><xref
             href="https://network.pivotal.io/products/pivotal-gpdb-backup-restore" format="html"
-            scope="external">Pivotal Network</xref></ph><ph otherprops="oss-only"><xref
+            scope="external">VMware Tanzu Network</xref></ph><ph otherprops="oss-only"><xref
             href="https://github.com/greenplum-db/gpbackup/releases" format="html" scope="external"
             >github</xref></ph>.</note>
       <note type="important">Make sure that you have a complete backup of all data in the Greenplum
@@ -108,7 +125,7 @@
             from Greenplum 5</xref> to plan for the PXF migration.</li>
         <li>Greenplum Database version 6 removes support for the <codeph>gphdfs</codeph> protocol.
           If you have created external tables that use gphdfs, remove the external table definitions
-          and (optionally) recreate them to use Pivotal Extension Framework (PXF) before you migrate
+          and (optionally) recreate them to use Greenplum Platform Extension Framework (PXF) before you migrate
           the data to Greenplum 6. Refer to <xref scope="peer" href="../pxf/gphdfs-pxf-migrate.html"
             >Migrating gphdfs External Tables to PXF</xref> in the PXF documentation for the
           migration procedure.</li>
@@ -121,17 +138,18 @@
                 <codeph>procpid</codeph> column is renamed to <codeph>pid</codeph>.</li>
             <li>In the <codeph>pg_stat_activity</codeph> system table, the <codeph>procpid</codeph>
               column is renamed to <codeph>pid</codeph>. The <codeph>current_query</codeph> column
-              is replaced by two columns <codeph>state</codeph>: the state of the backend, and
-                <codeph>query</codeph>: the last run query, or currently running query if
-                <codeph>state</codeph> is <codeph>active</codeph>. </li>
+              is replaced by two columns: <codeph>state</codeph> (the state of the backend), and
+                <codeph>query</codeph> (the last run query, or currently running query if
+                <codeph>state</codeph> is <codeph>active</codeph>). </li>
             <li>In the <codeph>gp_distribution_policy</codeph> system table, the
                 <codeph>attrnums</codeph> column is renamed to <codeph>distkey</codeph> and its data
               type is changed to <codeph>int2vector</codeph>. A backend function
                 <codeph>pg_get_table_distributedby()</codeph> was added to get the distribution
               policy for a table as a string.</li>
-            <li>In the <codeph>session_level_memory_consumption</codeph> system view, the
-                <codeph>__gp_localid</codeph> and <codeph>__gp_masterid</codeph> columns are
-              removed.</li>
+            <li>The <codeph>__gp_localid</codeph> and <codeph>__gp_masterid</codeph> columns are
+              removed from the <codeph>session_level_memory_consumption</codeph> system view in
+              Greenplum 6. The underlying external tables and functions are removed from the
+                <codeph>gp_toolkit</codeph> schema.</li>
             <li>Filespaces are removed in Greenplum 6. The <codeph>pg_filespace</codeph> and
                 <codeph>pg_filespace_entry</codeph> system tables are removed. Any reference to
                 <codeph>pg_filespace</codeph> or <codeph>pg_filespace_entry</codeph> will fail in
@@ -140,6 +158,13 @@
               Greenplum 4 catalog tables. For example, restoring a UDF can fail if it references a
               custom data type that is created later in the backup file.</li>
           </ul></li>
+        <li>The  <codeph>INTO <varname>error_table</varname></codeph> clause of the <codeph>CREATE
+            EXTERNAL TABLE</codeph> and <codeph>COPY</codeph> commands was deprecated in Greenplum
+          4.3 and is unsupported in Greenplum 5 and 6. Remove this clause from any external table
+          definitions before you create a backup of your Greenplum 4.3 system. The
+            <codeph>ERROR_TABLE</codeph> parameter of the <codeph>gpload</codeph> utility load
+          control YAML file must also be removed from any <codeph>gpload</codeph> YAML files before
+          you run <codeph>gpload</codeph>. </li>
         <li>The <codeph>int4_avg_accum()</codeph> function signature changed in Greenplum 6 from
             <codeph>int4_avg_accum(bytea, integer)</codeph> to <codeph>int4_avg_accum(bigint[],
             integer)</codeph>. This function is the state transition function (<i>sfunc</i>) called
@@ -152,6 +177,9 @@
           function with the function <codeph>string_agg(expression, delimiter)</codeph> and specify
           an empty string as the <codeph>delimiter</codeph>, for example
             <codeph>string_agg(txt_col1, '').</codeph></li>
+        <li>The <codeph>offset</codeph> argument of the <codeph>lag(expr, offset[,
+            default])</codeph> window function has changed from <codeph>int8</codeph> in Greenplum
+          4.3 to <codeph>int4</codeph> in Greenplum 5 and 6.</li>
         <li><codeph>gpbackup</codeph> saves the distribution policy and distribution key for each
           table in the backup so that data can be restored to the same segment. If a table's
           distribution key in the Greenplum 4.3 or 5 database is incompatible with Greenplum 6,
@@ -177,6 +205,11 @@
                 RANDOMLY</codeph>, alter the leaf tables to match the root table distribution policy
               before you back up the source database. </li>
           </ul></li>
+        <li>In Greenplum 4.3, the name provided for a constraint in a <codeph>CREATE TABLE</codeph>
+          command was the name of the index created to enforce the constraint, which could lead to
+          indexes having the same name. In Greenplum 6, duplicate index names are not allowed;
+          restoring from a Greenplum 4.3 backup that has duplicate index names will generate
+          errors.</li>
         <li>Columns of type <codeph>abstime</codeph>, <codeph>reltime</codeph>,
             <codeph>tinterval</codeph>, <codeph>money</codeph>, or <codeph>anyarray</codeph> are not
           supported as distribution keys in Greenplum 6.<p>If you have tables distributed on columns
@@ -185,18 +218,39 @@
               TABLE</codeph> command to set the distribution to <codeph>RANDOM</codeph> before you
             back up the database. After the data is restored, you can set a new distribution
             policy.</p></li>
+        <li>In Greenplum 4.3 and 5, it was possible to <codeph>ALTER</codeph> a table that has a
+          primary key or unique index to be <codeph>DISTRIBUTED RANDOMLY</codeph>. Greenplum 6 does
+          not permit tables <codeph>DISTRIBUTED RANDOMLY</codeph> to have primary keys or unique
+          indexes. Restoring such a table from a Greenplum 4.3 or 5 backup will cause an error.</li>
         <li>Greenplum 6 no longer automatically converts from the deprecated timestamp format
-          YYYYMMDDHH24MISS. The format could not be parsed unambiguously in previous Greenplum
-          Database releases. You can still specify the YYYYMMDDHH24MISS format in conversion
-          functions such as <codeph>to_timestamp</codeph> and <codeph>to_char</codeph> for
-          compatibility with other database systems. You can use input formats for converting text
-          to date or timestamp values to avoid unexpected results or query execution failures.</li>
+            <codeph>YYYYMMDDHH24MISS</codeph>. The format could not be parsed unambiguously in
+          previous Greenplum Database releases. You can still specify the
+            <codeph>YYYYMMDDHH24MISS</codeph> format in conversion functions such as
+            <codeph>to_timestamp</codeph> and <codeph>to_char</codeph> for compatibility with other
+          database systems. You can use input formats for converting text to date or timestamp
+          values to avoid unexpected results or query execution failures. For example, this
+            <codeph>SELECT</codeph> command returns a timestamp in Greenplum Database 5 and fails in
+            6.<codeblock>SELECT to_timestamp('20190905140000');</codeblock><p>To convert the string
+            to a timestamp in Greenplum Database 6, you must use a valid format. Both of these
+            commands return a timestamp in Greenplum Database 6. The first example explicitly
+            specifies a timestamp format. The second example uses the string in a format that
+            Greenplum Database
+            recognizes.<codeblock>SELECT to_timestamp('20190905140000','YYYYMMDDHH24MISS');
+SELECT to_timestamp('201909051 40000');</codeblock></p><p>The
+            timestamp issue also applies when you use the <codeph>::</codeph> syntax. In Greenplum
+            Database 6, the first command returns an error. The second command returns a timestamp.
+            <codeblock>SELECT '20190905140000'::timestamp ;
+SELECT '20190905 140000'::timestamp ;</codeblock></p></li>
         <li>Creating a table using the <codeph>CREATE TABLE AS</codeph> command in Greenplum 4.3 or
           5 could create a table with a duplicate distribution key. The <codeph>gpbackup</codeph>
           utility saves the table to the backup using a <codeph>CREATE TABLE</codeph> command that
           lists the duplicate keys in the <codeph>DISTRIBUTED BY</codeph> clause. Restoring this
           backup will cause a duplicate distribution key error. The <codeph>CREATE TABLE AS</codeph>
           command was fixed in Greenplum 5.10 to disallow duplicate distribution keys.</li>
+        <li>Greenplum 4.3 supports foreign key constraints on columns of different types, for
+          example, <codeph>numeric</codeph> and <codeph>bigint</codeph>, with implicit type
+          conversion. Greenplum 5 and 6 do not support implicit type conversion. Restoring a table
+          with a foreign key on columns with different data types causes an error.</li>
         <li>Only Boolean operators can use Boolean negators. In Greenplum Database 4.3 and 5 it was
           possible to create a non-Boolean operator that specifies a Boolean negator function. For
           example, this <codeph>CREATE OPERATOR</codeph> command creates an integer
@@ -236,7 +290,8 @@
           <codeph>gpbackup</codeph> or <codeph>gprestore</codeph> filter options to omit schemas or
         tables that cannot be restored without error. </p>
       <p otherprops="pivotal">If you use <codeph>gpcopy</codeph> to migrate data, initiate the
-          <codeph>gpcopy</codeph> operation from the Greenplum 4.3 or 5 cluster. See <xref
+          <codeph>gpcopy</codeph> operation from the Greenplum 4.3.26 (or later) or the
+          5.9 (or later) cluster. See <xref
           scope="peer" href="../admin_guide/managing/gpcopy-migrate.xml">Migrating Data with
           gpcopy</xref> for more information.</p>
       <note type="important">When you restore a backup taken from a Greenplum Database 4.3 or 5
@@ -263,11 +318,6 @@
         such as external tables, indexes, user-defined functions, or user-defined aggregates.</p>
       <p>Here are some additional items to consider to complete your migration to Greenplum 6.</p>
       <ul id="ul_spw_q2b_z3b">
-        <li>If you are migrating from Greenplum Database 4.3.27 or an earlier 4.3.x release and have
-          configured PgBouncer in your Greenplum Database installation, you must migrate to the new
-          PgBouncer when you upgrade Greenplum Database. Refer to <xref
-            href="../admin_guide/access_db/topics/pgbouncer.xml#pgb_migrate" format="dita"
-            scope="peer">Migrating PgBouncer</xref> for specific migration instructions.</li>
         <li>Greenplum Database 5 and 6 remove automatic casts between the text type and other data
           types. After you migrate from Greenplum Database version 4.3 to version 6, this changed
           behavior may impact existing applications and queries. Refer to <xref href="43x_to_5x.xml"
@@ -278,7 +328,7 @@
           user-defined functions as necessary to account for changes in Greenplum Database version
           6. Review the <xref
             href="https://gpdb.docs.pivotal.io/latest/relnotes/GPDB_600_README.html" format="html"
-            scope="external">Pivotal Greenplum 6.0.0 Release Notes</xref> for features and changes
+            scope="external">Tanzu Greenplum 6.0.0 Release Notes</xref> for features and changes
           that may necessitate post-migration tasks.</li>
         <li>To use the new Greenplum 6 default hash operator classes, use the command <codeph>ALTER
             TABLE &lt;table> SET DISTRIBUTED BY (&lt;key>)</codeph> to redistribute tables restored

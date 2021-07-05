@@ -3,7 +3,7 @@
  * spgdesc.c
  *	  rmgr descriptor routines for access/spgist/spgxlog.c
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,7 +14,7 @@
  */
 #include "postgres.h"
 
-#include "access/spgist_private.h"
+#include "access/spgxlog.h"
 
 void
 spg_desc(StringInfo buf, XLogReaderState *record)
@@ -24,20 +24,18 @@ spg_desc(StringInfo buf, XLogReaderState *record)
 
 	switch (info)
 	{
-		case XLOG_SPGIST_CREATE_INDEX:
-			break;
 		case XLOG_SPGIST_ADD_LEAF:
 			{
 				spgxlogAddLeaf *xlrec = (spgxlogAddLeaf *) rec;
 
-				appendStringInfo(buf, "add leaf to page");
+				appendStringInfoString(buf, "add leaf to page");
 				appendStringInfo(buf, "; off %u; headoff %u; parentoff %u",
 								 xlrec->offnumLeaf, xlrec->offnumHeadLeaf,
 								 xlrec->offnumParent);
 				if (xlrec->newPage)
-					appendStringInfo(buf, " (newpage)");
+					appendStringInfoString(buf, " (newpage)");
 				if (xlrec->storesNulls)
-					appendStringInfo(buf, " (nulls)");
+					appendStringInfoString(buf, " (nulls)");
 			}
 			break;
 		case XLOG_SPGIST_MOVE_LEAFS:
@@ -63,9 +61,9 @@ spg_desc(StringInfo buf, XLogReaderState *record)
 				appendStringInfo(buf, "ndel %u; nins %u",
 								 xlrec->nDelete, xlrec->nInsert);
 				if (xlrec->innerIsParent)
-					appendStringInfo(buf, " (innerIsParent)");
+					appendStringInfoString(buf, " (innerIsParent)");
 				if (xlrec->isRootSplit)
-					appendStringInfo(buf, " (isRootSplit)");
+					appendStringInfoString(buf, " (isRootSplit)");
 			}
 			break;
 		case XLOG_SPGIST_VACUUM_LEAF:
@@ -76,7 +74,7 @@ spg_desc(StringInfo buf, XLogReaderState *record)
 			break;
 		case XLOG_SPGIST_VACUUM_REDIRECT:
 			appendStringInfo(buf, "newest XID %u",
-						 ((spgxlogVacuumRedirect *) rec)->newestRedirectXid);
+							 ((spgxlogVacuumRedirect *) rec)->newestRedirectXid);
 			break;
 	}
 }
@@ -88,9 +86,6 @@ spg_identify(uint8 info)
 
 	switch (info & ~XLR_INFO_MASK)
 	{
-		case XLOG_SPGIST_CREATE_INDEX:
-			id = "CREATE_INDEX";
-			break;
 		case XLOG_SPGIST_ADD_LEAF:
 			id = "ADD_LEAF";
 			break;

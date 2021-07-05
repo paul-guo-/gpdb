@@ -4,7 +4,7 @@
 create schema qp_gist_indexes2;
 set search_path to qp_gist_indexes2;
  -- start_ignore
-create language plpythonu;
+create language plpython3u;
 -- end_ignore
 create or replace function count_index_scans(explain_query text) returns int as
 $$
@@ -17,7 +17,7 @@ for i in range(len(rv)):
         result = result+1
 return result
 $$
-language plpythonu;
+language plpython3u;
 -- ----------------------------------------------------------------------
 -- Test: test01create_table.sql
 -- ----------------------------------------------------------------------
@@ -28,6 +28,7 @@ COPY GistTable1 FROM
 '@abs_srcdir@/data/PropertyInfo.txt'
  CSV
  ;
+ANALYZE GistTable1;
 -- ----------------------------------------------------------------------
 -- Test: test03IndexScan.sql
 -- ----------------------------------------------------------------------
@@ -1079,9 +1080,8 @@ SELECT owner, property FROM GistTable1
          ->  Bitmap Heap Scan on gisttable1
                Recheck Cond: (property IS NULL)
                ->  Bitmap Index Scan on propertyisnullindex
-                     Index Cond: (property IS NULL)
  Optimizer: Postgres query optimizer
-(9 rows)
+(8 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test13Vacuum.sql
@@ -1334,7 +1334,7 @@ drop schema qp_gist_indexes2 cascade;
 NOTICE:  drop cascades to function insertmanyintogisttable13(integer,integer)
 NOTICE:  drop cascades to function insertintogisttable13(integer)
 NOTICE:  drop cascades to function to_box(text)
-NOTICE:  drop cascades to append only table gisttable1
+NOTICE:  drop cascades to table gisttable1
 -- end_ignore
 -- ----------------------------------------------------------------------
 -- Test: setup.sql
@@ -1702,9 +1702,8 @@ SELECT owner, property FROM GistTable1
          ->  Bitmap Heap Scan on gisttable1
                Recheck Cond: (property IS NULL)
                ->  Bitmap Index Scan on propertyisnullindex
-                     Index Cond: (property IS NULL)
  Optimizer: Postgres query optimizer
-(9 rows)
+(8 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test13Vacuum.sql
@@ -1957,7 +1956,7 @@ drop schema qp_gist_indexes2 cascade;
 NOTICE:  drop cascades to function insertmanyintogisttable13(integer,integer)
 NOTICE:  drop cascades to function insertintogisttable13(integer)
 NOTICE:  drop cascades to function to_box(text)
-NOTICE:  drop cascades to append only table gisttable1
+NOTICE:  drop cascades to table gisttable1
 -- end_ignore
 -- ----------------------------------------------------------------------
 -- Test: setup.sql
@@ -2316,8 +2315,8 @@ SELECT owner, property FROM GistTable1
  WHERE property IS NULL
  ORDER BY id
  ;
-                            QUERY PLAN                             
--------------------------------------------------------------------
+                         QUERY PLAN                         
+------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    Merge Key: id
    ->  Sort
@@ -2325,9 +2324,8 @@ SELECT owner, property FROM GistTable1
          ->  Bitmap Heap Scan on gisttable1
                Recheck Cond: (property IS NULL)
                ->  Bitmap Index Scan on propertyisnullindex
-                     Index Cond: (property IS NULL)
  Optimizer: Postgres query optimizer
-(9 rows)
+(8 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test13Vacuum.sql
@@ -2580,7 +2578,7 @@ drop schema qp_gist_indexes2 cascade;
 NOTICE:  drop cascades to function insertmanyintogisttable13(integer,integer)
 NOTICE:  drop cascades to function insertintogisttable13(integer)
 NOTICE:  drop cascades to function to_box(text)
-NOTICE:  drop cascades to append only columnar table gisttable1
+NOTICE:  drop cascades to table gisttable1
 -- end_ignore
 -- ----------------------------------------------------------------------
 -- Test: setup.sql
@@ -2939,8 +2937,8 @@ SELECT owner, property FROM GistTable1
  WHERE property IS NULL
  ORDER BY id
  ;
-                         QUERY PLAN                          
--------------------------------------------------------------
+                         QUERY PLAN                         
+------------------------------------------------------------
  Gather Motion 3:1  (slice1; segments: 3)
    Merge Key: id
    ->  Sort
@@ -2948,9 +2946,8 @@ SELECT owner, property FROM GistTable1
          ->  Bitmap Heap Scan on gisttable1
                Recheck Cond: (property IS NULL)
                ->  Bitmap Index Scan on propertyisnullindex
-                     Index Cond: (property IS NULL)
  Optimizer: Postgres query optimizer
-(9 rows)
+(8 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test13Vacuum.sql
@@ -3203,5 +3200,5 @@ drop schema qp_gist_indexes2 cascade;
 NOTICE:  drop cascades to function insertmanyintogisttable13(integer,integer)
 NOTICE:  drop cascades to function insertintogisttable13(integer)
 NOTICE:  drop cascades to function to_box(text)
-NOTICE:  drop cascades to append only columnar table gisttable1
+NOTICE:  drop cascades to table gisttable1
 -- end_ignore

@@ -4,7 +4,7 @@
  *	  Global DeadLock Detector - Helper Functions
  *
  *
- * Copyright (c) 2018-Present Pivotal Software, Inc.
+ * Copyright (c) 2018-Present VMware, Inc. or its affiliates.
  *
  *
  *-------------------------------------------------------------------------
@@ -39,20 +39,6 @@ struct GddWaitStatusCtx
 static bool isGranted(LockInstanceData *lock);
 static bool lockEqual(LockInstanceData *lock1, LockInstanceData *lock2);
 static bool lockIsHoldTillEndXact(LockInstanceData *lock);
-
-static const char *const LockTagTypeNames[] = {
-	"relation",
-	"extend",
-	"page",
-	"tuple",
-	"transactionid",
-	"virtualxid",
-	"append-only segment file",
-	"object",
-	"resource queue",
-	"userlock",
-	"advisory"
-};
 
 static bool
 isGranted(LockInstanceData *lock)
@@ -116,13 +102,13 @@ gp_dist_wait_status(PG_FUNCTION_ARGS)
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 
 		/* build tupdesc for result tuples */
-		tupdesc = CreateTemplateTupleDesc(10, false);
+		tupdesc = CreateTemplateTupleDesc(10);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "segid",
 						   INT4OID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "waiter_dxid",
-						   XIDOID, -1, 0);
+						   INT8OID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "holder_dxid",
-						   XIDOID, -1, 0);
+						   INT8OID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "holdTillEndXact",
 						   BOOLOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 5, "waiter_lpid",
@@ -280,8 +266,8 @@ gp_dist_wait_status(PG_FUNCTION_ARGS)
 			h_dxid = h_lock->distribXid;
 
 			values[0] = Int32GetDatum(GpIdentity.segindex);
-			values[1] = TransactionIdGetDatum(w_dxid);
-			values[2] = TransactionIdGetDatum(h_dxid);
+			values[1] = Int64GetDatum(w_dxid);
+			values[2] = Int64GetDatum(h_dxid);
 			values[3] = BoolGetDatum(lockIsHoldTillEndXact(w_lock));
 			values[4] = Int32GetDatum(w_lock->pid);
 			values[5] = Int32GetDatum(h_lock->pid);
@@ -321,8 +307,8 @@ gp_dist_wait_status(PG_FUNCTION_ARGS)
 				int row = ctx->row++;
 
 				values[0] = Int32GetDatum(atoi(PQgetvalue(pg_result, row, 0)));
-				values[1] = TransactionIdGetDatum(atoi(PQgetvalue(pg_result, row, 1)));
-				values[2] = TransactionIdGetDatum(atoi(PQgetvalue(pg_result, row, 2)));
+				values[1] = Int64GetDatum(atol(PQgetvalue(pg_result, row, 1)));
+				values[2] = Int64GetDatum(atol(PQgetvalue(pg_result, row, 2)));
 				values[3] = BoolGetDatum(strncmp(PQgetvalue(pg_result, row, 3), "t", 1) == 0);
 				values[4] = Int32GetDatum(atoi(PQgetvalue(pg_result, row, 4)));
 				values[5] = Int32GetDatum(atoi(PQgetvalue(pg_result, row, 5)));

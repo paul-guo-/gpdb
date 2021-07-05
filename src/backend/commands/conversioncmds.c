@@ -3,7 +3,7 @@
  * conversioncmds.c
  *	  conversion creation command support code
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -14,13 +14,11 @@
  */
 #include "postgres.h"
 
-#include "access/heapam.h"
 #include "access/htup_details.h"
 #include "catalog/dependency.h"
 #include "catalog/indexing.h"
 #include "catalog/oid_dispatch.h"
 #include "catalog/pg_conversion.h"
-#include "catalog/pg_conversion_fn.h"
 #include "catalog/pg_type.h"
 #include "commands/alter.h"
 #include "commands/conversioncmds.h"
@@ -60,7 +58,7 @@ CreateConversionCommand(CreateConversionStmt *stmt)
 	/* Check we have creation rights in target namespace */
 	aclresult = pg_namespace_aclcheck(namespaceId, GetUserId(), ACL_CREATE);
 	if (aclresult != ACLCHECK_OK)
-		aclcheck_error(aclresult, ACL_KIND_NAMESPACE,
+		aclcheck_error(aclresult, OBJECT_SCHEMA,
 					   get_namespace_name(namespaceId));
 
 	/* Check the encoding names */
@@ -89,13 +87,13 @@ CreateConversionCommand(CreateConversionStmt *stmt)
 	if (get_func_rettype(funcoid) != VOIDOID)
 		ereport(ERROR,
 				(errcode(ERRCODE_INVALID_OBJECT_DEFINITION),
-		  errmsg("encoding conversion function %s must return type \"void\"",
-				 NameListToString(func_name))));
+				 errmsg("encoding conversion function %s must return type %s",
+						NameListToString(func_name), "void")));
 
 	/* Check we have EXECUTE rights for the function */
 	aclresult = pg_proc_aclcheck(funcoid, GetUserId(), ACL_EXECUTE);
 	if (aclresult != ACLCHECK_OK)
-		aclcheck_error(aclresult, ACL_KIND_PROC,
+		aclcheck_error(aclresult, OBJECT_FUNCTION,
 					   NameListToString(func_name));
 
 	/*

@@ -1,5 +1,8 @@
 CREATE EXTENSION dblink;
 
+-- want context for notices
+\set SHOW_CONTEXT always
+
 CREATE TABLE foo(f1 int, f2 text, f3 text[], primary key (f1,f2));
 INSERT INTO foo VALUES (0,'a','{"a0","b0","c0"}');
 INSERT INTO foo VALUES (1,'b','{"a1","b1","c1"}');
@@ -34,6 +37,44 @@ SELECT dblink_build_sql_update('foo','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}','{"9
 SELECT dblink_build_sql_delete('foo','1 2',2,'{"0", "a"}');
 -- too many pk fields, should fail
 SELECT dblink_build_sql_delete('foo','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}');
+
+-- repeat the test for table with primary key index with included columns
+CREATE TABLE foo_1(f1 int, f2 text, f3 text[], primary key (f1,f2) include (f3));
+INSERT INTO foo_1 VALUES (0,'a','{"a0","b0","c0"}');
+INSERT INTO foo_1 VALUES (1,'b','{"a1","b1","c1"}');
+INSERT INTO foo_1 VALUES (2,'c','{"a2","b2","c2"}');
+INSERT INTO foo_1 VALUES (3,'d','{"a3","b3","c3"}');
+INSERT INTO foo_1 VALUES (4,'e','{"a4","b4","c4"}');
+INSERT INTO foo_1 VALUES (5,'f','{"a5","b5","c5"}');
+INSERT INTO foo_1 VALUES (6,'g','{"a6","b6","c6"}');
+INSERT INTO foo_1 VALUES (7,'h','{"a7","b7","c7"}');
+INSERT INTO foo_1 VALUES (8,'i','{"a8","b8","c8"}');
+INSERT INTO foo_1 VALUES (9,'j','{"a9","b9","c9"}');
+
+-- misc utilities
+
+-- list the primary key fields
+SELECT *
+FROM dblink_get_pkey('foo_1');
+
+-- build an insert statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_insert('foo_1','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+-- too many pk fields, should fail
+SELECT dblink_build_sql_insert('foo_1','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}','{"99", "xyz", "{za0,zb0,zc0}"}');
+
+-- build an update statement based on a local tuple,
+-- replacing the primary key values with new ones
+SELECT dblink_build_sql_update('foo_1','1 2',2,'{"0", "a"}','{"99", "xyz"}');
+-- too many pk fields, should fail
+SELECT dblink_build_sql_update('foo_1','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}','{"99", "xyz", "{za0,zb0,zc0}"}');
+
+-- build a delete statement based on a local tuple,
+SELECT dblink_build_sql_delete('foo_1','1 2',2,'{"0", "a"}');
+-- too many pk fields, should fail
+SELECT dblink_build_sql_delete('foo_1','1 2 3 4',4,'{"0", "a", "{a0,b0,c0}"}');
+
+DROP TABLE foo_1;
 
 -- retest using a quoted and schema qualified table
 CREATE SCHEMA "MySchema";
@@ -157,14 +198,14 @@ SELECT *
 FROM dblink('SELECT * FROM foo') AS t(a int, b text, c text[])
 WHERE t.a > 7;
 
--- put more data into our slave table, first using arbitrary connection syntax
+-- put more data into our table, first using arbitrary connection syntax
 -- but truncate the actual return value so we can use diff to check for success
 SELECT substr(dblink_exec(connection_parameters(),'INSERT INTO foo VALUES(10,''k'',''{"a10","b10","c10"}'')'),1,6);
 
 -- create a persistent connection
 SELECT dblink_connect(connection_parameters());
 
--- put more data into our slave table, using persistent connection syntax
+-- put more data into our table, using persistent connection syntax
 -- but truncate the actual return value so we can use diff to check for success
 SELECT substr(dblink_exec('INSERT INTO foo VALUES(11,''l'',''{"a11","b11","c11"}'')'),1,6);
 
@@ -313,7 +354,7 @@ WHERE t.a > 7;
 -- create a named persistent connection
 SELECT dblink_connect('myconn',connection_parameters());
 
--- put more data into our slave table, using named persistent connection syntax
+-- put more data into our table, using named persistent connection syntax
 -- but truncate the actual return value so we can use diff to check for success
 SELECT substr(dblink_exec('myconn','INSERT INTO foo VALUES(11,''l'',''{"a11","b11","c11"}'')'),1,6);
 
@@ -413,7 +454,7 @@ SELECT dblink_error_message('dtest1');
 SELECT dblink_disconnect('dtest1');
 
 -- test foreign data wrapper functionality
-CREATE ROLE dblink_regression_test;
+CREATE ROLE regress_dblink_user;
 DO $d$
     BEGIN
         EXECUTE $$CREATE SERVER fdtest FOREIGN DATA WRAPPER dblink_fdw
@@ -427,10 +468,10 @@ CREATE USER MAPPING FOR public SERVER fdtest
   OPTIONS (server 'localhost');  -- fail, can't specify server here
 CREATE USER MAPPING FOR public SERVER fdtest OPTIONS (user :'USER');
 
-GRANT USAGE ON FOREIGN SERVER fdtest TO dblink_regression_test;
-GRANT EXECUTE ON FUNCTION dblink_connect_u(text, text) TO dblink_regression_test;
+GRANT USAGE ON FOREIGN SERVER fdtest TO regress_dblink_user;
+GRANT EXECUTE ON FUNCTION dblink_connect_u(text, text) TO regress_dblink_user;
 
-SET SESSION AUTHORIZATION dblink_regression_test;
+SET SESSION AUTHORIZATION regress_dblink_user;
 -- should fail
 -- GPDB: We also check for hostname in connection string which is checked first
 SELECT dblink_connect('myconn', 'fdtest');
@@ -439,9 +480,9 @@ SELECT dblink_connect_u('myconn', 'fdtest');
 SELECT * FROM dblink('myconn','SELECT * FROM foo') AS t(a int, b text, c text[]);
 
 \c - -
-REVOKE USAGE ON FOREIGN SERVER fdtest FROM dblink_regression_test;
-REVOKE EXECUTE ON FUNCTION dblink_connect_u(text, text) FROM dblink_regression_test;
-DROP USER dblink_regression_test;
+REVOKE USAGE ON FOREIGN SERVER fdtest FROM regress_dblink_user;
+REVOKE EXECUTE ON FUNCTION dblink_connect_u(text, text) FROM regress_dblink_user;
+DROP USER regress_dblink_user;
 DROP USER MAPPING FOR public SERVER fdtest;
 DROP SERVER fdtest;
 

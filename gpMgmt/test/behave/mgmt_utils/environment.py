@@ -1,5 +1,4 @@
 import os
-import platform
 import shutil
 
 import behave
@@ -13,12 +12,13 @@ from steps.gpssh_exkeys_mgmt_utils import GpsshExkeysMgmtContext
 from gppylib.db import dbconn
 
 def before_all(context):
-    if map(int, behave.__version__.split('.')) < [1,2,6]:
+    if list(map(int, behave.__version__.split('.'))) < [1,2,6]:
         raise Exception("Requires at least behave version 1.2.6 (found %s)" % behave.__version__)
 
 def before_feature(context, feature):
     # we should be able to run gpexpand without having a cluster initialized
-    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpmovemirrors', 'gpconfig', 'gpssh-exkeys', 'gpstop']
+    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpmovemirrors',
+                    'gpconfig', 'gpssh-exkeys', 'gpstop', 'gpinitsystem', 'cross_subnet']
     if set(context.feature.tags).intersection(tags_to_skip):
         return
 
@@ -37,12 +37,19 @@ def before_feature(context, feature):
         context.dbname = 'incr_analyze'
 
         # setting up the tables that will be used
-        context.execute_steps(u"""
+        context.execute_steps("""
         Given there is a regular "ao" table "t1_ao" with column name list "x,y,z" and column type list "int,text,real" in schema "public"
         And there is a regular "heap" table "t2_heap" with column name list "x,y,z" and column type list "int,text,real" in schema "public"
         And there is a regular "ao" table "t3_ao" with column name list "a,b,c" and column type list "int,text,real" in schema "public"
-        And there is a hard coded ao partition table "sales" with 4 child partitions in schema "public"
+        And there is a hard coded partition table "sales" with 4 child partitions in schema "public"
         """)
+
+    if 'gpreload' in feature.tags:
+        start_database_if_not_started(context)
+        drop_database_if_exists(context, 'gpreload_db')
+        create_database(context, 'gpreload_db')
+        context.conn = dbconn.connect(dbconn.DbURL(dbname='gpreload_db'), unsetSearchPath=False)
+        context.dbname = 'gpreload_db'
 
     if 'minirepro' in feature.tags:
         start_database_if_not_started(context)
@@ -70,25 +77,26 @@ def before_feature(context, feature):
 def after_feature(context, feature):
     if 'analyzedb' in feature.tags:
         context.conn.close()
+    if 'gpreload' in feature.tags:
+        context.conn.close()
     if 'minirepro' in feature.tags:
         context.conn.close()
     if 'gpconfig' in feature.tags:
-        context.execute_steps(u'''
+        context.execute_steps('''
             Then the user runs "gpstop -ar"
             And gpstop should return a return code of 0
             ''')
 
-def before_scenario(context, scenario):
-    if "skip_fixme_ubuntu18.04" in scenario.effective_tags:
-        if platform.linux_distribution()[0].lower() == "ubuntu" and platform.linux_distribution()[1] == "18.04":
-            scenario.skip("skipping scenario tagged with @skip_fixme_ubuntu18.04")
-            return
 
+def before_scenario(context, scenario):
     if "skip" in scenario.effective_tags:
         scenario.skip("skipping scenario tagged with @skip")
         return
 
     if 'gpmovemirrors' in context.feature.tags:
+        context.mirror_context = MirrorMgmtContext()
+
+    if 'gprecoverseg' in context.feature.tags:
         context.mirror_context = MirrorMgmtContext()
 
     if 'gpconfig' in context.feature.tags:
@@ -97,7 +105,8 @@ def before_scenario(context, scenario):
     if 'gpssh-exkeys' in context.feature.tags:
         context.gpssh_exkeys_context = GpsshExkeysMgmtContext(context)
 
-    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpmovemirrors', 'gpconfig', 'gpssh-exkeys', 'gpstop']
+    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpmovemirrors',
+                    'gpconfig', 'gpssh-exkeys', 'gpstop', 'gpinitsystem', 'cross_subnet']
     if set(context.feature.tags).intersection(tags_to_skip):
         return
 
@@ -113,18 +122,19 @@ def after_scenario(context, scenario):
         return
 
     if 'tablespaces' in context:
-        for tablespace in context.tablespaces.values():
+        for tablespace in list(context.tablespaces.values()):
             tablespace.cleanup()
 
     if 'gpstop' in scenario.effective_tags:
-        context.execute_steps(u'''
+        context.execute_steps('''
             # restart the cluster so that subsequent tests re-use the existing demo cluster
             Then the user runs "gpstart -a"
             And gpstart should return a return code of 0
             ''')
 
     # NOTE: gpconfig after_scenario cleanup is in the step `the gpconfig context is setup`
-    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpinitstandby', 'gpconfig', 'gpstop']
+    tags_to_skip = ['gpexpand', 'gpaddmirrors', 'gpstate', 'gpinitstandby',
+                    'gpconfig', 'gpstop', 'gpinitsystem', 'cross_subnet']
     if set(context.feature.tags).intersection(tags_to_skip):
         return
 

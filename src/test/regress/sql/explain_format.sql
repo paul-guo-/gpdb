@@ -7,14 +7,22 @@
 -- s/Executor memory: (\d+)\w bytes avg x \d+ workers, \d+\w bytes max \(seg\d+\)\./Executor memory: ####K bytes avg x #### workers, ####K bytes max (seg#)./
 -- m/Work_mem: \d+\w bytes max\./
 -- s/Work_mem: \d+\w bytes max\. */Work_mem: ###K bytes max./
--- m/Execution time: \d+\.\d+ ms/
--- s/Execution time: \d+\.\d+ ms/Execution time: ##.### ms/
--- m/Planning time: \d+\.\d+ ms/
--- s/Planning time: \d+\.\d+ ms/Planning time: ##.### ms/
+-- m/Execution Time: \d+\.\d+ ms/
+-- s/Execution Time: \d+\.\d+ ms/Execution Time: ##.### ms/
+-- m/Planning Time: \d+\.\d+ ms/
+-- s/Planning Time: \d+\.\d+ ms/Planning Time: ##.### ms/
 -- m/cost=\d+\.\d+\.\.\d+\.\d+ rows=\d+ width=\d+/
 -- s/\(cost=\d+\.\d+\.\.\d+\.\d+ rows=\d+ width=\d+\)/(cost=##.###..##.### rows=### width=###)/
 -- m/Memory used:  \d+\w?B/
 -- s/Memory used:  \d+\w?B/Memory used: ###B/
+-- m/Memory Usage: \d+\w?B/
+-- s/Memory Usage: \d+\w?B/Memory Usage: ###B/
+-- m/Peak Memory Usage: \d+/
+-- s/Peak Memory Usage: \d+/Peak Memory Usage: ###/
+-- m/Buckets: \d+/
+-- s/Buckets: \d+/Buckets: ###/
+-- m/Batches: \d+/
+-- s/Batches: \d+/Batches: ###/
 -- end_matchsubs
 --
 -- DEFAULT syntax
@@ -56,7 +64,7 @@ EXPLAIN (ANALYZE) SELECT * from boxes LEFT JOIN apples ON apples.id = boxes.appl
 -- m/Segments: \d+/
 -- s/Segments: \d+/Segments: #/
 -- m/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+",?/
--- s/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+",?/Pivotal Optimizer \(GPORCA\) version ##.##.##"/
+-- s/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+",?/Pivotal Optimizer \(GPORCA\)"/
 -- m/ Memory: \d+/
 -- s/ Memory: \d+/ Memory: ###/
 -- m/Maximum Memory Used: \d+/
@@ -88,15 +96,22 @@ EXPLAIN (ANALYZE, FORMAT YAML) SELECT * from boxes LEFT JOIN apples ON apples.id
 --
 -- start_matchsubs
 -- m/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+/
--- s/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+/Pivotal Optimizer \(GPORCA\) version ##.##.##/
+-- s/Pivotal Optimizer \(GPORCA\) version \d+\.\d+\.\d+/Pivotal Optimizer \(GPORCA\)/
 -- end_matchsubs
 -- explain_processing_off
 EXPLAIN (FORMAT JSON, COSTS OFF) SELECT * FROM generate_series(1, 10);
 
 EXPLAIN (FORMAT XML, COSTS OFF) SELECT * FROM generate_series(1, 10);
+
+-- Test for an old bug in printing Sequence nodes in JSON/XML format
+-- (https://github.com/greenplum-db/gpdb/issues/9410)
+CREATE TABLE jsonexplaintest (i int4) PARTITION BY RANGE (i) (START(1) END(3) EVERY(1));
+EXPLAIN (FORMAT JSON, COSTS OFF) SELECT * FROM jsonexplaintest WHERE i = 2;
+
 -- explain_processing_on
 
 -- Cleanup
 DROP TABLE boxes;
 DROP TABLE apples;
 DROP TABLE box_locations;
+DROP TABLE jsonexplaintest;

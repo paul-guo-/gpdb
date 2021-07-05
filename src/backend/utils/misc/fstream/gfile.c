@@ -49,6 +49,17 @@
 
 #define COMPRESSION_BUFFER_SIZE		(1<<14)
 
+#ifdef WIN32
+#if !defined(S_ISDIR)
+#define S_IFDIR  _S_IFDIR
+#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+#endif
+#if !defined(S_ISFIFO)
+#define S_IFIFO _S_IFIFO
+#define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
+#endif
+#define strcasecmp stricmp
+#endif
 
 static int
 nothing_close(gfile_t *fd)
@@ -396,7 +407,7 @@ gz_file_write(gfile_t *fd, void *ptr, size_t size)
 	do
 	{
 		/*
-		 * we do not wish that the size of the input buffer to  the deflate engine, will be greater
+		 * we do not wish that the size of the input buffer to the deflate engine, will be greater
 		 * than the recomended COMPRESSION_BUFFER_SIZE.
 		 */
 		one_iter_compress = (left_to_compress > COMPRESSION_BUFFER_SIZE) ? COMPRESSION_BUFFER_SIZE : left_to_compress;
@@ -500,7 +511,268 @@ gz_file_open(gfile_t *fd)
 	return 0;
 }
 #endif
+#ifdef USE_ZSTD
 
+/* The value range of the level could be found at zstd.h at different versions.
+ * Although the level in ZSTD_initCStream() has the same meaning in different
+ * versions, the macro ZSTD_CLEVEL_DEFAULT may not be defined before 1.3.7.
+ * So we borrow the macro from zstd.h at 1.3.7 in case it is not defined */
+#ifndef ZSTD_CLEVEL_DEFAULT
+#  define ZSTD_CLEVEL_DEFAULT 3
+#endif
+struct zstdlib_stuff
+{
+	ZSTD_inBuffer in;
+	ZSTD_outBuffer out;
+	int in_size, out_size;
+	ZSTD_CStream* cstream;
+	ZSTD_DStream* dstream;
+	unsigned char in_buffer[COMPRESSION_BUFFER_SIZE];
+	unsigned char out_buffer[COMPRESSION_BUFFER_SIZE];
+};
+/* Defined in later version 1.4.8 of zstd.h */
+enum compress_mode
+{
+	ZSTD_CONTINUE_FLUSH = 0,
+	ZSTD_FLUSH_FLUSH = 1,
+	ZSTD_END_FLUSH = 2,
+};
+static ssize_t
+zstd_file_read(gfile_t* fd, void* ptr, size_t len)
+{
+	struct zstdlib_stuff* zstd = fd->u.zstd;
+
+	for (;;)
+	{
+		size_t	ret;
+		/*
+		 * 'out->dst' is our output buffer.
+		 * 'pos' is a size_t value equal to the next pos in 'out_buffer'
+		 * 'out_size' is num bytes currently read out of 'out_buffer'
+		 *
+		 * if s is >0 we have data in 'out.dst' that we didn't write
+		 * yet, write it and return.
+		 */
+		int s = zstd->out.pos - zstd->out_size;
+
+		if (s > 0)
+		{
+			if (s > len)
+				s = len;
+			memcpy(ptr, zstd->out_buffer + zstd->out_size, s);
+			zstd->out_size += s;
+			return s;
+		}
+
+		/* ok, wrote all 'out' data. reset back to beginning of 'out_buffer' */
+		zstd->out_size = 0;
+		zstd->out.pos = 0;
+
+		/*
+		 * Fill up our input buffer from the input file.
+		 */
+		while (zstd->in_size < sizeof zstd->in_buffer)
+		{
+			s = read_and_retry(fd, zstd->in_buffer + zstd->in_size, sizeof zstd->in_buffer - zstd->in_size);
+
+			if (s < 0)
+			{
+				/* read error */
+				gfile_printf_then_putc_newline("ZSTD read_and_retry failed");
+				return -1;
+			}
+			if(s == 0)
+			{
+				break;
+			}
+
+			zstd->in_size += s;
+		}
+
+		/* size of bytes at next decompression */
+		zstd->in.size = zstd->in_size;
+
+		/* remaining free space at next decompression */
+		zstd->out.size = sizeof zstd->out_buffer;
+
+		/* decompress */
+		if (zstd->in.size == 0)
+		{
+			/* No more data to be decompressed and out_buffer is empty */
+			return 0;
+		}
+
+		ret = ZSTD_decompressStream(zstd->dstream, &zstd->out, &zstd->in);
+		if (ZSTD_isError(ret))
+		{
+			gfile_printf_then_putc_newline("ZSTD_decompressStream failed");
+			return -1;
+		}
+
+		/* if no more data available for decompression reset input buf */
+		if (zstd->in.pos == zstd->in_size)
+		{
+			zstd->in.pos = 0;
+			zstd->in_size = 0;
+		}
+	}
+}
+/* In later version we can use ZSTD_compressStream2 with mode parameter,
+ * but in order to coordinate with earlier version, we use the following two functions instead */
+static inline size_t zstd_compression_with_mode(ZSTD_CStream* zcs, ZSTD_outBuffer* output, ZSTD_inBuffer* input, int mode)
+{
+	if(mode != ZSTD_END_FLUSH)
+	{
+		return ZSTD_compressStream(zcs, output, input);
+	}
+	else
+	{
+		return ZSTD_endStream(zcs, output);
+	}
+}
+static int
+zstd_file_write_one_chunk(gfile_t *fd, int mode)
+{
+	/*
+	 * 0 - means we are ok
+	 */
+	size_t remain = 0, have, finished = 0;
+	struct zstdlib_stuff* zstd = fd->u.zstd;
+
+	do
+	{
+		zstd->out.size = COMPRESSION_BUFFER_SIZE;
+		zstd->out.dst = zstd->out_buffer;
+		zstd->out.pos = 0;
+		remain = zstd_compression_with_mode(zstd->cstream, &zstd->out, &zstd->in, mode);    /* no bad return value */
+		if (ZSTD_isError(remain))
+		{
+			gfile_printf_then_putc_newline("zstd_compression_with_mode failed mode:%d", mode);
+			return -1;
+		}
+		have = zstd->out.pos;
+
+		if ( write_and_retry(fd, zstd->out_buffer, have) != have)
+		{
+			gfile_printf_then_putc_newline("ZSTD write_and_retry failed");
+			return -1;
+		}
+		finished = (mode == ZSTD_END_FLUSH) ? (remain == 0) : (zstd->in.pos == zstd->in.size);
+	} while (!finished);
+	/*
+	 * if the ZSTD_compressStream or ZSTD_endStream engine filled all the output buffer, it may have more data, so we must try again
+	 */
+	return 0;
+}
+
+static ssize_t
+zstd_file_write(gfile_t *fd, void *ptr, size_t size)
+{
+	int ret;
+	size_t left_to_compress = size;
+	size_t one_iter_compress;
+	struct zstdlib_stuff* zstd = fd->u.zstd;
+
+	do
+	{
+		/*
+		 * we do not wish that the size of the input buffer to the ZSTD_compressStream engine, will be greater
+		 * than the recommended COMPRESSION_BUFFER_SIZE.
+		 */
+		one_iter_compress = (left_to_compress > COMPRESSION_BUFFER_SIZE) ? COMPRESSION_BUFFER_SIZE : left_to_compress;
+
+		zstd->in.size = one_iter_compress;
+		zstd->in.src = (void *)((unsigned char *)ptr + (size - left_to_compress));
+		zstd->in.pos = 0;
+
+		ret = zstd_file_write_one_chunk(fd, ZSTD_CONTINUE_FLUSH);
+		if (0 != ret)
+		{
+			return ret;
+		}
+
+		left_to_compress -= one_iter_compress;
+	} while( left_to_compress > 0 );
+
+	return size;
+}
+
+static int
+zstd_file_close(gfile_t *fd)
+{
+	int ret;
+	if ( fd->is_write == FALSE ) /* writing, or in other words compressing */
+	{
+		ZSTD_freeDStream(fd->u.zstd->dstream);
+	}
+	else
+	{
+		/* flush any remaining data _and_ close current frame */
+		ret = zstd_file_write_one_chunk(fd, ZSTD_END_FLUSH);
+		if (0 != ret)
+		{
+			return ret;
+		}
+		ZSTD_freeCStream(fd->u.zstd->cstream);
+	}
+
+	gfile_free(fd->u.zstd);
+	return 0;
+}
+static int
+zstd_file_open(gfile_t *fd)
+{
+	if (!(fd->u.zstd = gfile_malloc(sizeof *fd->u.zstd)))
+	{
+		gfile_printf_then_putc_newline("Out of memory");
+		return 1;
+	}
+
+	memset(fd->u.zstd, 0, sizeof *fd->u.zstd);
+
+	fd->u.zstd->in.src = fd->u.zstd->in_buffer;
+	fd->u.zstd->out.dst = fd->u.zstd->out_buffer;
+
+	fd->read = zstd_file_read;
+	fd->write = zstd_file_write;
+	fd->close = zstd_file_close;
+
+	if ( fd->is_write == FALSE )/* for read */
+	{
+		/*
+		 * reading a compressed file
+		 */
+		if (!(fd->u.zstd->dstream = ZSTD_createDStream()))
+		{
+			gfile_printf_then_putc_newline("ZSTD_createDStream failed");
+			return 1;
+		}
+		if(ZSTD_isError(ZSTD_initDStream(fd->u.zstd->dstream)))
+		{
+			gfile_printf_then_putc_newline("ZSTD_initDStream failed");
+			return 1;
+		}
+	}
+	else
+	{
+		/*
+		 * writing a compressed file
+		 */
+		if (!(fd->u.zstd->cstream = ZSTD_createCStream()))
+		{
+			gfile_printf_then_putc_newline("ZSTD_createCStream() failed");
+			return 1;
+		}
+		if(ZSTD_isError(ZSTD_initCStream(fd->u.zstd->cstream, ZSTD_CLEVEL_DEFAULT)))
+		{
+			gfile_printf_then_putc_newline("ZSTD_initCStream failed");
+			return 1;
+		}
+	}
+
+	return 0;
+}
+#endif
 #ifdef GPFXDIST
 /*
  * subprocess support
@@ -662,6 +934,22 @@ close_subprocess(gfile_t *fd)
 }
 #endif
 
+static int close_filefd(int fd)
+{
+	int ret = 0;
+
+	do
+	{
+#ifdef FRONTEND
+		ret = close(fd);
+#else
+		ret = CloseTransientFile(fd);
+#endif
+	}
+	while (ret < 0 && errno == EINTR);
+
+	return ret;
+}
 
 /*
  * public interface
@@ -684,41 +972,18 @@ gfile_open_flags(int writing, int usesync)
 int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, const char** response_string, struct gpfxdist_t* transform)
 {
 	const char* s = strrchr(fpath, '.');
-	bool_t is_win_pipe = FALSE;
-#ifndef WIN32
-	struct 		stat sta;
-#endif
-	off_t ssize = 0;
-
-	memset(fd,0,sizeof*fd);
-
 #ifdef WIN32
-#if !defined(S_ISDIR)
-#define S_IFDIR  _S_IFDIR
-#define S_ISDIR(m) (((m) & S_IFMT) == S_IFDIR)
+	bool_t is_win_pipe = FALSE;
+#else
+	struct 		stat sta;
+	memset(&sta, 0, sizeof(sta));
 #endif
-#if !defined(S_ISFIFO)
-#define S_IFIFO _S_IFIFO
-#define S_ISFIFO(m) (((m) & S_IFMT) == S_IFIFO)
-#endif
-#define strcasecmp stricmp
-#endif 
 
+	memset(fd, 0, sizeof(*fd));
 
 	/*
 	 * check for subprocess and/or named pipe
 	 */
-
-#ifdef GPFXDIST
-	fd->transform = transform;
-
-	if (fd->transform)
-	{
-		/* caller wants a subprocess. nothing to do here just yet. */
-		gfile_printf_then_putc_newline("looks like a subprocess");
-	}
-	else 
-#endif
 #ifdef WIN32
 	/* is this a windows named pipe, of the form \\<host>\... */
 	if (strlen(fpath) > 2)
@@ -743,7 +1008,6 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 		gfile_printf_then_putc_newline("trying to connect to pipe");
 		if (pipe != INVALID_HANDLE_VALUE)
 		{
-			is_win_pipe = TRUE;
 			fd->is_win_pipe = TRUE;
 			fd->fd.pipefd = pipe;
 			gfile_printf_then_putc_newline("connected to pipe");
@@ -772,65 +1036,64 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 			return 1;
 		}
 	}
-
-#else
-
-	if (!is_win_pipe && (flags == GFILE_OPEN_FOR_READ))
-	{
-		if (stat(fpath, &sta))
-		{
-			if(errno == EOVERFLOW)
-			{
-				/*
-				 * ENGINF-176
-				 * 
-				 * Some platforms don't support stat'ing of "large files"
-				 * accurately (files over 2GB) - SPARC for example. In these
-				 * cases the storage size of st_size is too small and the
-				 * file size will overflow. Therefore, we look for cases where
-				 * overflow had occurred, and resume operation. At least we
-				 * know that the file does exist and that's the main goal of
-				 * stat'ing here anyway. we set the size to 0, similarly to
-				 * the winpipe path, so that negative sizes won't be used.
-				 * 
-				 * TODO: there may be side effects to setting the size to 0,
-				 * need to double check.
-				 * 
-				 * TODO: this hack could possibly now be removed after enabling
-				 * largefiles via the build process with compiler flags.
-				 */
-				sta.st_size = 0;
-			}
-			else
-			{
-				gfile_printf_then_putc_newline("gfile stat %s failure: %s", fpath, strerror(errno));
-				*response_code = 404;
-				*response_string = "file not found";
-				return 1;				
-			}
-		}
-		if (S_ISDIR(sta.st_mode))
-		{
-			gfile_printf_then_putc_newline("gfile %s is a directory", fpath);
-			*response_code = 403;
-			*response_string = "Reading a directory is forbidden.";
-			return 1;
-		}
-		ssize = sta.st_size;
-	}
-
-#endif
-
-	fd->compressed_size = ssize;
-
+#else	/* not win32 */
 #ifdef GPFXDIST
+	fd->transform = transform;
 	if (fd->transform)
 	{
-		/* CR-2173 nothing to do here if transformation is requested */
+		/* caller wants a subprocess. nothing to do here just yet. */
+		gfile_printf_then_putc_newline("looks like a subprocess");
 	}
 	else
 #endif
-	if (!fd->is_win_pipe)
+	{
+		if (!fd->is_win_pipe && (flags == GFILE_OPEN_FOR_READ))
+		{
+			if (stat(fpath, &sta))
+			{
+				if(errno == EOVERFLOW)
+				{
+					/*
+					* ENGINF-176
+					* 
+					* Some platforms don't support stat'ing of "large files"
+					* accurately (files over 2GB) - SPARC for example. In these
+					* cases the storage size of st_size is too small and the
+					* file size will overflow. Therefore, we look for cases where
+					* overflow had occurred, and resume operation. At least we
+					* know that the file does exist and that's the main goal of
+					* stat'ing here anyway. we set the size to 0, similarly to
+					* the winpipe path, so that negative sizes won't be used.
+					* 
+					* TODO: there may be side effects to setting the size to 0,
+					* need to double check.
+					* 
+					* TODO: this hack could possibly now be removed after enabling
+					* largefiles via the build process with compiler flags.
+					*/
+					sta.st_size = 0;
+				}
+				else
+				{
+					gfile_printf_then_putc_newline("gfile stat %s failure: %s", fpath, strerror(errno));
+					*response_code = 404;
+					*response_string = "file not found";
+					return 1;
+				}
+			}
+			if (S_ISDIR(sta.st_mode))
+			{
+				gfile_printf_then_putc_newline("gfile %s is a directory", fpath);
+				*response_code = 403;
+				*response_string = "Reading a directory is forbidden.";
+				return 1;
+			}
+			fd->compressed_size = sta.st_size;
+		}
+	}
+#endif	/* ifdef win32 */
+
+	if (NULL == fd->transform && !fd->is_win_pipe)
 	{
 		int syncFlag = 0;
 		int openFlags;
@@ -871,31 +1134,28 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 #ifdef FRONTEND
 			fd->fd.filefd = open(fpath, openFlags, openMode);
 #else
-			fd->fd.filefd = OpenTransientFile((char *) fpath, openFlags, openMode);
+			fd->fd.filefd = OpenTransientFile((char *) fpath, openFlags);
 #endif
 		}
 		while (fd->fd.filefd < 0 && errno == EINTR);
-	}
 
-	if (!fd->is_win_pipe && -1 == fd->fd.filefd) 
-	{
-		static char buf[256];
-		gfile_printf_then_putc_newline("gfile open (for %s) failed %s: %s",
-									   ((flags == GFILE_OPEN_FOR_READ) ? "read" : 
-										((flags == GFILE_OPEN_FOR_WRITE_SYNC) ? "write (sync)" : "write")),
-					  				  fpath, strerror(errno));
-		*response_code = 404;
-		snprintf(buf, sizeof buf, "file open failure %s: %s", fpath, 
-				strerror(errno));
-		*response_string = buf;
-		return 1;
-	}
+		if (-1 == fd->fd.filefd)
+		{
+			static char buf[256];
+			gfile_printf_then_putc_newline("gfile open (for %s) failed %s: %s",
+										((flags == GFILE_OPEN_FOR_READ) ? "read" :
+											((flags == GFILE_OPEN_FOR_WRITE_SYNC) ? "write (sync)" : "write")),
+										fpath, strerror(errno));
+			*response_code = 404;
+			snprintf(buf, sizeof buf, "file open failure %s: %s", fpath,
+					strerror(errno));
+			*response_string = buf;
+			return 1;
+		}
 
-#if !defined(WIN32) && !defined(_AIX)
-	if (!is_win_pipe && (flags == GFILE_OPEN_FOR_READ))
-	{
+#if !defined(WIN32)
 		/* Restrict only one reader session for each PIPE */
-		if (S_ISFIFO(sta.st_mode))
+		if (S_ISFIFO(sta.st_mode) && (flags == GFILE_OPEN_FOR_READ))
 		{
 			if (flock (fd->fd.filefd, LOCK_EX | LOCK_NB) != 0)
 			{
@@ -903,6 +1163,8 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 				gfile_printf_then_putc_newline("gfile %s is a pipe", fpath);
 				*response_code = 404;
 				*response_string = "Multiple reader to a pipe is forbidden.";
+				close_filefd(fd->fd.filefd);
+				fd->fd.filefd = -1;
 				return 1;
 			}
 			else
@@ -910,8 +1172,8 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 				fd->held_pipe_lock = TRUE;
 			}
 		}
-	}
 #endif
+	}
 
 	/*
 	 * prepare to use the appropriate i/o routines 
@@ -939,7 +1201,6 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 		fd->close = nothing_close;
 	}
 
-	
 	/*
 	 * delegate remaining setup work to an appropriate open routine
 	 * or return an error if we can't handle the type
@@ -982,6 +1243,20 @@ int gfile_open(gfile_t* fd, const char* fpath, int flags, int* response_code, co
 		return bz_file_open(fd);
 #endif
 	}
+	else if (s && strcasecmp(s, ".zst") == 0)
+	{
+#ifndef USE_ZSTD
+		gfile_printf_then_putc_newline(".zst not supported");
+#else
+		fd->compression = ZSTD_COMPRESSION;
+		if (flags != GFILE_OPEN_FOR_READ)
+		{
+			fd->is_write = TRUE;
+		}
+
+		return zstd_file_open(fd);
+#endif
+	}
 	else if (s && strcasecmp(s,".z") == 0)
 		gfile_printf_then_putc_newline("gfile compression .z file is not supported");
 	else if (s && strcasecmp(s,".zip") == 0)
@@ -1008,49 +1283,34 @@ gfile_close(gfile_t*fd)
 			fd->close(fd);
 		} 
         else
-		{
 #endif
-
-		/*
-		 * for the compressed data implementation we need to call the "close" callback. Other implementations
-		 * didn't use to call this callback here and it will remain so.
-		 */
-		if (  fd->compression == GZ_COMPRESSION ) 
 		{
-			fd->close(fd);
-		}
-
-		if (fd->is_win_pipe)
-		{
-			fd->close(fd);
-		}
-		else
-		{
-			if(fd->held_pipe_lock)
+			/*
+			* for the compressed data implementation we need to call the "close" callback. Other implementations
+			* didn't use to call this callback here and it will remain so.
+			*/
+			if (fd->compression == GZ_COMPRESSION || fd->compression == ZSTD_COMPRESSION)
 			{
+				fd->close(fd);
+			}
+
+			if (fd->is_win_pipe)
+			{
+				fd->close(fd);
+			}
+			else
+			{
+				if(fd->held_pipe_lock)
+				{
 #ifndef WIN32
-				flock (fd->fd.filefd, LOCK_UN);
+					flock (fd->fd.filefd, LOCK_UN);
 #endif
+				}
+				ret = close_filefd(fd->fd.filefd);
+				if (ret == -1)
+					ret = 1;
 			}
-			do
-			{
-				//fsync(fd->fd.filefd);
-#ifdef FRONTEND
-				ret = close(fd->fd.filefd);
-#else
-				ret = CloseTransientFile(fd->fd.filefd);
-#endif
-			}
-			while (ret < 0 && errno == EINTR);
-
-			if (ret == -1)
-				ret = 1;
-		}
-
-#ifdef GPFXDIST
 		} 
-#endif
-
 		fd->read = 0;
 		fd->close = 0;
 	}

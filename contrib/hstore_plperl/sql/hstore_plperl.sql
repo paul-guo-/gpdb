@@ -1,6 +1,4 @@
-CREATE EXTENSION hstore;
-CREATE EXTENSION plperl;
-CREATE EXTENSION hstore_plperl;
+CREATE EXTENSION hstore_plperl CASCADE;
 
 SELECT transforms.udt_schema, transforms.udt_name,
        routine_schema, routine_name,
@@ -32,6 +30,25 @@ return $val;
 $$;
 
 SELECT test2arr();
+
+-- check error cases
+CREATE OR REPLACE FUNCTION test2() RETURNS hstore
+LANGUAGE plperl
+TRANSFORM FOR TYPE hstore
+AS $$
+return 42;
+$$;
+
+SELECT test2();
+
+CREATE OR REPLACE FUNCTION test2() RETURNS hstore
+LANGUAGE plperl
+TRANSFORM FOR TYPE hstore
+AS $$
+return [1, 2];
+$$;
+
+SELECT test2();
 
 
 DROP FUNCTION test2();

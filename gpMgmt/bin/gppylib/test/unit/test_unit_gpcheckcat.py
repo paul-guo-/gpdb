@@ -5,7 +5,7 @@ import sys
 
 from mock import *
 
-from gp_unittest import *
+from .gp_unittest import *
 from gppylib.gpcatalog import GPCatalogTable
 
 class GpCheckCatTestCase(GpTestCase):
@@ -26,7 +26,6 @@ class GpCheckCatTestCase(GpTestCase):
             patch("gpcheckcat.UniqueIndexViolationCheck", return_value=self.unique_index_violation_check),
             patch("gpcheckcat.ForeignKeyCheck", return_value=self.foreign_key_check),
             patch('os.environ', new={}),
-            patch('pygresql.pgdb'),
         ])
 
         self.subject.logger = Mock(spec=['log', 'info', 'debug', 'error', 'fatal'])
@@ -41,6 +40,7 @@ class GpCheckCatTestCase(GpTestCase):
                                ('arbitrary_catalog_table', ['pkey1', 'pkey2'], [('r1', 'r2'), ('r3', 'r4')])]
         self.foreign_key_check.runCheck.return_value = issues_list
 
+        self.subject.GV.coordinator_dbid = 0
         self.subject.GV.cfg = {0:dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=-1, dbid=0),
                                1:dict(hostname='host1', port=123, id=1, address='123', datadir='dir', content=1, dbid=1)}
         self.subject.GV.checkStatus = True
@@ -153,12 +153,12 @@ class GpCheckCatTestCase(GpTestCase):
         # which can then be mocked as necessary.
         with patch.object(sys, 'argv', testargs):
             self.subject.main()
-            self.assertEquals(self.subject.GV.opt['-B'], len(primaries))
+            self.assertEqual(self.subject.GV.opt['-B'], len(primaries))
 
         #mock_log.assert_any_call(50, "Truncated batch size to number of primaries: 50")
         # I am confused that .assert_any_call() did not seem to work as expected --Larry
         last_call = mock_log.call_args_list[0][0][2]
-        self.assertEquals(last_call, "Truncated batch size to number of primaries: 50")
+        self.assertEqual(last_call, "Truncated batch size to number of primaries: 50")
 
     @patch('gpcheckcat_modules.repair.Repair', return_value=Mock())
     @patch('gpcheckcat_modules.repair.Repair.create_repair_for_extra_missing', return_value="/tmp")
@@ -185,7 +185,7 @@ class GpCheckCatTestCase(GpTestCase):
         cat_tables = ["input1", "input2"]
         self.subject.checkForeignKey(cat_tables)
 
-        self.assertEquals(cat_mock.getCatalogTables.call_count, 0)
+        self.assertEqual(cat_mock.getCatalogTables.call_count, 0)
         self.assertFalse(self.subject.GV.checkStatus)
         self.assertTrue(self.subject.GV.foreignKeyStatus)
         self.subject.setError.assert_any_call(self.subject.ERROR_REMOVE)
@@ -200,7 +200,7 @@ class GpCheckCatTestCase(GpTestCase):
         cat_tables = ["input1", "input2"]
         self.subject.checkForeignKey(cat_tables)
 
-        self.assertEquals(cat_mock.getCatalogTables.call_count, 0)
+        self.assertEqual(cat_mock.getCatalogTables.call_count, 0)
         self.assertFalse(self.subject.GV.checkStatus)
         self.assertTrue(self.subject.GV.foreignKeyStatus)
         self.subject.setError.assert_any_call(self.subject.ERROR_NOREPAIR)
@@ -214,7 +214,7 @@ class GpCheckCatTestCase(GpTestCase):
         self.subject.GV.catalog = cat_mock
 
         self.subject.checkForeignKey()
-        self.assertEquals(cat_mock.getCatalogTables.call_count, 1)
+        self.assertEqual(cat_mock.getCatalogTables.call_count, 1)
         self.assertFalse(self.subject.GV.checkStatus)
         self.assertTrue(self.subject.GV.foreignKeyStatus)
         self.subject.setError.assert_any_call(self.subject.ERROR_NOREPAIR)
@@ -271,7 +271,7 @@ class GpCheckCatTestCase(GpTestCase):
 
         self.subject.runOneCheck("missing_extraneous")
 
-        self.assertEquals(aTable.getPrimaryKey.call_count, 1)
+        self.assertEqual(aTable.getPrimaryKey.call_count, 1)
         self.subject.setError.assert_called_once_with(self.subject.ERROR_REMOVE)
 
     @patch('gpcheckcat.checkTableMissingEntry', return_value= {("pg_operator", "typename, typenamespace"): "extra"})
@@ -288,7 +288,7 @@ class GpCheckCatTestCase(GpTestCase):
 
         self.subject.runOneCheck("missing_extraneous")
 
-        self.assertEquals(aTable.getPrimaryKey.call_count, 1)
+        self.assertEqual(aTable.getPrimaryKey.call_count, 1)
         self.subject.setError.assert_called_once_with(self.subject.ERROR_REMOVE)
 
     def test_getReportConfiguration_uses_contentid(self):
@@ -305,6 +305,87 @@ class GpCheckCatTestCase(GpTestCase):
         self.assertIn('Relation oid: N/A', log_messages)
         self.assertIn('Relation schema: N/A', log_messages)
         self.assertIn('Relation name: N/A', log_messages)
+
+    @patch('gpcheckcat.GPCatalog', return_value=Mock())
+    @patch('sys.exit')
+    @patch('gpcheckcat.runAllChecks', return_value=Mock())
+    @patch('gpcheckcat.getversion', return_value="5.0")
+    def test_skip_one_test(self, mock_ver, mock_run, mock1, mock2):
+        primaries = [dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=-1, dbid=0, isprimary='t')]
+        for i in range(1, 50):
+            primaries.append(dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=1, dbid=i, isprimary='t'))
+        self.db_connection.query.return_value.dictresult.return_value = primaries
+        self.subject.all_checks = {'test1': 'a', 'test2': 'b', 'test3': 'c'}
+
+        testargs = ['gpcheckcat', '-port 1', '-s test2']
+        with patch.object(sys, 'argv', testargs):
+            self.subject.main()
+        mock_run.assert_has_calls(call(['test1', 'test3']))
+
+    @patch('gpcheckcat.GPCatalog', return_value=Mock())
+    @patch('sys.exit')
+    @patch('gpcheckcat.runAllChecks', return_value=Mock())
+    @patch('gpcheckcat.getversion', return_value="5.0")
+    def test_skip_multiple_test(self, mock_ver, mock_run, mock1, mock2):
+        primaries = [dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=-1, dbid=0, isprimary='t')]
+        for i in range(1, 50):
+            primaries.append(dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=1, dbid=i, isprimary='t'))
+        self.db_connection.query.return_value.dictresult.return_value = primaries
+        self.subject.all_checks = {'test1': 'a', 'test2': 'b', 'test3': 'c'}
+
+        testargs = ['gpcheckcat', '-port 1', '-s', "test1, test2"]
+        with patch.object(sys, 'argv', testargs):
+            self.subject.main()
+        mock_run.assert_has_calls(call(['test3']))
+
+    @patch('gpcheckcat.GPCatalog', return_value=Mock())
+    @patch('sys.exit')
+    @patch('gpcheckcat.runAllChecks', return_value=Mock())
+    @patch('gpcheckcat.getversion', return_value="5.0")
+    def test_skip_test_warning(self, mock_ver, mock_run, mock1, mock2):
+        primaries = [dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=-1, dbid=0, isprimary='t')]
+        for i in range(1, 50):
+            primaries.append(dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=1, dbid=i, isprimary='t'))
+        self.db_connection.query.return_value.dictresult.return_value = primaries
+        self.subject.all_checks = {'test1': 'a', 'test2': 'b', 'test3': 'c'}
+
+        testargs = ['gpcheckcat', '-port 1', '-s', "test_invalid, test2"]
+        with patch.object(sys, 'argv', testargs):
+            self.subject.main()
+        mock_run.assert_has_calls(call(['test1', 'test3']))
+        expected_message = "'test_invalid' is not a valid test"
+        log_messages = [args[0][1] for args in self.subject.logger.log.call_args_list]
+        self.assertIn(expected_message, log_messages)
+
+    @patch('gpcheckcat.GPCatalog', return_value=Mock())
+    @patch('sys.exit')
+    @patch('gpcheckcat.runAllChecks', return_value=Mock())
+    @patch('gpcheckcat.getversion', return_value="5.0")
+    def test_run_multiple_test(self, mock_ver, mock_run, mock1, mock2):
+        primaries = [dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=-1, dbid=0, isprimary='t')]
+        for i in range(1, 50):
+            primaries.append(dict(hostname='host0', port=123, id=1, address='123', datadir='dir', content=1, dbid=i, isprimary='t'))
+        self.db_connection.query.return_value.dictresult.return_value = primaries
+        self.subject.all_checks = {'test1': 'a', 'test2': 'b', 'test3': 'c'}
+
+        testargs = ['gpcheckcat', '-port 1', '-R', "test1, test2"]
+        with patch.object(sys, 'argv', testargs):
+            self.subject.main()
+        calls_to_check = [call(['test1', 'test2'])]
+        mock_run.assert_has_calls(calls_to_check)
+
+    @patch('sys.exit')
+    @patch('gpcheckcat.getversion', return_value="5.0")
+    def test_check_test_subset_parameter_count_fail(self, mock_ver, mock_exit):
+        GV = Global()
+        GV.opt['-R'] = 'test1'
+        GV.opt['-s'] = 'test2'
+        GV.opt['-C'] = None
+        GV.retcode = None
+        self.subject.GV = GV
+
+        self.subject.check_test_subset_parameter_count()
+        self.subject.setError.assert_any_call(self.subject.ERROR_NOREPAIR)
 
     ####################### PRIVATE METHODS #######################
 
@@ -330,6 +411,9 @@ class GpCheckCatTestCase(GpTestCase):
                 self.num_batches += 1
                 self.num_joins = 0
                 self.num_starts = 0
+class Global():
+    def __init__(self):
+        self.opt = {}
 
 if __name__ == '__main__':
     run_tests()

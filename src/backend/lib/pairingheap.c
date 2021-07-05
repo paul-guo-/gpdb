@@ -14,7 +14,7 @@
  *	The pairing heap: a new form of self-adjusting heap.
  *	Algorithmica 1, 1 (January 1986), pages 111-129. DOI: 10.1007/BF01840439
  *
- * Portions Copyright (c) 2012-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 2012-2019, PostgreSQL Global Development Group
  *
  * IDENTIFICATION
  *	  src/backend/lib/pairingheap.c
@@ -27,9 +27,9 @@
 #include "lib/pairingheap.h"
 
 static pairingheap_node *merge(pairingheap *heap, pairingheap_node *a,
-	  pairingheap_node *b);
+							   pairingheap_node *b);
 static pairingheap_node *merge_children(pairingheap *heap,
-			   pairingheap_node *children);
+										pairingheap_node *children);
 
 /*
  * pairingheap_allocate
@@ -295,7 +295,7 @@ merge_children(pairingheap *heap, pairingheap_node *children)
 static void
 pairingheap_dump_recurse(StringInfo buf,
 						 pairingheap_node *node,
-	 void (*dumpfunc) (pairingheap_node *node, StringInfo buf, void *opaque),
+						 void (*dumpfunc) (pairingheap_node *node, StringInfo buf, void *opaque),
 						 void *opaque,
 						 int depth,
 						 pairingheap_node *prev_or_parent)
@@ -306,7 +306,7 @@ pairingheap_dump_recurse(StringInfo buf,
 
 		appendStringInfoSpaces(buf, depth * 4);
 		dumpfunc(node, buf, opaque);
-		appendStringInfoString(buf, "\n");
+		appendStringInfoChar(buf, '\n');
 		if (node->first_child)
 			pairingheap_dump_recurse(buf, node->first_child, dumpfunc, opaque, depth + 1, node);
 		prev_or_parent = node;
@@ -316,7 +316,7 @@ pairingheap_dump_recurse(StringInfo buf,
 
 char *
 pairingheap_dump(pairingheap *heap,
-	 void (*dumpfunc) (pairingheap_node *node, StringInfo buf, void *opaque),
+				 void (*dumpfunc) (pairingheap_node *node, StringInfo buf, void *opaque),
 				 void *opaque)
 {
 	StringInfoData buf;

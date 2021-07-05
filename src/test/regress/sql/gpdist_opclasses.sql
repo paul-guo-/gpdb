@@ -57,20 +57,19 @@ CREATE TABLE abstab_a (a int) DISTRIBUTED BY (a);
 INSERT INTO abstab_a VALUES (-1), (0), (1);
 CREATE TABLE abstab_b (b int) DISTRIBUTED BY (b);
 INSERT INTO abstab_b VALUES (-1), (0), (1), (2);
+ANALYZE abstab_a;
+ANALYZE abstab_b;
 
 -- The default opclass isn't helpful with the |=| operator, so this needs
 -- a Motion.
--- FIXME: This is currently broken with ORCA, see
--- https://github.com/greenplum-db/gpdb/issues/6796
-set optimizer=off;
 EXPLAIN (COSTS OFF) SELECT a, b FROM abstab_a, abstab_b WHERE a |=| b;
 SELECT a, b FROM abstab_a, abstab_b WHERE a |=| b;
-reset optimizer;
 
 -- Change distribution key of abstab_a to use our fancy opclass.
 DROP TABLE abstab_a;
 CREATE TABLE abstab_a (a int) DISTRIBUTED BY (a abs_int_hash_ops);
 INSERT INTO abstab_a VALUES (-1), (0), (1);
+ANALYZE abstab_a;
 
 -- The other side is still distributed using the default opclass,
 -- so we still need a Motion.
@@ -120,6 +119,55 @@ INSERT INTO abs_opclass_test VALUES
 -- Test deparsing of the non-default opclass
 \d abs_opclass_test
 
+
+--
+-- Test interaction between unique and primary key indexes and distribution keys.
+--
+-- should fail, because the default index opclass is not compatible with the |=| operator
+CREATE UNIQUE INDEX ON abs_opclass_test (i, j, t);
+ALTER TABLE abs_opclass_test ADD PRIMARY KEY (i, j, t);
+
+-- but this is allowed. (There is no syntax to specify the opclasses with ADD PRIMARY KEY)
+CREATE UNIQUE INDEX ON abs_opclass_test (i abs_int_btree_ops, j abs_int_btree_ops, t);
+
+-- ALTER TABLE should perform the same tests
+ALTER TABLE abs_opclass_test SET DISTRIBUTED BY (i, j); -- not allowed
+ALTER TABLE abs_opclass_test SET DISTRIBUTED BY (i abs_int_hash_ops, j abs_int_hash_ops);
+
+
+-- Exclusion constraints work similarly. We can enforce them, as long as the
+-- exclusion ops are the same equality ops as used in the distribution key.
+--
+-- That may seem a bit pointless, but there are some use cases for it. For
+-- example, imagine that you have a calendar system, where you can book rooms.
+-- If you distribute the bookings table by room number, you could have an
+-- exclusion constraint on (room_no WITH =, reservation WITH &&), to enforce
+-- that there are no overlapping reservations for the same room.
+--
+-- We can't use that exact example here, without the 'btree_gist' extension
+-- that would provide the = gist opclass for basic types. So we use a more
+-- contrived example using IP addresses rather than rooms.
+
+CREATE TABLE ip_reservations (ip_addr inet, reserved tsrange) DISTRIBUTED BY (ip_addr);
+
+-- these are not allowed
+ALTER TABLE ip_reservations ADD EXCLUDE USING gist (reserved WITH &&);
+ALTER TABLE ip_reservations ADD EXCLUDE USING gist (ip_addr inet_ops WITH &&);
+
+-- but this is.
+ALTER TABLE ip_reservations ADD EXCLUDE USING gist (ip_addr inet_ops WITH =, reserved WITH &&);
+
+-- new distribution is incompatible with the constraint.
+ALTER TABLE ip_reservations SET DISTRIBUTED BY (reserved);
+
+-- After dropping the constraint, it's allowed.
+ALTER TABLE ip_reservations DROP CONSTRAINT ip_reservations_ip_addr_reserved_excl;
+ALTER TABLE ip_reservations SET DISTRIBUTED BY (reserved);
+
+-- Test creating exclusion constraint on tsrange column. (The subtle
+-- difference is there is no direct =(tsrange, tsrange) operator, we rely on
+-- the implicit casts for it)
+ALTER TABLE ip_reservations ADD EXCLUDE USING gist (reserved WITH =);
 
 
 --

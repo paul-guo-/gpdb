@@ -38,6 +38,8 @@
         <xref href="./gpexpand_expansion_progress.xml#topic1" type="topic" format="dita"/>
       </li>
       <li>
+        <xref href="./pg_matviews.xml" type="topic" format="dita"/></li>
+      <li>
         <xref href="./pg_max_external_files.xml#topic1" type="topic" format="dita"/></li>
       <li>
         <xref href="./pg_partition_columns.xml#topic1" type="topic" format="dita"/>
@@ -57,13 +59,19 @@
         <xref href="./pg_stat_activity.xml#topic1" type="topic" format="dita"/>
       </li>
       <li>
+        <xref href="./pg_stat_indexes.xml" type="topic" format="dita"/>
+      </li>
+      <li>
+        <xref href="./pg_stat_tables.xml" type="topic" format="dita"/>
+      </li>
+      <li>
         <xref href="./pg_stat_replication.xml#topic1" type="topic" format="dita"/>
       </li>
       <li>
         <xref href="./pg_stats_resqueue.xml#topic1" type="topic" format="dita"/>
       </li>
-      <li>session_level_memory_consumption (See "Viewing Session Memory Usage Information" in the
-          <cite>Greenplum Database Administrator Guide</cite>.)</li>
+      <li>session_level_memory_consumption (See <xref
+          href="../../admin_guide/managing/monitor.xml#topic_slt_ddv_1q"/>.)</li>
     </ul>
     <p>For more information about the standard system views supported in PostgreSQL and Greenplum
       Database, see the following sections of the PostgreSQL documentation:</p>
@@ -78,8 +86,8 @@
           scope="external" format="html">Statistics Collector Views</xref>
       </li>
       <li>
-        <xref href="https://www.postgresql.org/docs/9.4/information-schema.html"
-          scope="external" format="html">The Information Schema</xref>
+        <xref href="https://www.postgresql.org/docs/9.4/information-schema.html" scope="external"
+          format="html">The Information Schema</xref>
       </li>
     </ul>
   </body>

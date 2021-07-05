@@ -5,7 +5,7 @@
  *    within Greenplum Database.
  *
  * Portions Copyright (c) 2005-2008, Greenplum inc
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -19,8 +19,10 @@
 #include "access/heapam.h"
 #include "access/htup_details.h"
 #include "catalog/indexing.h"
+#include "catalog/pg_am.h"
 #include "catalog/pg_amop.h"
 #include "catalog/pg_amproc.h"
+#include "catalog/pg_collation.h"
 #include "catalog/pg_opclass.h"
 #include "cdb/cdbhash.h"
 #include "commands/defrem.h"
@@ -81,11 +83,6 @@ makeCdbHash(int numsegs, int natts, Oid *hashfuncs)
 
 	Assert(numsegs > 0);		/* verify number of segments is legal. */
 
-	if (numsegs == GP_POLICY_INVALID_NUMSEGMENTS())
-	{
-		Assert(!"what's the proper value of numsegments?");
-	}
-
 	/* Allocate a new CdbHash, with space for the datatype OIDs. */
 	h = palloc(sizeof(CdbHash));
 
@@ -141,7 +138,7 @@ makeCdbHashForRelation(Relation rel)
 	for (i = 0; i < policy->nattrs; i++)
 	{
 		AttrNumber	attnum = policy->attrs[i];
-		Oid			typeoid = desc->attrs[attnum - 1]->atttypid;
+		Oid			typeoid = TupleDescAttr(desc, attnum - 1)->atttypid;
 		Oid			opfamily;
 
 		opfamily = get_opclass_family(policy->opclasses[i]);
@@ -185,21 +182,22 @@ cdbhash(CdbHash *h, int attno, Datum datum, bool isnull)
 
 		if (!isnull)
 		{
-			FunctionCallInfoData fcinfo;
+			LOCAL_FCINFO(fcinfo, 1);
 			uint32		hkey;
 
-			InitFunctionCallInfoData(fcinfo, &h->hashfuncs[attno - 1], 1,
-									 InvalidOid,
+			InitFunctionCallInfoData(*fcinfo, &h->hashfuncs[attno - 1], 1,
+									 /* GPDB_12_MERGE_FIXME: always use default collation. Is that OK? */
+									 DEFAULT_COLLATION_OID,
 									 NULL, NULL);
 
-			fcinfo.arg[0] = datum;
-			fcinfo.argnull[0] = false;
+			fcinfo->args[0].value = datum;
+			fcinfo->args[0].isnull = false;
 
-			hkey = DatumGetUInt32(FunctionCallInvoke(&fcinfo));
+			hkey = DatumGetUInt32(FunctionCallInvoke(fcinfo));
 
 			/* Check for null result, since caller is clearly not expecting one */
-			if (fcinfo.isnull)
-				elog(ERROR, "function %u returned NULL", fcinfo.flinfo->fn_oid);
+			if (fcinfo->isnull)
+				elog(ERROR, "function %u returned NULL", fcinfo->flinfo->fn_oid);
 
 			hashkey ^= hkey;
 		}
@@ -209,21 +207,21 @@ cdbhash(CdbHash *h, int attno, Datum datum, bool isnull)
 		magic_hash_stash = hashkey;
 		if (!isnull)
 		{
-			FunctionCallInfoData fcinfo;
+			LOCAL_FCINFO(fcinfo, 1);
 			uint32		hkey;
 
-			InitFunctionCallInfoData(fcinfo, &h->hashfuncs[attno - 1], 1,
-									 InvalidOid,
+			InitFunctionCallInfoData(*fcinfo, &h->hashfuncs[attno - 1], 1,
+									 DEFAULT_COLLATION_OID, /* legacy hash functions don't care about collations */
 									 NULL, NULL);
 
-			fcinfo.arg[0] = datum;
-			fcinfo.argnull[0] = false;
+			fcinfo->args[0].value = datum;
+			fcinfo->args[0].isnull = false;
 
-			hkey = DatumGetUInt32(FunctionCallInvoke(&fcinfo));
+			hkey = DatumGetUInt32(FunctionCallInvoke(fcinfo));
 
 			/* Check for null result, since caller is clearly not expecting one */
-			if (fcinfo.isnull)
-				elog(ERROR, "function %u returned NULL", fcinfo.flinfo->fn_oid);
+			if (fcinfo->isnull)
+				elog(ERROR, "function %u returned NULL", fcinfo->flinfo->fn_oid);
 
 			hashkey = hkey;
 		}
@@ -308,7 +306,7 @@ cdbhashrandomseg(int numsegs)
  * This is used when parsing the DISTRIBUTED BY of CREATE TABLE and ALTER TABLE,
  * to determine the operator class to use.
  *
- * Mostly the same as GetIndexOpClass(), but this knows about the
+ * Mostly the same as ResolveOpClass(), but this knows about the
  * gp_use_legacy_hashops GUC, and gives a slightly more appropriate
  * error message if no opclass is found.
  */
@@ -319,8 +317,8 @@ cdb_get_opclass_for_column_def(List *opclassName, Oid attrType)
 
 	if (opclassName)
 	{
-		opclass = GetIndexOpClass(opclassName, attrType,
-								  "hash", HASH_AM_OID);
+		opclass = ResolveOpClass(opclassName, attrType,
+								 "hash", HASH_AM_OID);
 	}
 	else
 	{
@@ -331,7 +329,7 @@ cdb_get_opclass_for_column_def(List *opclassName, Oid attrType)
 			opclass = cdb_default_distribution_opclass_for_type(attrType);
 
 		/*
-		 * Same error message as in GetIndexOpClass, except for the hint, for
+		 * Same error message as in ResolveOpClass, except for the hint, for
 		 * consistency.
 		 */
 		if (!OidIsValid(opclass))
@@ -401,7 +399,7 @@ cdb_hashproc_in_opfamily(Oid opfamily, Oid typeoid)
 	int			i;
 
 	/* First try a simple lookup. */
-	hashfunc = get_opfamily_proc(opfamily, typeoid, typeoid, HASHPROC);
+	hashfunc = get_opfamily_proc(opfamily, typeoid, typeoid, HASHSTANDARD_PROC);
 	if (hashfunc)
 		return hashfunc;
 
@@ -417,7 +415,7 @@ cdb_hashproc_in_opfamily(Oid opfamily, Oid typeoid)
 		HeapTuple	tuple = &catlist->members[i]->tuple;
 		Form_pg_amproc amproc_form = (Form_pg_amproc) GETSTRUCT(tuple);
 
-		if (amproc_form->amprocnum != HASHPROC)
+		if (amproc_form->amprocnum != HASHSTANDARD_PROC)
 			continue;
 
 		if (amproc_form->amproclefttype != amproc_form->amprocrighttype)

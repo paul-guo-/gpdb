@@ -1,6 +1,3 @@
-include: helpers/server_helpers.sql;
-CREATE
-
 -- t0r is the reference table to provide the data distribution info.
 DROP TABLE IF EXISTS t0p;
 DROP
@@ -62,6 +59,8 @@ SELECT segid(2,10) is not null;
  t        
 (1 row)
 
+--enable GDD
+
 -- table to just store the master's data directory path on segment.
 CREATE TABLE datadir(a int, dir text);
 CREATE
@@ -77,13 +76,9 @@ ALTER
 -- situation where session issuing the restart doesn't disappear
 -- itself.
 1U:SELECT pg_ctl(dir, 'restart') from datadir;
- pg_ctl                                                                                               
-------------------------------------------------------------------------------------------------------
- waiting for server to shut down done
-server stopped
-waiting for server to start done
-server started
- 
+ pg_ctl 
+--------
+ OK     
 (1 row)
 -- Start new session on master to make sure it has fully completed
 -- recovery and up and running again.

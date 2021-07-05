@@ -39,13 +39,10 @@ typedef struct FtsProbeInfo
 	volatile int32		done_count;
 } FtsProbeInfo;
 
-#define FTS_MAX_TRANSIENT_STATE 100
-
 typedef struct FtsControlBlock
 {
-	LWLockId		ControlLock;
 	FtsProbeInfo	fts_probe_info;
-	volatile bool	pm_launch_walreceiver;
+	pid_t			fts_probe_pid;
 }	FtsControlBlock;
 
 extern volatile FtsProbeInfo *ftsProbeInfo;
@@ -56,8 +53,6 @@ extern void FtsShmemInit(void);
 extern bool FtsIsSegmentDown(CdbComponentDatabaseInfo *dBInfo);
 extern bool FtsTestSegmentDBIsDown(SegmentDatabaseDescriptor **, int);
 
-extern void ftsLock(void);
-extern void ftsUnlock(void);
 extern void FtsNotifyProber(void);
 extern uint8 getFtsVersion(void);
 #endif   /* CDBFTS_H */

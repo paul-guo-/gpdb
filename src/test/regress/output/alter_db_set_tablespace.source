@@ -11,32 +11,12 @@
 -- end_ignore
 CREATE SCHEMA adst;
 SET search_path TO adst,public;
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record_master() RETURNS VOID AS
-    '@abs_builddir@/regress.so', 'insert_noop_xlog_record'
-LANGUAGE C EXECUTE ON MASTER;
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record_all_segments() RETURNS SETOF VOID AS
-'@abs_builddir@/regress.so', 'insert_noop_xlog_record'
-    LANGUAGE C EXECUTE ON ALL SEGMENTS;
-CREATE OR REPLACE FUNCTION insert_noop_xlog_record() RETURNS VOID AS $$
-BEGIN
-    PERFORM insert_noop_xlog_record_master();
-    PERFORM insert_noop_xlog_record_all_segments();
-END;
-$$LANGUAGE plpgsql;
-CREATE OR REPLACE FUNCTION force_mirrors_to_catch_up() RETURNS VOID AS $$
-BEGIN
-    PERFORM gp_inject_fault('after_xlog_redo_noop', 'sleep', dbid) FROM gp_segment_configuration WHERE role='m';
-    PERFORM insert_noop_xlog_record();
-    PERFORM gp_wait_until_triggered_fault('after_xlog_redo_noop', 1, dbid) FROM gp_segment_configuration WHERE role='m';
-    PERFORM gp_inject_fault('after_xlog_redo_noop', 'reset', dbid) FROM gp_segment_configuration WHERE role='m';
-END;
-$$ LANGUAGE plpgsql;
 CREATE OR REPLACE FUNCTION get_tablespace_version_directory_name()
     RETURNS TEXT
 AS '@abs_builddir@/regress.so', 'get_tablespace_version_directory_name'
     LANGUAGE C;
 -- start_ignore
-CREATE LANGUAGE plpythonu;
+CREATE LANGUAGE plpython3u;
 -- end_ignore
 CREATE OR REPLACE FUNCTION setup_tablespace_location_dir_for_test(tablespace_location_dir text) RETURNS VOID AS $$
 import os;
@@ -48,7 +28,7 @@ except OSError:
     plpy.debug(traceback.format_exc())
     plpy.debug('failed to remove tablespace location directory: %s' % (tablespace_location_dir))
 os.mkdir(tablespace_location_dir)
-$$ LANGUAGE plpythonu;
+$$ LANGUAGE plpython3u;
 \set adst_source_tablespace_location @testtablespace@/adst_source
 \set adst_destination_tablespace_location @testtablespace@/adst_dest
 CREATE or REPLACE FUNCTION setup() RETURNS VOID AS $$
@@ -73,11 +53,11 @@ CREATE OR REPLACE FUNCTION list_db_tablespace(database_name text, tablespace_nam
     ORDER BY gp_segment_id;
 $$ LANGUAGE sql;
 -- start_ignore
-CREATE LANGUAGE plpythonu;
+CREATE LANGUAGE plpython3u;
 -- end_ignore
 CREATE OR REPLACE FUNCTION stat_db_objects(datname text, spcname text)
     RETURNS TABLE (dbid int2, relfilenode_dboid_relative_path text, size int)
-    VOLATILE LANGUAGE plpythonu
+    VOLATILE LANGUAGE plpython3u
 AS
 $fn$
 import os
@@ -235,21 +215,13 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 -- And the dboid directory under the source tablespace directory should remain empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_source_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -354,21 +326,13 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -461,15 +425,17 @@ SELECT * FROM list_db_tablespace('alter_db', 'adst_source_tablespace');
              2 | alter_db | adst_source_tablespace
 (4 rows)
 
--- Ensure that the mirrors including the standby master have removed the dboid dir under the target tablespace.
-SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m';
+-- Ensure for content 0, the mirror has removed the dboid dir under
+-- the target tablespace. We cannot wait for this fault for all
+-- mirrors and standby, as don't know till what stage other primaries
+-- has completed the command when error happens for content 0. If
+-- other primaries end up aborting before starting the directory copy,
+-- replay of abort record will not delete the directory.
+SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m' and content = 0;
  gp_wait_until_triggered_fault 
 -------------------------------
  Success:
- Success:
- Success:
- Success:
-(4 rows)
+(1 row)
 
 -- Then all the files of the database should remain in the dboid directory in the source tablespace directory for all database instances.
 CREATE TEMPORARY TABLE after_alter AS SELECT * FROM stat_db_objects('alter_db', 'adst_source_tablespace');
@@ -479,24 +445,23 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 ------+---------------------------------+------
 (0 rows)
 
+-- Wait for all the mirrors to replay the xlog before checking destination directory
+SELECT force_mirrors_to_catch_up();
+ force_mirrors_to_catch_up 
+---------------------------
+ 
+(1 row)
+
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -597,15 +562,17 @@ SELECT * FROM list_db_tablespace('alter_db', 'adst_source_tablespace');
              2 | alter_db | adst_source_tablespace
 (4 rows)
 
--- Ensure that the mirrors including the standby master have removed the dboid dir under the target tablespace.
-SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m';
+-- Ensure for content 0, the mirror has removed the dboid dir under
+-- the target tablespace. We cannot wait for this fault for all
+-- mirrors and standby, as don't know till what stage other primaries
+-- has completed the command when error happens for content 0. If
+-- other primaries end up aborting before starting the directory copy,
+-- abort record will not delete the directory.
+SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m' and content = 0;
  gp_wait_until_triggered_fault 
 -------------------------------
  Success:
- Success:
- Success:
- Success:
-(4 rows)
+(1 row)
 
 -- Then all the files of the database should remain in the dboid directory in the source tablespace directory for all database instances.
 CREATE TEMPORARY TABLE after_alter AS SELECT * FROM stat_db_objects('alter_db', 'adst_source_tablespace');
@@ -615,24 +582,23 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 ------+---------------------------------+------
 (0 rows)
 
+-- Wait for all the mirrors to replay the xlog before checking destination directory
+SELECT force_mirrors_to_catch_up();
+ force_mirrors_to_catch_up 
+---------------------------
+ 
+(1 row)
+
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -745,21 +711,13 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -881,21 +839,13 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -1008,21 +958,13 @@ NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entr
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -1085,6 +1027,27 @@ SELECT force_mirrors_to_catch_up();
 -- Note: We can't use a temporary table as PANICS wipe them out
 CREATE TABLE before_alter AS SELECT * FROM stat_db_objects('alter_db', 'adst_source_tablespace');
 NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entry.
+-- Skip fts probe such that we prevent the promotion of the mirror of the primary that we induce the panic on.
+SELECT gp_inject_fault_infinite('fts_probe', 'skip', dbid) FROM gp_segment_configuration WHERE role='p' AND content=-1;
+ gp_inject_fault_infinite 
+--------------------------
+ Success:
+(1 row)
+
+-- Force scan to trigger the fault.
+SELECT gp_request_fts_probe_scan();
+ gp_request_fts_probe_scan 
+---------------------------
+ t
+(1 row)
+
+-- Verify the failure should be triggered once.
+SELECT gp_wait_until_triggered_fault('fts_probe', 1, 1);
+ gp_wait_until_triggered_fault 
+-------------------------------
+ Success:
+(1 row)
+
 -- And we track the removal of the dboid dir by all mirrors including the standby master, except the mirror of the primary about to panic.
 SELECT gp_inject_fault('after_drop_database_directories', 'sleep', c.dbid) FROM gp_segment_configuration c WHERE role='m' AND content!=0;
  gp_inject_fault 
@@ -1098,13 +1061,6 @@ SELECT gp_inject_fault('after_drop_database_directories', 'sleep', c.dbid) FROM 
 SELECT gp_inject_fault('start_prepare', 'panic', dbid) FROM gp_segment_configuration WHERE role = 'p' AND content = 0;
  gp_inject_fault 
 -----------------
- Success:
-(1 row)
-
--- Skip fts probe such that we prevent the promotion of the mirror of the primary that we induce the panic on.
-SELECT gp_inject_fault_infinite('fts_probe', 'skip', dbid) FROM gp_segment_configuration WHERE role='p' AND content=-1;
- gp_inject_fault_infinite 
---------------------------
  Success:
 (1 row)
 
@@ -1143,17 +1099,11 @@ SELECT * FROM ((SELECT * FROM before_alter) EXCEPT (SELECT * FROM after_alter)) 
 -- And the dboid directory under the target tablespace directory is empty for all database instances except the primary that panicked and its mirror.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace') WHERE dbid NOT IN (SELECT dbid FROM gp_segment_configuration WHERE content=0);
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -1212,6 +1162,27 @@ SELECT force_mirrors_to_catch_up();
 -- And we record the filesystem state for the database in the source tablespace
 CREATE TABLE before_alter AS SELECT * FROM stat_db_objects('alter_db', 'adst_source_tablespace');
 NOTICE:  Table doesn't have 'DISTRIBUTED BY' clause. Creating a NULL policy entry.
+-- Skip fts probe such that we prevent the promotion of the mirror of the primary that we induce the panic on.
+SELECT gp_inject_fault_infinite('fts_probe', 'skip', dbid) FROM gp_segment_configuration WHERE role='p' AND content=-1;
+ gp_inject_fault_infinite 
+--------------------------
+ Success:
+(1 row)
+
+-- Force scan to trigger the fault.
+SELECT gp_request_fts_probe_scan();
+ gp_request_fts_probe_scan 
+---------------------------
+ t
+(1 row)
+
+-- Verify the failure should be triggered once.
+SELECT gp_wait_until_triggered_fault('fts_probe', 1, 1);
+ gp_wait_until_triggered_fault 
+-------------------------------
+ Success:
+(1 row)
+
 -- And we track the removal of the dboid dir by all mirrors including the standby master.
 SELECT gp_inject_fault('after_drop_database_directories', 'sleep', c.dbid) FROM gp_segment_configuration c WHERE role='m';
  gp_inject_fault 
@@ -1229,13 +1200,6 @@ SELECT gp_inject_fault('after_xlog_xact_prepare_flushed', 'panic', dbid) FROM gp
  Success:
 (1 row)
 
--- Skip fts probe such that we prevent the promotion of the mirror of the primary that we induce the panic on.
-SELECT gp_inject_fault_infinite('fts_probe', 'skip', dbid) FROM gp_segment_configuration WHERE role='p' AND content=-1;
- gp_inject_fault_infinite 
---------------------------
- Success:
-(1 row)
-
 -- When we execute an ALTER DATABASE SET TABLESPACE command on alter_db and the panic is triggered
 ALTER DATABASE alter_db SET TABLESPACE adst_destination_tablespace;
 WARNING:  Any temporary tables for this session have been dropped because the gang was disconnected (session id = 3078)
@@ -1250,14 +1214,15 @@ SELECT * FROM list_db_tablespace('alter_db', 'adst_source_tablespace');
              2 | alter_db | adst_source_tablespace
 (4 rows)
 
--- Ensure that the mirrors including the standby master have removed the dboid dir under the target tablespace, except the mirror of the panicked primary.
-SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m' AND content!=0;
+-- Ensure that the mirrors including the standby master have removed the dboid dir under the target tablespace
+SELECT gp_wait_until_triggered_fault('after_drop_database_directories', 1, dbid) FROM gp_segment_configuration WHERE role='m';
  gp_wait_until_triggered_fault 
 -------------------------------
  Success:
  Success:
  Success:
-(3 rows)
+ Success:
+(4 rows)
 
 -- Then all the files of the database should remain in the dboid directory in the source tablespace directory for all database instances.
 -- Note: Sometimes the pg_internal.init is not yet formed on the recovering primary. It is not important for our test.
@@ -1271,21 +1236,13 @@ SELECT * FROM ((SELECT * FROM before_alter) EXCEPT (SELECT * FROM after_alter)) 
 -- And the dboid directory under the target tablespace directory is empty for all database instances.
 SELECT * FROM stat_db_objects('alter_db', 'adst_destination_tablespace');
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 1
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 2
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 3
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 4
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 5
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 6
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 7
-CONTEXT:  PL/Python function "stat_db_objects"
 NOTICE:  dboid dir for database alter_db does not exist on dbid = 8
-CONTEXT:  PL/Python function "stat_db_objects"
  dbid | relfilenode_dboid_relative_path | size 
 ------+---------------------------------+------
     1 |                                 |     
@@ -1312,12 +1269,8 @@ SELECT force_mirrors_to_catch_up();
 
 -- Final cleanup
 DROP SCHEMA adst CASCADE;
-NOTICE:  drop cascades to 9 other objects
-DETAIL:  drop cascades to function insert_noop_xlog_record_master()
-drop cascades to function insert_noop_xlog_record_all_segments()
-drop cascades to function insert_noop_xlog_record()
-drop cascades to function force_mirrors_to_catch_up()
-drop cascades to function get_tablespace_version_directory_name()
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to function get_tablespace_version_directory_name()
 drop cascades to function setup_tablespace_location_dir_for_test(text)
 drop cascades to function setup()
 drop cascades to function list_db_tablespace(text,text)

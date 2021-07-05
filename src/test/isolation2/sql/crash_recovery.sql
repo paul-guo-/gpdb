@@ -27,8 +27,14 @@
 1:select gp_inject_fault('dtm_broadcast_commit_prepared', 'status', 1);
 1:select gp_inject_fault('transaction_abort_after_distributed_prepared', 'status', 1);
 
--- trigger crash
-1:select gp_inject_fault('before_read_command', 'panic', 1);
+-- trigger crash on QD
+1:select gp_inject_fault('exec_simple_query_start', 'panic', current_setting('gp_dbid')::smallint);
+-- verify master panic happens. The PANIC message does not emit sometimes so
+-- mask it.
+-- start_matchsubs
+-- m/PANIC:  fault triggered, fault name:'exec_simple_query_start' fault type:'panic'\n/
+-- s/PANIC:  fault triggered, fault name:'exec_simple_query_start' fault type:'panic'\n//
+-- end_matchsubs
 1:select 1;
 
 2<:

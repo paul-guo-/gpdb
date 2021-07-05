@@ -5,7 +5,7 @@
  *
  *
  * Portions Copyright (c) 2006-2017, Greenplum inc.
- * Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+ * Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
  *
  *
  * IDENTIFICATION
@@ -18,6 +18,7 @@
 
 #include "cdb/memquota.h"
 #include "catalog/pg_resgroup.h"
+#include "utils/session_state.h"
 
 /*
  * The max number of resource groups.
@@ -93,12 +94,15 @@ typedef struct ResGroupCaps
 extern bool						gp_log_resgroup_memory;
 extern int						gp_resgroup_memory_policy_auto_fixed_mem;
 extern bool						gp_resgroup_print_operator_memory_limits;
+extern bool						gp_resgroup_debug_wait_queue;
 extern int						memory_spill_ratio;
 
 extern int gp_resource_group_cpu_priority;
 extern double gp_resource_group_cpu_limit;
+extern bool gp_resource_group_cpu_ceiling_enforcement;
 extern double gp_resource_group_memory_limit;
 extern bool gp_resource_group_bypass;
+extern int gp_resource_group_queuing_timeout;
 
 /*
  * Non-GUC global variables.
@@ -161,7 +165,7 @@ extern void DeserializeResGroupInfo(struct ResGroupCaps *capsOut,
 extern bool ShouldAssignResGroupOnMaster(void);
 extern bool ShouldUnassignResGroup(void);
 extern void AssignResGroupOnMaster(void);
-extern void UnassignResGroup(void);
+extern void UnassignResGroup(bool releaseSlot);
 extern void SwitchResGroupOnSegment(const char *buf, int len);
 
 extern bool ResGroupIsAssigned(void);
@@ -214,6 +218,15 @@ extern void CpusetDifference(char *cpuset1, const char *cpuset2, int len);
 extern bool CpusetIsEmpty(const char *cpuset);
 extern void SetCpusetEmpty(char *cpuset, int cpusetSize);
 extern bool EnsureCpusetIsAvailable(int elevel);
+extern bool IsGroupInRedZone(void);
+extern void ResGroupGetMemoryRunawayInfo(StringInfo str);
+extern Oid SessionGetResGroupId(SessionState *session);
+extern int32 SessionGetResGroupGlobalShareMemUsage(SessionState *session);
+extern void HandleMoveResourceGroup(void);
+extern void ResGroupMoveQuery(int sessionId, Oid groupId, const char *groupName);
+extern int32 ResGroupGetSessionMemUsage(int sessionId);
+extern int32 ResGroupGetGroupAvailableMem(Oid groupId);
+extern Oid ResGroupGetGroupIdBySessionId(int sessionId);
 
 #define LOG_RESGROUP_DEBUG(...) \
 	do {if (Debug_resource_group) elog(__VA_ARGS__); } while(false);

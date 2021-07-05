@@ -3,7 +3,7 @@
 # GNUmakefile--
 #    Makefile for src/test/regress (the regression tests)
 #
-# Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+# Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
 # Portions Copyright (c) 1994, Regents of the University of California
 #
 # src/test/regress/GNUmakefile
@@ -23,9 +23,6 @@ ifdef TEMP_CONFIG
 TEMP_CONF += --temp-config=$(TEMP_CONFIG)
 endif
 
-# Greenplum regression tests use $PGPORT
-PGPORT?=15432
-
 # maximum simultaneous connections for parallel tests
 MAXCONNOPT =
 ifdef MAX_CONNECTIONS
@@ -37,19 +34,13 @@ EXTRADEFS = '-DHOST_TUPLE="$(host_tuple)"' \
 	'-DSHELLPROG="$(SHELL)"' \
 	'-DDLSUFFIX="$(DLSUFFIX)"'
 
-
-# The frontend doesn't need everything that's in LIBS, some are backend only
-LIBS := $(filter-out -lresolv -lbz2, $(LIBS))
-# This program isn't interactive, so doesn't need these
-LIBS := $(filter-out -lreadline -ledit -ltermcap -lncurses -lcurses -lcurl -lssl -lz, $(LIBS))
-
 ##
 ## Prepare for tests
 ##
 
 # Build regression test driver
 
-all: pg_regress$(X) scan_flaky_fault_injectors
+all: pg_regress$(X)
 
 pg_regress$(X): pg_regress.o pg_regress_main.o $(WIN32RES) | submake-libpgport
 	$(CC) $(CFLAGS) $^ $(LDFLAGS) $(LDFLAGS_EX) $(LIBS) -o $@
@@ -57,21 +48,19 @@ pg_regress$(X): pg_regress.o pg_regress_main.o $(WIN32RES) | submake-libpgport
 # dependencies ensure that path changes propagate
 pg_regress.o: pg_regress.c $(top_builddir)/src/port/pg_config_paths.h
 pg_regress.o: override CPPFLAGS += -I$(top_builddir)/src/port $(EXTRADEFS)
-regress_gp.o: override CFLAGS += -I$(top_builddir)/src/interfaces/libpq
+regress_gp.o: override CPPFLAGS += -I$(libpq_srcdir)
 regress_gp.o: override LDFLAGS += -L$(top_builddir)/src/interfaces/libpq
-
-.PHONY: scan_flaky_fault_injectors
-scan_flaky_fault_injectors:
-	$(top_builddir)/src/test/regress/scan_flaky_fault_injectors.sh
 
 twophase_pqexecparams: twophase_pqexecparams.c
 	$(CC) $(CPPFLAGS) -I$(top_builddir)/src/interfaces/libpq -L$(GPHOME)/lib -L$(top_builddir)/src/interfaces/libpq  -o $@ $< -lpq
 
-$(top_builddir)/src/port/pg_config_paths.h: $(top_builddir)/src/Makefile.global
+# note: because of the submake dependency, this rule's action is really a no-op
+$(top_builddir)/src/port/pg_config_paths.h: | submake-libpgport
 	$(MAKE) -C $(top_builddir)/src/port pg_config_paths.h
 
 install: all installdirs
 	$(INSTALL_PROGRAM) pg_regress$(X) '$(DESTDIR)$(pgxsdir)/$(subdir)/pg_regress$(X)'
+	$(INSTALL_PROGRAM) regress.so '$(DESTDIR)$(pkglibdir)/regress.so'
 	$(INSTALL_PROGRAM) gpdiff.pl '$(DESTDIR)$(pgxsdir)/$(subdir)/gpdiff.pl'
 	$(INSTALL_PROGRAM) gpstringsubs.pl '$(DESTDIR)$(pgxsdir)/$(subdir)/gpstringsubs.pl'
 	$(INSTALL_PROGRAM) atmsort.pl '$(DESTDIR)$(pgxsdir)/$(subdir)/atmsort.pl'
@@ -79,11 +68,12 @@ install: all installdirs
 	$(INSTALL_PROGRAM) explain.pl '$(DESTDIR)$(pgxsdir)/$(subdir)/explain.pl'
 	$(INSTALL_PROGRAM) explain.pm '$(DESTDIR)$(pgxsdir)/$(subdir)/explain.pm'
 	$(INSTALL_PROGRAM) GPTest.pm '$(DESTDIR)$(pgxsdir)/$(subdir)/GPTest.pm'
-
+	$(INSTALL_PROGRAM) scan_flaky_fault_injectors.sh '$(DESTDIR)$(pgxsdir)/$(subdir)/scan_flaky_fault_injectors.sh'
 installdirs:
 	$(MKDIR_P) '$(DESTDIR)$(pgxsdir)/$(subdir)'
 
 uninstall:
+	rm -f '$(DESTDIR)$(pkglibdir)/regress.so'
 	rm -f '$(DESTDIR)$(pgxsdir)/$(subdir)/pg_regress$(X)'
 	rm -f '$(DESTDIR)$(pgxsdir)/$(subdir)/gpdiff.pl'
 	rm -f '$(DESTDIR)$(pgxsdir)/$(subdir)/gpstringsubs.pl'
@@ -99,11 +89,14 @@ uninstall:
 NAME = regress
 OBJS = $(WIN32RES) regress.o
 
-OBJS += regress_gp.o partindex.o workfile_mgr_test.o
+OBJS += regress_gp.o
 
 include $(top_srcdir)/src/Makefile.shlib
 
 all: all-lib
+
+# Ensure parallel safety if a build is started in this directory
+$(OBJS): | submake-libpgport submake-generated-headers
 
 # Test input and expected files.  These are created by pg_regress itself, so we
 # don't have a rule to create them.  We do need rules to clean them however.
@@ -146,7 +139,7 @@ $(top_builddir)/contrib/spi/refint$(DLSUFFIX): | submake-contrib-spi ;
 
 $(top_builddir)/contrib/spi/autoinc$(DLSUFFIX): | submake-contrib-spi ;
 
-submake-contrib-spi:
+submake-contrib-spi: | submake-libpgport submake-generated-headers
 	$(MAKE) -C $(top_builddir)/contrib/spi
 
 .PHONY: submake-contrib-spi
@@ -183,13 +176,13 @@ query_info_hook_test:
 ## Run tests
 ##
 
-REGRESS_OPTS = --dlpath=. --init-file=$(srcdir)/init_file $(EXTRA_REGRESS_OPTS) --load-extension=gp_inject_fault
+REGRESS_OPTS = --dlpath=. --max-concurrent-tests=20 --init-file=$(srcdir)/init_file $(EXTRA_REGRESS_OPTS)
 
 check: all tablespace-setup
-	$(pg_regress_check) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule $(MAXCONNOPT) $(TEMP_CONF) $(EXTRA_TESTS)
+	$(pg_regress_check) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule $(MAXCONNOPT) $(EXTRA_TESTS)
 
-check-tests: all tablespace-setup
-	$(pg_regress_check) $(REGRESS_OPTS) $(MAXCONNOPT) $(TEMP_CONF) $(TESTS) $(EXTRA_TESTS)
+check-tests: all tablespace-setup | temp-install
+	$(pg_regress_check) $(REGRESS_OPTS) $(MAXCONNOPT) $(TESTS) $(EXTRA_TESTS)
 
 #installcheck: all tablespace-setup
 #	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/serial_schedule $(EXTRA_TESTS)
@@ -216,11 +209,6 @@ installcheck-icudp: all tablespace-setup
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/icudp_schedule --dbname=regression_icudp $(EXTRA_TESTS)
 endif
 
-testbouncer: all
-	bash -c "bouncer/setup.sh"
-	$(pg_regress_check)  --port=65432 --schedule=./minimal_schedule --host=`hostname` $(EXTRA_TESTS)
-	bash -c "bouncer/stop.sh"
-
 standbycheck: all
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/standby_schedule  $(EXTRA_TESTS)
 
@@ -233,7 +221,7 @@ runtest-parallel: installcheck-parallel
 bigtest: all tablespace-setup
 	$(pg_regress_installcheck) $(REGRESS_OPTS) --schedule=$(srcdir)/serial_schedule numeric_big
 
-bigcheck: all tablespace-setup
+bigcheck: all tablespace-setup | temp-install
 	$(pg_regress_check) $(REGRESS_OPTS) --schedule=$(srcdir)/parallel_schedule $(MAXCONNOPT) numeric_big
 
 ##

@@ -48,9 +48,9 @@
         errors.</note>
       <p>For readable external tables, if load files are compressed using <codeph>gzip</codeph> or
           <codeph>bzip2</codeph> (have a <codeph>.gz</codeph> or <codeph>.bz2</codeph> file
-        extension), <codeph>gpfdist</codeph> uncompresses the files before loading. For writable
-        external tables, <codeph>gpfdist</codeph> compresses the data using <codeph>gzip</codeph> if
-        the target file has a <codeph>.gz</codeph> extension.</p>
+        extension), <codeph>gpfdist</codeph> uncompresses the data while loading the data (on the
+        fly). For writable external tables, <codeph>gpfdist</codeph> compresses the data using
+          <codeph>gzip</codeph> if the target file has a <codeph>.gz</codeph> extension.</p>
       <note type="note">Compression is not supported for readable and writeable external tables when
         the <codeph>gpfdist</codeph> utility runs on Windows platforms.</note>
       <p>When reading or writing data with the <codeph>gpfdist</codeph> or <codeph>gpfdists</codeph>
@@ -213,6 +213,11 @@
         </ul>
         <note type="warning">Disabling SSL certificate authentication exposes a security risk by not
           validating the <codeph>gpfdists</codeph> SSL certificate. </note></p>
+      <p>You can set the server configuration parameter <codeph><xref
+            href="../../ref_guide/config_params/guc-list.xml#gpfdist_retry_timeout"/></codeph> to
+        control the time that Greenplum Database waits before returning an error when a
+          <codeph>gpfdist</codeph> server does not respond while Greenplum Database is attempting to
+        write data to <codeph>gpfdist</codeph>. The default is 300 seconds (5 minutes).</p>
       <p>If the <codeph>gpfdist</codeph> utility hangs with no read or write activity occurring, you
         can generate a core dump the next time a hang occurs to help debug the issue. Set the
         environment variable <codeph>GPFDIST_WATCHDOG_TIMER</codeph> to the number of seconds of no

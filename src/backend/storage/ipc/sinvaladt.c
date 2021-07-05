@@ -3,7 +3,7 @@
  * sinvaladt.c
  *	  POSTGRES shared cache invalidation data manager.
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -240,7 +240,7 @@ CreateSharedInvalidationState(void)
 	/* Mark all backends inactive, and initialize nextLXID */
 	for (i = 0; i < shmInvalBuffer->maxBackends; i++)
 	{
-		shmInvalBuffer->procState[i].procPid = 0;		/* inactive */
+		shmInvalBuffer->procState[i].procPid = 0;	/* inactive */
 		shmInvalBuffer->procState[i].proc = NULL;
 		shmInvalBuffer->procState[i].nextMsgNum = 0;	/* meaningless */
 		shmInvalBuffer->procState[i].resetState = false;
@@ -271,7 +271,7 @@ SharedInvalBackendInit(bool sendOnly)
 	/* Look for a free entry in the procState array */
 	for (index = 0; index < segP->lastBackend; index++)
 	{
-		if (segP->procState[index].procPid == 0)		/* inactive slot? */
+		if (segP->procState[index].procPid == 0)	/* inactive slot? */
 		{
 			stateP = &segP->procState[index];
 			break;
@@ -485,14 +485,9 @@ SIInsertDataEntries(const SharedInvalidationMessage *data, int n)
 		}
 
 		/* Update current value of maxMsgNum using spinlock */
-		{
-			/* use volatile pointer to prevent code rearrangement */
-			volatile SISeg *vsegP = segP;
-
-			SpinLockAcquire(&vsegP->msgnumLock);
-			vsegP->maxMsgNum = max;
-			SpinLockRelease(&vsegP->msgnumLock);
-		}
+		SpinLockAcquire(&segP->msgnumLock);
+		segP->maxMsgNum = max;
+		SpinLockRelease(&segP->msgnumLock);
 
 		/*
 		 * Now that the maxMsgNum change is globally visible, we give everyone
@@ -579,14 +574,9 @@ SIGetDataEntries(SharedInvalidationMessage *data, int datasize)
 	stateP->hasMessages = false;
 
 	/* Fetch current value of maxMsgNum using spinlock */
-	{
-		/* use volatile pointer to prevent code rearrangement */
-		volatile SISeg *vsegP = segP;
-
-		SpinLockAcquire(&vsegP->msgnumLock);
-		max = vsegP->maxMsgNum;
-		SpinLockRelease(&vsegP->msgnumLock);
-	}
+	SpinLockAcquire(&segP->msgnumLock);
+	max = segP->maxMsgNum;
+	SpinLockRelease(&segP->msgnumLock);
 
 	if (stateP->resetState)
 	{
@@ -637,7 +627,7 @@ SIGetDataEntries(SharedInvalidationMessage *data, int datasize)
  * SICleanupQueue
  *		Remove messages that have been consumed by all active backends
  *
- * callerHasWriteLock is TRUE if caller is holding SInvalWriteLock.
+ * callerHasWriteLock is true if caller is holding SInvalWriteLock.
  * minFree is the minimum number of message slots to make free.
  *
  * Possible side effects of this routine include marking one or more

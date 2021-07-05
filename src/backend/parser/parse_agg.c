@@ -3,7 +3,7 @@
  * parse_agg.c
  *	  handle aggregates in parser
  *
- * Portions Copyright (c) 1996-2015, PostgreSQL Global Development Group
+ * Portions Copyright (c) 1996-2019, PostgreSQL Global Development Group
  * Portions Copyright (c) 1994, Regents of the University of California
  *
  *
@@ -19,8 +19,7 @@
 #include "catalog/pg_type.h"
 #include "nodes/makefuncs.h"
 #include "nodes/nodeFuncs.h"
-#include "optimizer/tlist.h"
-#include "optimizer/walkers.h"
+#include "optimizer/optimizer.h"
 #include "parser/parse_agg.h"
 #include "parser/parse_clause.h"
 #include "parser/parse_coerce.h"
@@ -29,8 +28,6 @@
 #include "rewrite/rewriteManip.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
-
-#include "optimizer/walkers.h"
 
 
 typedef struct
@@ -45,7 +42,7 @@ typedef struct
 {
 	ParseState *pstate;
 	Query	   *qry;
-	PlannerInfo *root;
+	bool		hasJoinRTEs;
 	List	   *groupClauses;
 	List	   *groupClauseCommonVars;
 	bool		have_non_var_grouping;
@@ -59,37 +56,37 @@ typedef struct
 	int sublevels_up;
 } checkHasGroupExtFuncs_context;
 
-static int check_agg_arguments(ParseState *pstate,
-					List *directargs,
-					List *args,
-					Expr *filter);
+static int	check_agg_arguments(ParseState *pstate,
+								List *directargs,
+								List *args,
+								Expr *filter);
 static bool check_agg_arguments_walker(Node *node,
-						   check_agg_arguments_context *context);
+									   check_agg_arguments_context *context);
 static void check_ungrouped_columns(Node *node, ParseState *pstate, Query *qry,
-						List *groupClauses, List *groupClauseVars,
-						bool have_non_var_grouping,
-						List **func_grouped_rels);
+									List *groupClauses, List *groupClauseVars,
+									bool have_non_var_grouping,
+									List **func_grouped_rels);
 static bool check_ungrouped_columns_walker(Node *node,
-							   check_ungrouped_columns_context *context);
-
+										   check_ungrouped_columns_context *context);
 static void finalize_grouping_exprs(Node *node, ParseState *pstate, Query *qry,
-						List *groupClauses, PlannerInfo *root,
-						bool have_non_var_grouping);
+									List *groupClauses, bool hasJoinRTEs,
+									bool have_non_var_grouping);
 static bool finalize_grouping_exprs_walker(Node *node,
-							   check_ungrouped_columns_context *context);
+										   check_ungrouped_columns_context *context);
 static void check_agglevels_and_constraints(ParseState *pstate, Node *expr);
 static List *expand_groupingset_node(GroupingSet *gs);
 static Node *make_agg_arg(Oid argtype, Oid argcollation);
+
 
 /*
  * transformAggregateCall -
  *		Finish initial transformation of an aggregate call
  *
  * parse_func.c has recognized the function as an aggregate, and has set up
- * all the fields of the Aggref except aggdirectargs, args, aggorder,
- * aggdistinct and agglevelsup.  The passed-in args list has been through
- * standard expression transformation and type coercion to match the agg's
- * declared arg types, while the passed-in aggorder list hasn't been
+ * all the fields of the Aggref except aggargtypes, aggdirectargs, args,
+ * aggorder, aggdistinct and agglevelsup.  The passed-in args list has been
+ * through standard expression transformation and type coercion to match the
+ * agg's declared arg types, while the passed-in aggorder list hasn't been
  * transformed at all.
  *
  * Here we separate the args list into direct and aggregated args, storing the
@@ -110,12 +107,25 @@ void
 transformAggregateCall(ParseState *pstate, Aggref *agg,
 					   List *args, List *aggorder, bool agg_distinct)
 {
+	List	   *argtypes = NIL;
 	List	   *tlist = NIL;
 	List	   *torder = NIL;
 	List	   *tdistinct = NIL;
 	AttrNumber	attno = 1;
 	int			save_next_resno;
 	ListCell   *lc;
+
+	/*
+	 * Before separating the args into direct and aggregated args, make a list
+	 * of their data type OIDs for use later.
+	 */
+	foreach(lc, args)
+	{
+		Expr	   *arg = (Expr *) lfirst(lc);
+
+		argtypes = lappend_oid(argtypes, exprType((Node *) arg));
+	}
+	agg->aggargtypes = argtypes;
 
 	if (AGGKIND_IS_ORDERED_SET(agg->aggkind))
 	{
@@ -149,8 +159,7 @@ transformAggregateCall(ParseState *pstate, Aggref *agg,
 			tlist = lappend(tlist, tle);
 
 			torder = addTargetToSortList(pstate, tle,
-										 torder, tlist, sortby,
-										 true /* fix unknowns */ );
+										 torder, tlist, sortby);
 		}
 
 		/* Never any DISTINCT in an ordered-set agg */
@@ -190,7 +199,6 @@ transformAggregateCall(ParseState *pstate, Aggref *agg,
 									 aggorder,
 									 &tlist,
 									 EXPR_KIND_ORDER_BY,
-									 true /* fix unknowns */ ,
 									 true /* force SQL99 rules */ );
 
 		/*
@@ -409,6 +417,13 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 		case EXPR_KIND_WHERE:
 			errkind = true;
 			break;
+		case EXPR_KIND_POLICY:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in policy expressions");
+			else
+				err = _("grouping operations are not allowed in policy expressions");
+
+			break;
 		case EXPR_KIND_HAVING:
 			/* okay */
 			break;
@@ -433,6 +448,13 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 				err = _("aggregate functions are not allowed in window ROWS");
 			else
 				err = _("grouping operations are not allowed in window ROWS");
+
+			break;
+		case EXPR_KIND_WINDOW_FRAME_GROUPS:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in window GROUPS");
+			else
+				err = _("grouping operations are not allowed in window GROUPS");
 
 			break;
 		case EXPR_KIND_SELECT_TARGET:
@@ -460,6 +482,7 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 			errkind = true;
 			break;
 		case EXPR_KIND_VALUES:
+		case EXPR_KIND_VALUES_SINGLE:
 			errkind = true;
 			break;
 		case EXPR_KIND_CHECK_CONSTRAINT:
@@ -514,11 +537,46 @@ check_agglevels_and_constraints(ParseState *pstate, Node *expr)
 				err = _("grouping operations are not allowed in trigger WHEN conditions");
 
 			break;
-		case EXPR_KIND_PARTITION_EXPRESSION:
-			err = _("aggregate functions are not allowed in partition key expression");
-
 		case EXPR_KIND_SCATTER_BY:
 			/* okay */
+			break;
+		case EXPR_KIND_PARTITION_BOUND:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in partition bound");
+			else
+				err = _("grouping operations are not allowed in partition bound");
+
+			break;
+		case EXPR_KIND_PARTITION_EXPRESSION:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in partition key expressions");
+			else
+				err = _("grouping operations are not allowed in partition key expressions");
+
+			break;
+		case EXPR_KIND_GENERATED_COLUMN:
+
+			if (isAgg)
+				err = _("aggregate functions are not allowed in column generation expressions");
+			else
+				err = _("grouping operations are not allowed in column generation expressions");
+
+			break;
+
+		case EXPR_KIND_CALL_ARGUMENT:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in CALL arguments");
+			else
+				err = _("grouping operations are not allowed in CALL arguments");
+
+			break;
+
+		case EXPR_KIND_COPY_WHERE:
+			if (isAgg)
+				err = _("aggregate functions are not allowed in COPY FROM WHERE conditions");
+			else
+				err = _("grouping operations are not allowed in COPY FROM WHERE conditions");
+
 			break;
 
 			/*
@@ -653,15 +711,15 @@ check_agg_arguments(ParseState *pstate,
 					(errcode(ERRCODE_GROUPING_ERROR),
 					 errmsg("outer-level aggregate cannot contain a lower-level variable in its direct arguments"),
 					 parser_errposition(pstate,
-									 locate_var_of_level((Node *) directargs,
-													context.min_varlevel))));
+										locate_var_of_level((Node *) directargs,
+															context.min_varlevel))));
 		if (context.min_agglevel >= 0 && context.min_agglevel <= agglevel)
 			ereport(ERROR,
 					(errcode(ERRCODE_GROUPING_ERROR),
 					 errmsg("aggregate function calls cannot be nested"),
 					 parser_errposition(pstate,
-									 locate_agg_of_level((Node *) directargs,
-													context.min_agglevel))));
+										locate_agg_of_level((Node *) directargs,
+															context.min_agglevel))));
 	}
 	return agglevel;
 }
@@ -733,13 +791,27 @@ check_agg_arguments_walker(Node *node,
 		}
 		/* Continue and descend into subtree */
 	}
-	/* We can throw error on sight for a window function */
-	if (IsA(node, WindowFunc) && context->sublevels_up == 0)
-		ereport(ERROR,
-				(errcode(ERRCODE_GROUPING_ERROR),
-				 errmsg("aggregate function calls cannot contain window function calls"),
-				 parser_errposition(context->pstate,
-									((WindowFunc *) node)->location)));
+	/*
+	 * SRFs and window functions can be rejected immediately, unless we are
+	 * within a sub-select within the aggregate's arguments; in that case
+	 * they're OK.
+	 */
+	if (context->sublevels_up == 0)
+	{
+		if ((IsA(node, FuncExpr) &&((FuncExpr *) node)->funcretset) ||
+			(IsA(node, OpExpr) &&((OpExpr *) node)->opretset))
+			ereport(ERROR,
+					(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+					 errmsg("aggregate function calls cannot contain set-returning function calls"),
+					 errhint("You might be able to move the set-returning function into a LATERAL FROM item."),
+					 parser_errposition(context->pstate, exprLocation(node))));
+		if (IsA(node, WindowFunc))
+			ereport(ERROR,
+					(errcode(ERRCODE_GROUPING_ERROR),
+					 errmsg("aggregate function calls cannot contain window function calls"),
+					 parser_errposition(context->pstate,
+										((WindowFunc *) node)->location)));
+	}
 	if (IsA(node, Query))
 	{
 		/* Recurse into subselects */
@@ -792,7 +864,7 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 				(errcode(ERRCODE_WINDOWING_ERROR),
 				 errmsg("window function calls cannot be nested"),
 				 parser_errposition(pstate,
-								  locate_windowfunc((Node *) wfunc->args))));
+									locate_windowfunc((Node *) wfunc->args))));
 
 	/*
 	 * Check to see if the window function is in an invalid place within the
@@ -828,6 +900,9 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 		case EXPR_KIND_WHERE:
 			errkind = true;
 			break;
+		case EXPR_KIND_POLICY:
+			err = _("window functions are not allowed in policy expressions");
+			break;
 		case EXPR_KIND_HAVING:
 			errkind = true;
 			break;
@@ -838,6 +913,7 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 		case EXPR_KIND_WINDOW_ORDER:
 		case EXPR_KIND_WINDOW_FRAME_RANGE:
 		case EXPR_KIND_WINDOW_FRAME_ROWS:
+		case EXPR_KIND_WINDOW_FRAME_GROUPS:
 			err = _("window functions are not allowed in window definitions");
 			break;
 		case EXPR_KIND_SELECT_TARGET:
@@ -865,6 +941,7 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 			errkind = true;
 			break;
 		case EXPR_KIND_VALUES:
+		case EXPR_KIND_VALUES_SINGLE:
 			errkind = true;
 			break;
 		case EXPR_KIND_CHECK_CONSTRAINT:
@@ -890,12 +967,23 @@ transformWindowFuncCall(ParseState *pstate, WindowFunc *wfunc,
 		case EXPR_KIND_TRIGGER_WHEN:
 			err = _("window functions are not allowed in trigger WHEN conditions");
 			break;
-		case EXPR_KIND_PARTITION_EXPRESSION:
-			err = _("window functions are not allowed in partition key expression");
-			break;
-
 		case EXPR_KIND_SCATTER_BY:
 			/* okay */
+			break;
+		case EXPR_KIND_PARTITION_BOUND:
+			err = _("window functions are not allowed in partition bound");
+			break;
+		case EXPR_KIND_PARTITION_EXPRESSION:
+			err = _("window functions are not allowed in partition key expressions");
+			break;
+		case EXPR_KIND_CALL_ARGUMENT:
+			err = _("window functions are not allowed in CALL arguments");
+			break;
+		case EXPR_KIND_COPY_WHERE:
+			err = _("window functions are not allowed in COPY FROM WHERE conditions");
+			break;
+		case EXPR_KIND_GENERATED_COLUMN:
+			err = _("window functions are not allowed in column generation expressions");
 			break;
 
 			/*
@@ -1031,7 +1119,6 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 	ListCell   *l;
 	bool		hasJoinRTEs;
 	bool		hasSelfRefRTEs;
-	PlannerInfo *root = NULL;
 	Node	   *clause;
 
 	/* This should only be called if we found aggregates or grouping */
@@ -1052,11 +1139,11 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 		if (!gsets)
 			ereport(ERROR,
 					(errcode(ERRCODE_STATEMENT_TOO_COMPLEX),
-					 errmsg("too many grouping sets present (max 4096)"),
+					 errmsg("too many grouping sets present (maximum 4096)"),
 					 parser_errposition(pstate,
 										qry->groupClause
-									? exprLocation((Node *) qry->groupClause)
-							   : exprLocation((Node *) qry->groupingSets))));
+										? exprLocation((Node *) qry->groupClause)
+										: exprLocation((Node *) qry->groupingSets))));
 
 		/*
 		 * The intersection will often be empty, so help things along by
@@ -1122,20 +1209,11 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 	 * If there are join alias vars involved, we have to flatten them to the
 	 * underlying vars, so that aliased and unaliased vars will be correctly
 	 * taken as equal.  We can skip the expense of doing this if no rangetable
-	 * entries are RTE_JOIN kind. We use the planner's flatten_join_alias_vars
-	 * routine to do the flattening; it wants a PlannerInfo root node, which
-	 * fortunately can be mostly dummy.
+	 * entries are RTE_JOIN kind.
 	 */
 	if (hasJoinRTEs)
-	{
-		root = makeNode(PlannerInfo);
-		root->parse = qry;
-		root->planner_cxt = CurrentMemoryContext;
-		root->hasJoinRTEs = true;
-
-		groupClauses = (List *) flatten_join_alias_vars(root,
-													  (Node *) groupClauses);
-	}
+		groupClauses = (List *) flatten_join_alias_vars(qry,
+														(Node *) groupClauses);
 
 	/*
 	 * Detect whether any of the grouping expressions aren't simple Vars; if
@@ -1175,10 +1253,10 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 	 */
 	clause = (Node *) qry->targetList;
 	finalize_grouping_exprs(clause, pstate, qry,
-							groupClauses, root,
+							groupClauses, hasJoinRTEs,
 							have_non_var_grouping);
 	if (hasJoinRTEs)
-		clause = flatten_join_alias_vars(root, clause);
+		clause = flatten_join_alias_vars(qry, clause);
 	check_ungrouped_columns(clause, pstate, qry,
 							groupClauses, groupClauseCommonVars,
 							have_non_var_grouping,
@@ -1186,10 +1264,10 @@ parseCheckAggregates(ParseState *pstate, Query *qry)
 
 	clause = (Node *) qry->havingQual;
 	finalize_grouping_exprs(clause, pstate, qry,
-							groupClauses, root,
+							groupClauses, hasJoinRTEs,
 							have_non_var_grouping);
 	if (hasJoinRTEs)
-		clause = flatten_join_alias_vars(root, clause);
+		clause = flatten_join_alias_vars(qry, clause);
 	check_ungrouped_columns(clause, pstate, qry,
 							groupClauses, groupClauseCommonVars,
 							have_non_var_grouping,
@@ -1237,7 +1315,7 @@ check_ungrouped_columns(Node *node, ParseState *pstate, Query *qry,
 
 	context.pstate = pstate;
 	context.qry = qry;
-	context.root = NULL;
+	context.hasJoinRTEs = false;	/* assume caller flattened join Vars */
 	context.groupClauses = groupClauses;
 	context.groupClauseCommonVars = groupClauseCommonVars;
 	context.have_non_var_grouping = have_non_var_grouping;
@@ -1359,7 +1437,7 @@ check_ungrouped_columns_walker(Node *node,
 					gvar->varno == var->varno &&
 					gvar->varattno == var->varattno &&
 					gvar->varlevelsup == 0)
-					return false;		/* acceptable, we're okay */
+					return false;	/* acceptable, we're okay */
 			}
 		}
 
@@ -1447,14 +1525,14 @@ check_ungrouped_columns_walker(Node *node,
  */
 static void
 finalize_grouping_exprs(Node *node, ParseState *pstate, Query *qry,
-						List *groupClauses, PlannerInfo *root,
+						List *groupClauses, bool hasJoinRTEs,
 						bool have_non_var_grouping)
 {
 	check_ungrouped_columns_context context;
 
 	context.pstate = pstate;
 	context.qry = qry;
-	context.root = root;
+	context.hasJoinRTEs = hasJoinRTEs;
 	context.groupClauses = groupClauses;
 	context.groupClauseCommonVars = NIL;
 	context.have_non_var_grouping = have_non_var_grouping;
@@ -1527,8 +1605,8 @@ finalize_grouping_exprs_walker(Node *node,
 				Node	   *expr = lfirst(lc);
 				Index		ref = 0;
 
-				if (context->root)
-					expr = flatten_join_alias_vars(context->root, expr);
+				if (context->hasJoinRTEs)
+					expr = flatten_join_alias_vars(context->qry, expr);
 
 				/*
 				 * Each expression must match a grouping entry at the current
@@ -1845,26 +1923,11 @@ get_aggregate_argtypes(Aggref *aggref, Oid *inputTypes)
 	int			numArguments = 0;
 	ListCell   *lc;
 
-	/* Any direct arguments of an ordered-set aggregate come first */
-	foreach(lc, aggref->aggdirectargs)
+	Assert(list_length(aggref->aggargtypes) <= FUNC_MAX_ARGS);
+
+	foreach(lc, aggref->aggargtypes)
 	{
-		Node	   *expr = (Node *) lfirst(lc);
-
-		inputTypes[numArguments] = exprType(expr);
-		numArguments++;
-	}
-
-	/* Now get the regular (aggregated) arguments */
-	foreach(lc, aggref->args)
-	{
-		TargetEntry *tle = (TargetEntry *) lfirst(lc);
-
-		/* Ignore ordering columns of a plain aggregate */
-		if (tle->resjunk)
-			continue;
-
-		inputTypes[numArguments] = exprType((Node *) tle->expr);
-		numArguments++;
+		inputTypes[numArguments++] = lfirst_oid(lc);
 	}
 
 	return numArguments;
@@ -1877,8 +1940,8 @@ get_aggregate_argtypes(Aggref *aggref, Oid *inputTypes)
  * This function resolves a polymorphic aggregate's state datatype.
  * It must be passed the aggtranstype from the aggregate's catalog entry,
  * as well as the actual argument types extracted by get_aggregate_argtypes.
- * (We could fetch these values internally, but for all existing callers that
- * would just duplicate work the caller has to do too, so we pass them in.)
+ * (We could fetch pg_aggregate.aggtranstype internally, but all existing
+ * callers already have the value at hand, so we make them pass it.)
  */
 Oid
 resolve_aggregate_transtype(Oid aggfuncid,
@@ -1912,78 +1975,54 @@ resolve_aggregate_transtype(Oid aggfuncid,
 }
 
 /*
- * Create expression trees for the transition and final functions
- * of an aggregate.  These are needed so that polymorphic functions
- * can be used within an aggregate --- without the expression trees,
- * such functions would not know the datatypes they are supposed to use.
- * (The trees will never actually be executed, however, so we can skimp
- * a bit on correctness.)
+ * Create an expression tree for the transition function of an aggregate.
+ * This is needed so that polymorphic functions can be used within an
+ * aggregate --- without the expression tree, such functions would not know
+ * the datatypes they are supposed to use.  (The trees will never actually
+ * be executed, however, so we can skimp a bit on correctness.)
  *
- * agg_input_types, agg_state_type, agg_result_type identify the input,
- * transition, and result types of the aggregate.  These should all be
- * resolved to actual types (ie, none should ever be ANYELEMENT etc).
+ * agg_input_types and agg_state_type identifies the input types of the
+ * aggregate.  These should be resolved to actual types (ie, none should
+ * ever be ANYELEMENT etc).
  * agg_input_collation is the aggregate function's input collation.
  *
  * For an ordered-set aggregate, remember that agg_input_types describes
  * the direct arguments followed by the aggregated arguments.
  *
- * transfn_oid, invtransfn_oid and finalfn_oid identify the funcs to be
- * called; the latter two may be InvalidOid.
+ * transfn_oid and invtransfn_oid identify the funcs to be called; the
+ * latter may be InvalidOid, however if invtransfn_oid is set then
+ * transfn_oid must also be set.
  *
  * Pointers to the constructed trees are returned into *transfnexpr,
- * *invtransfnexpr and *finalfnexpr. If there is no invtransfn or finalfn,
- * the respective pointers are set to NULL.  Since use of the invtransfn is
- * optional, NULL may be passed for invtransfnexpr.
+ * *invtransfnexpr. If there is no invtransfn, the respective pointer is set
+ * to NULL.  Since use of the invtransfn is optional, NULL may be passed for
+ * invtransfnexpr.
  */
 void
-build_aggregate_fnexprs(Oid *agg_input_types,
-						int agg_num_inputs,
-						int agg_num_direct_inputs,
-						int num_finalfn_inputs,
-						bool agg_variadic,
-						Oid agg_state_type,
-						Oid agg_result_type,
-						Oid agg_input_collation,
-						Oid transfn_oid,
-						Oid invtransfn_oid,
-						Oid finalfn_oid,
-						Oid combinefn_oid,
-						Expr **transfnexpr,
-						Expr **invtransfnexpr,
-						Expr **finalfnexpr,
-						Expr **combinefnexpr)
+build_aggregate_transfn_expr(Oid *agg_input_types,
+							 int agg_num_inputs,
+							 int agg_num_direct_inputs,
+							 bool agg_variadic,
+							 Oid agg_state_type,
+							 Oid agg_input_collation,
+							 Oid transfn_oid,
+							 Oid invtransfn_oid,
+							 Expr **transfnexpr,
+							 Expr **invtransfnexpr)
 {
-	Param	   *argp;
 	List	   *args;
 	FuncExpr   *fexpr;
 	int			i;
 
 	/*
-	 * Build arg list to use in the transfn FuncExpr node. We really only care
-	 * that transfn can discover the actual argument types at runtime using
-	 * get_fn_expr_argtype(), so it's okay to use Param nodes that don't
-	 * correspond to any real Param.
+	 * Build arg list to use in the transfn FuncExpr node.
 	 */
-	argp = makeNode(Param);
-	argp->paramkind = PARAM_EXEC;
-	argp->paramid = -1;
-	argp->paramtype = agg_state_type;
-	argp->paramtypmod = -1;
-	argp->paramcollid = agg_input_collation;
-	argp->location = -1;
-
-	args = list_make1(argp);
+	args = list_make1(make_agg_arg(agg_state_type, agg_input_collation));
 
 	for (i = agg_num_direct_inputs; i < agg_num_inputs; i++)
 	{
-		argp = makeNode(Param);
-		argp->paramkind = PARAM_EXEC;
-		argp->paramid = -1;
-		argp->paramtype = agg_input_types[i];
-		argp->paramtypmod = -1;
-		argp->paramcollid = agg_input_collation;
-		argp->location = -1;
-		args = lappend(args, argp);
+		args = lappend(args,
+					   make_agg_arg(agg_input_types[i], agg_input_collation));
 	}
 
 	fexpr = makeFuncExpr(transfn_oid,
@@ -2014,69 +2053,35 @@ build_aggregate_fnexprs(Oid *agg_input_types,
 		else
 			*invtransfnexpr = NULL;
 	}
+}
 
-	/* see if we have a final function */
-	if (!OidIsValid(finalfn_oid))
-	{
-		*finalfnexpr = NULL;
-	}
-	else
-	{
-		/*
-		 * Build expr tree for final function
-		 */
-		argp = makeNode(Param);
-		argp->paramkind = PARAM_EXEC;
-		argp->paramid = -1;
-		argp->paramtype = agg_state_type;
-		argp->paramtypmod = -1;
-		argp->location = -1;
-		args = list_make1(argp);
+/*
+ * Like build_aggregate_transfn_expr, but creates an expression tree for the
+ * combine function of an aggregate, rather than the transition function.
+ */
+void
+build_aggregate_combinefn_expr(Oid agg_state_type,
+							   Oid agg_input_collation,
+							   Oid combinefn_oid,
+							   Expr **combinefnexpr)
+{
+	Node	   *argp;
+	List	   *args;
+	FuncExpr   *fexpr;
 
-		/* finalfn may take additional args, which match agg's input types */
-		for (i = 0; i < num_finalfn_inputs - 1; i++)
-		{
-			argp = makeNode(Param);
-			argp->paramkind = PARAM_EXEC;
-			argp->paramid = -1;
-			argp->paramtype = agg_input_types[i];
-			argp->paramtypmod = -1;
-			argp->paramcollid = agg_input_collation;
-			argp->location = -1;
-			args = lappend(args, argp);
-		}
+	/* combinefn takes two arguments of the aggregate state type */
+	argp = make_agg_arg(agg_state_type, agg_input_collation);
 
-		*finalfnexpr = (Expr *) makeFuncExpr(finalfn_oid,
-											 agg_result_type,
-											 args,
-											 InvalidOid,
-											 agg_input_collation,
-											 COERCE_EXPLICIT_CALL);
-		/* finalfn is currently never treated as variadic */
-	}
+	args = list_make2(argp, argp);
 
-	/* combine function */
-	if (OidIsValid(combinefn_oid))
-	{
-		/*
-		 * Build expr tree for combine function
-		 */
-		argp = makeNode(Param);
-		argp->paramkind = PARAM_EXEC;
-		argp->paramid = -1;
-		argp->paramtype = agg_state_type;
-		argp->paramtypmod = -1;
-		argp->location = -1;
-		args = list_make1(argp);
-
-		/* XXX: is agg_state_type correct here? */
-		*combinefnexpr = (Expr *) makeFuncExpr(combinefn_oid,
-											   agg_state_type,
-											   args,
-											   InvalidOid,
-											   agg_input_collation,
-											   COERCE_EXPLICIT_CALL);
-	}
+	fexpr = makeFuncExpr(combinefn_oid,
+						 agg_state_type,
+						 args,
+						 InvalidOid,
+						 agg_input_collation,
+						 COERCE_EXPLICIT_CALL);
+	/* combinefn is currently never treated as variadic */
+	*combinefnexpr = (Expr *) fexpr;
 }
 
 /*
@@ -2126,6 +2131,42 @@ build_aggregate_deserialfn_expr(Oid deserialfn_oid,
 	*deserialfnexpr = (Expr *) fexpr;
 }
 
+/*
+ * Like build_aggregate_transfn_expr, but creates an expression tree for the
+ * final function of an aggregate, rather than the transition function.
+ */
+void
+build_aggregate_finalfn_expr(Oid *agg_input_types,
+							 int num_finalfn_inputs,
+							 Oid agg_state_type,
+							 Oid agg_result_type,
+							 Oid agg_input_collation,
+							 Oid finalfn_oid,
+							 Expr **finalfnexpr)
+{
+	List	   *args;
+	int			i;
+
+	/*
+	 * Build expr tree for final function
+	 */
+	args = list_make1(make_agg_arg(agg_state_type, agg_input_collation));
+
+	/* finalfn may take additional args, which match agg's input types */
+	for (i = 0; i < num_finalfn_inputs - 1; i++)
+	{
+		args = lappend(args,
+					   make_agg_arg(agg_input_types[i], agg_input_collation));
+	}
+
+	*finalfnexpr = (Expr *) makeFuncExpr(finalfn_oid,
+										 agg_result_type,
+										 args,
+										 InvalidOid,
+										 agg_input_collation,
+										 COERCE_EXPLICIT_CALL);
+	/* finalfn is currently never treated as variadic */
+}
 
 /*
  * Convenience function to build dummy argument expressions for aggregates.

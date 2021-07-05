@@ -3,13 +3,14 @@
  *
  *	controldata functions
  *
- *	Copyright (c) 2010-2015, PostgreSQL Global Development Group
+ *	Copyright (c) 2010-2019, PostgreSQL Global Development Group
  *	src/bin/pg_upgrade/controldata.c
  */
 
 #include "postgres_fe.h"
 
 #include "pg_upgrade.h"
+#include "greenplum/pg_upgrade_greenplum.h"
 
 #include <ctype.h>
 
@@ -18,16 +19,16 @@
  *
  * gets pg_control information in "ctrl". Assumes that bindir and
  * datadir are valid absolute paths to postgresql bin and pgdata
- * directories respectively *and* pg_resetxlog is version compatible
+ * directories respectively *and* pg_resetwal is version compatible
  * with datadir. The main purpose of this function is to get pg_control
  * data in a version independent manner.
  *
- * The approach taken here is to invoke pg_resetxlog with -n option
+ * The approach taken here is to invoke pg_resetwal with -n option
  * and then pipe its output. With little string parsing we get the
- * pg_control data.  pg_resetxlog cannot be run while the server is running
+ * pg_control data.  pg_resetwal cannot be run while the server is running
  * so we use pg_controldata;  pg_controldata doesn't provide all the fields
  * we need to actually perform the upgrade, but it provides enough for
- * check mode.  We do not implement pg_resetxlog -n because it is hard to
+ * check mode.  We do not implement pg_resetwal -n because it is hard to
  * return valid xid data for a running server.
  */
 void
@@ -37,15 +38,17 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	char		bufin[MAX_STRING];
 	FILE	   *output;
 	char	   *p;
-	bool		got_xid = false;
-	bool		got_oid = false;
-	bool		got_nextxlogfile = false;
-	bool		got_multi = false;
-	bool		got_mxoff = false;
-	bool		got_oldestmulti = false;
+	bool		got_tli = false;
 	bool		got_log_id = false;
 	bool		got_log_seg = false;
-	bool		got_tli = false;
+	bool		got_xid = false;
+	bool		got_gxid = false;
+	bool		got_oid = false;
+	bool		got_multi = false;
+	bool		got_oldestmulti = false;
+	bool		got_mxoff = false;
+	bool		got_nextxlogfile = false;
+	bool		got_float8_pass_by_value = false;
 	bool		got_align = false;
 	bool		got_blocksz = false;
 	bool		got_largesz = false;
@@ -56,7 +59,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	bool		got_toast = false;
 	bool		got_large_object = false;
 	bool		got_date_is_int = false;
-	bool		got_float8_pass_by_value = false;
 	bool		got_data_checksum_version = false;
 	bool		got_cluster_state = false;
 	char	   *lc_collate = NULL;
@@ -68,13 +70,14 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	char	   *language = NULL;
 	char	   *lc_all = NULL;
 	char	   *lc_messages = NULL;
+	uint32		tli = 0;
 	uint32		logid = 0;
 	uint32		segno = 0;
-	uint32		tli = 0;
+	char	   *resetwal_bin;
 
 
 	/*
-	 * Because we test the pg_resetxlog output as strings, it has to be in
+	 * Because we test the pg_resetwal output as strings, it has to be in
 	 * English.  Copied from pg_regress.c.
 	 */
 	if (getenv("LC_COLLATE"))
@@ -101,12 +104,11 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	pg_putenv("LC_MONETARY", NULL);
 	pg_putenv("LC_NUMERIC", NULL);
 	pg_putenv("LC_TIME", NULL);
-	pg_putenv("LANG",
 #ifndef WIN32
-			  NULL);
+	pg_putenv("LANG", NULL);
 #else
-	/* On Windows the default locale cannot be English, so force it */
-			  "en");
+	/* On Windows the default locale may not be English, so force it */
+	pg_putenv("LANG", "en");
 #endif
 	pg_putenv("LANGUAGE", NULL);
 	pg_putenv("LC_ALL", NULL);
@@ -137,14 +139,15 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 				if (p == NULL || strlen(p) <= 1)
 					pg_fatal("%d: database cluster state problem\n", __LINE__);
 
-				p++;				/* remove ':' char */
+				p++;			/* remove ':' char */
 
 				/*
-				 * We checked earlier for a postmaster lock file, and if we found
-				 * one, we tried to start/stop the server to replay the WAL.  However,
-				 * pg_ctl -m immediate doesn't leave a lock file, but does require
-				 * WAL replay, so we check here that the server was shut down cleanly,
-				 * from the controldata perspective.
+				 * We checked earlier for a postmaster lock file, and if we
+				 * found one, we tried to start/stop the server to replay the
+				 * WAL.  However, pg_ctl -m immediate doesn't leave a lock
+				 * file, but does require WAL replay, so we check here that
+				 * the server was shut down cleanly, from the controldata
+				 * perspective.
 				 */
 				/* remove leading spaces */
 				while (*p == ' ')
@@ -178,16 +181,21 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		}
 	}
 
+	/* pg_resetxlog has been renamed to pg_resetwal in version 10 */
+	if (GET_MAJOR_VERSION(cluster->bin_version) < 1000)
+		resetwal_bin = "pg_resetxlog\" -n";
+	else
+		resetwal_bin = "pg_resetwal\" -n";
 	snprintf(cmd, sizeof(cmd), "\"%s/%s \"%s\"",
 			 cluster->bindir,
-			 live_check ? "pg_controldata\"" : "pg_resetxlog\" -n",
+			 live_check ? "pg_controldata\"" : resetwal_bin,
 			 cluster->pgdata);
 	fflush(stdout);
 	fflush(stderr);
 
 	if ((output = popen(cmd, "r")) == NULL)
-		pg_fatal("Could not get control data using %s: %s\n",
-				 cmd, getErrorText());
+		pg_fatal("could not get control data using %s: %s\n",
+				 cmd, strerror(errno));
 
 	/* Only in <= 8.3 */
 	if (GET_MAJOR_VERSION(cluster->major_version) <= 803)
@@ -235,7 +243,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			p = strchr(p, ':');
 
 			if (p == NULL || strlen(p) <= 1)
-				pg_fatal("%d: pg_resetxlog problem\n", __LINE__);
+				pg_fatal("%d: pg_resetwal problem\n", __LINE__);
 
 			p++;				/* remove ':' char */
 			cluster->controldata.ctrl_ver = str2uint(p);
@@ -249,6 +257,17 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 
 			p++;				/* remove ':' char */
 			cluster->controldata.cat_ver = str2uint(p);
+		}
+		else if ((p = strstr(bufin, "Latest checkpoint's TimeLineID:")) != NULL)
+		{
+			p = strchr(p, ':');
+
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			p++;				/* remove ':' char */
+			tli = str2uint(p);
+			got_tli = true;
 		}
 		else if ((p = strstr(bufin, "First log file ID after reset:")) != NULL)
 		{
@@ -317,13 +336,36 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			p++;				/* remove ':' char */
 			cluster->controldata.chkpnt_nxtepoch = str2uint(p);
 
-			p = strchr(p, '/');
+			/*
+			 * Delimiter changed from '/' to ':' in 9.6.  We don't test for
+			 * the catalog version of the change because the catalog version
+			 * is pulled from pg_controldata too, and it isn't worth adding an
+			 * order dependency for this --- we just check the string.
+			 */
+			if (strchr(p, '/') != NULL)
+				p = strchr(p, '/');
+			else if (GET_MAJOR_VERSION(cluster->major_version) >= 906)
+				p = strchr(p, ':');
+			else
+				p = NULL;
+
 			if (p == NULL || strlen(p) <= 1)
 				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
 
-			p++;				/* remove '/' char */
+			p++;				/* remove '/' or ':' char */
 			cluster->controldata.chkpnt_nxtxid = str2uint(p);
 			got_xid = true;
+		}
+		else if ((p = strstr(bufin, "Latest checkpoint's NextGxid:")) != NULL)
+		{
+			p = strchr(p, ':');
+
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			p++;				/* remove ':' char */
+			cluster->controldata.chkpnt_nxtgxid = str2uint64(p);
+			got_gxid = true;
 		}
 		else if ((p = strstr(bufin, "Latest checkpoint's NextOID:")) != NULL)
 		{
@@ -385,6 +427,18 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 
 			strlcpy(cluster->controldata.nextxlogfile, p, 25);
 			got_nextxlogfile = true;
+		}
+		else if ((p = strstr(bufin, "Float8 argument passing:")) != NULL)
+		{
+			p = strchr(p, ':');
+
+			if (p == NULL || strlen(p) <= 1)
+				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
+
+			p++;				/* remove ':' char */
+			/* used later for contrib check */
+			cluster->controldata.float8_pass_by_value = strstr(p, "by value") != NULL;
+			got_float8_pass_by_value = true;
 		}
 		else if ((p = strstr(bufin, "Maximum data alignment:")) != NULL)
 		{
@@ -496,18 +550,6 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 			cluster->controldata.date_is_int = strstr(p, "64-bit integers") != NULL;
 			got_date_is_int = true;
 		}
-		else if ((p = strstr(bufin, "Float8 argument passing:")) != NULL)
-		{
-			p = strchr(p, ':');
-
-			if (p == NULL || strlen(p) <= 1)
-				pg_fatal("%d: controldata retrieval problem\n", __LINE__);
-
-			p++;				/* remove ':' char */
-			/* used later for contrib check */
-			cluster->controldata.float8_pass_by_value = strstr(p, "by value") != NULL;
-			got_float8_pass_by_value = true;
-		}
 		else if ((p = strstr(bufin, "checksum")) != NULL)
 		{
 			p = strchr(p, ':');
@@ -548,7 +590,7 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 	pg_free(lc_messages);
 
 	/*
-	 * Before 9.3, pg_resetxlog reported the xlogid and segno of the first log
+	 * Before 9.3, pg_resetwal reported the xlogid and segno of the first log
 	 * file after reset as separate lines. Starting with 9.3, it reports the
 	 * WAL file name. If the old cluster is older than 9.3, we construct the
 	 * WAL file name from the tli, xlogid, and segno.
@@ -563,24 +605,41 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 		}
 	}
 
+	/*
+	 * GPDB specific: No such entry in pg_control data on gpdb 6 and below.
+	 * We set it as FirstDistributedTransactionId instead.
+	 *
+	 */
+	if  (GET_MAJOR_VERSION(cluster->major_version) < 1200) {
+		cluster->controldata.chkpnt_nxtgxid = FirstDistributedTransactionId;
+		got_gxid = true;
+	}
+
 	/* verify that we got all the mandatory pg_control data */
-	if (!got_xid || !got_oid ||
+	if (!got_xid || !got_gxid || !got_oid ||
 		!got_multi ||
 		(!got_oldestmulti &&
 		 cluster->controldata.cat_ver >= MULTIXACT_FORMATCHANGE_CAT_VER) ||
 		!got_mxoff || (!live_check && !got_nextxlogfile) ||
-		!got_align || !got_blocksz || !got_largesz || !got_walsz ||
-		!got_walseg || !got_ident || !got_index || /* !got_toast || */
+		!got_float8_pass_by_value || !got_align || !got_blocksz ||
+		!got_largesz || !got_walsz || !got_walseg || !got_ident ||
+		!got_index || /* !got_toast || */
 		(!got_large_object &&
 		 cluster->controldata.ctrl_ver >= LARGE_OBJECT_SIZE_PG_CONTROL_VER) ||
-		!got_date_is_int || !got_float8_pass_by_value || !got_data_checksum_version)
+		!got_date_is_int || !got_data_checksum_version)
 	{
-		pg_log(PG_REPORT,
-			   "The %s cluster lacks some required control information:\n",
-			   CLUSTER_NAME(cluster));
+		if (cluster == &old_cluster)
+			pg_log(PG_REPORT,
+				   "The source cluster lacks some required control information:\n");
+		else
+			pg_log(PG_REPORT,
+				   "The target cluster lacks some required control information:\n");
 
 		if (!got_xid)
 			pg_log(PG_REPORT, "  checkpoint next XID\n");
+
+		if (!got_gxid)
+			pg_log(PG_REPORT, "  checkpoint next Gxid\n");
 
 		if (!got_oid)
 			pg_log(PG_REPORT, "  latest checkpoint next OID\n");
@@ -597,6 +656,9 @@ get_control_data(ClusterInfo *cluster, bool live_check)
 
 		if (!live_check && !got_nextxlogfile)
 			pg_log(PG_REPORT, "  first WAL segment after reset\n");
+
+		if (!got_float8_pass_by_value)
+			pg_log(PG_REPORT, "  float8 argument passing method\n");
 
 		if (!got_align)
 			pg_log(PG_REPORT, "  maximum alignment\n");
@@ -655,7 +717,7 @@ check_control_data(ControlData *oldctrl,
 {
 	if (oldctrl->align == 0 || oldctrl->align != newctrl->align)
 		pg_fatal("old and new pg_controldata alignments are invalid or do not match\n"
-			   "Likely one cluster is a 32-bit install, the other 64-bit\n");
+				 "Likely one cluster is a 32-bit install, the other 64-bit\n");
 
 	if (oldctrl->blocksz == 0 || oldctrl->blocksz != newctrl->blocksz)
 		pg_fatal("old and new pg_controldata block sizes are invalid or do not match\n");
@@ -710,7 +772,10 @@ check_control_data(ControlData *oldctrl,
 				 "options.\n");
 	}
 
-	/* float8_pass_by_value does not need to match */
+	/*
+	 * float8_pass_by_value does not need to match, but is used in
+	 * check_for_isn_and_int8_passing_mismatch().
+	 */
 
 	/*
 	 * Check for allowed combinations of data checksums. PostgreSQL only allow
@@ -719,20 +784,20 @@ check_control_data(ControlData *oldctrl,
 	 */
 	if (oldctrl->data_checksum_version == 0 &&
 		newctrl->data_checksum_version != 0 &&
-		user_opts.checksum_mode != CHECKSUM_ADD)
+		!is_checksum_mode(CHECKSUM_ADD))
 		pg_fatal("old cluster does not use data checksums but the new one does\n");
 	else if (oldctrl->data_checksum_version != 0 &&
 			 newctrl->data_checksum_version == 0 &&
-			 user_opts.checksum_mode != CHECKSUM_REMOVE)
+			 !is_checksum_mode(CHECKSUM_REMOVE))
 		pg_fatal("old cluster uses data checksums but the new one does not\n");
 	else if (oldctrl->data_checksum_version == newctrl->data_checksum_version &&
-			 user_opts.checksum_mode != CHECKSUM_NONE)
+			 !is_checksum_mode(CHECKSUM_NONE))
 		pg_fatal("old and new cluster data checksum configuration match, cannot %s data checksums\n",
-				 (user_opts.checksum_mode == CHECKSUM_ADD ? "add" : "remove"));
-	else if (oldctrl->data_checksum_version != 0 && user_opts.checksum_mode == CHECKSUM_ADD)
+				 (is_checksum_mode(CHECKSUM_ADD) ? "add" : "remove"));
+	else if (oldctrl->data_checksum_version != 0 && is_checksum_mode(CHECKSUM_ADD))
 		pg_fatal("--add-checksum option not supported for old cluster which uses data checksums\n");
 	else if (oldctrl->data_checksum_version != newctrl->data_checksum_version
-			 && user_opts.checksum_mode == CHECKSUM_NONE)
+			 && is_checksum_mode(CHECKSUM_NONE))
 		pg_fatal("old and new cluster pg_controldata checksum versions do not match\n");
 }
 
@@ -755,6 +820,6 @@ disable_old_cluster(void)
 	pg_log(PG_REPORT, "\n"
 		   "If you want to start the old cluster, you will need to remove\n"
 		   "the \".old\" suffix from %s/global/pg_control.old.\n"
-		 "Because \"link\" mode was used, the old cluster cannot be safely\n"
-	"started once the new cluster has been started.\n\n", old_cluster.pgdata);
+		   "Because \"link\" mode was used, the old cluster cannot be safely\n"
+		   "started once the new cluster has been started.\n\n", old_cluster.pgdata);
 }

@@ -26,24 +26,44 @@ class ReconfigDetectionSQLQueryCommand(base.SQLCommand):
 
 
 class GpSegmentRebalanceOperation:
-    def __init__(self, gpEnv, gpArray):
+    def __init__(self, gpEnv, gpArray, batch_size, segment_batch_size):
         self.gpEnv = gpEnv
         self.gpArray = gpArray
+        self.batch_size = batch_size
+        self.segment_batch_size = segment_batch_size
         self.logger = gplog.get_default_logger()
 
     def rebalance(self):
-        # Get the unbalanced primary segments grouped by hostname
-        # These segments are what we will shutdown.
-        self.logger.info("Getting unbalanced segments")
-        unbalanced_primary_segs = GpArray.getSegmentsByHostName(self.gpArray.get_unbalanced_primary_segdbs())
-        pool = base.WorkerPool()
+        self.logger.info("Determining primary and mirror segment pairs to rebalance")
 
+        # The current implementation of rebalance calls "gprecoverseg -a" below.
+        # Thus, if another balanced pair is not synchronized, or has a down mirror
+        # that pair will be recovered as a side-effect of rebalancing.
+        unbalanced_primary_segs = []
+        for segmentPair in self.gpArray.segmentPairs:
+            if segmentPair.balanced():
+                continue
+
+            if segmentPair.up() and segmentPair.reachable() and segmentPair.synchronized():
+                unbalanced_primary_segs.append(segmentPair.primaryDB)
+            else:
+                self.logger.warning(
+                    "Not rebalancing primary segment dbid %d with its mirror dbid %d because one is either down, unreachable, or not synchronized" \
+                    % (segmentPair.primaryDB.dbid, segmentPair.mirrorDB.dbid))
+
+        if not len(unbalanced_primary_segs):
+            self.logger.info("No segments to rebalance")
+            return True
+
+        unbalanced_primary_segs = GpArray.getSegmentsByHostName(unbalanced_primary_segs)
+
+        pool = base.WorkerPool(min(len(unbalanced_primary_segs), self.batch_size))
         try:
             # Disable ctrl-c
             signal.signal(signal.SIGINT, signal.SIG_IGN)
 
             self.logger.info("Stopping unbalanced primary segments...")
-            for hostname in unbalanced_primary_segs.keys():
+            for hostname in list(unbalanced_primary_segs.keys()):
                 cmd = GpSegStopCmd("stop unbalanced primary segs",
                                    self.gpEnv.getGpHome(),
                                    self.gpEnv.getGpVersion(),
@@ -51,7 +71,8 @@ class GpSegmentRebalanceOperation:
                                    unbalanced_primary_segs[hostname],
                                    ctxt=base.REMOTE,
                                    remoteHost=hostname,
-                                   timeout=600)
+                                   timeout=600,
+                                   segment_batch_size=self.segment_batch_size)
                 pool.addCommand(cmd)
 
             base.join_and_indicate_progress(pool)
@@ -79,29 +100,29 @@ class GpSegmentRebalanceOperation:
             # Final step is to issue a recoverseg operation to resync segments
             self.logger.info("Starting segment synchronization")
             original_sys_args = sys.argv[:]
+            self.logger.info("=============================START ANOTHER RECOVER=========================================")
+            # import here because GpRecoverSegmentProgram and GpSegmentRebalanceOperation have a circular dependency
+            from gppylib.programs.clsRecoverSegment import GpRecoverSegmentProgram
+            cmd_args = ['gprecoverseg', '-a', '-B', str(self.batch_size), '-b', str(self.segment_batch_size)]
+            sys.argv = cmd_args[:]
+            local_parser = GpRecoverSegmentProgram.createParser()
+            local_options, args = local_parser.parse_args()
+            recover_cmd = GpRecoverSegmentProgram.createProgram(local_options, args)
             try:
-                self.logger.info("=============================START ANOTHER RECOVER=========================================")
-                # import here because GpRecoverSegmentProgram and GpSegmentRebalanceOperation have a circular dependency
-                from gppylib.programs.clsRecoverSegment import GpRecoverSegmentProgram
-                sys.argv = ['gprecoverseg', '-a']
-                local_parser = GpRecoverSegmentProgram.createParser()
-                local_options, args = local_parser.parse_args()
-                cmd = GpRecoverSegmentProgram.createProgram(local_options, args)
-                cmd.run()
-
+                recover_cmd.run()
             except SystemExit as e:
                 if e.code != 0:
                     self.logger.error("Failed to start the synchronization step of the segment rebalance.")
                     self.logger.error("Check the gprecoverseg log file, correct any problems, and re-run")
-                    self.logger.error("'gprecoverseg -a'.")
+                    self.logger.error(' '.join(cmd_args))
                     raise Exception("Error synchronizing.\nError: %s" % str(e))
             finally:
-                if cmd:
-                    cmd.cleanup()
+                if recover_cmd:
+                    recover_cmd.cleanup()
                 sys.argv = original_sys_args
                 self.logger.info("==============================END ANOTHER RECOVER==========================================")
 
-        except Exception, ex:
+        except Exception as ex:
             raise ex
         finally:
             pool.join()

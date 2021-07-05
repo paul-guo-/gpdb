@@ -5,80 +5,6 @@ create schema DML_over_joins;
 set search_path to DML_over_joins;
 
 -- ----------------------------------------------------------------------
--- Test: heap_motion0.sql
--- ----------------------------------------------------------------------
-
-------------------------------------------------------------
--- Update with Motion:
---   r,s colocated on join attributes
---      delete: using clause, subquery, initplan
---      update: join and subsubquery
-------------------------------------------------------------
-
--- start_ignore
-drop table if exists r;
-drop table if exists s;
--- end_ignore
-create table r (a int, b int) distributed by (a);
-create table s (a int, b int) distributed by (a);
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
-update r set b = r.b + 1 from s where r.a = s.a;
-
-update r set b = r.b + 1 from s where r.a in (select a from s);
-
-delete from r using s where r.a = s.a;
-
-delete from r;
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-delete from r where a in (select a from s);
-
-delete from r;
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-delete from r where a = (select max(a) from s);
-
-
-
-------------------------------------------------------------
--- Updates with motion:
--- 	Redistribute s
-------------------------------------------------------------
-
-delete from r;
-delete from s;
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
-
-update r set b = r.b + 4 from s where r.b = s.b;
-
-update r set b = b + 1 where b in (select b from s);
-
-delete from s using r where r.a = s.b;
-
-delete from r;
-delete from s;
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
-
-delete from r using s where r.b = s.b; 
-
-
-------------------------------------------------------------
--- 	Hash aggregate group by
-------------------------------------------------------------
-
-delete from r;
-delete from s;
-
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
-
-explain update s set b = b + 1 where exists (select 1 from r where s.a = r.b);
-update s set b = b + 1 where exists (select 1 from r where s.a = r.b);
-
-explain delete from s where exists (select 1 from r where s.a = r.b);
-delete from s where exists (select 1 from r where s.a = r.b);
--- ----------------------------------------------------------------------
 -- Test: heap_motion1.sql
 -- ----------------------------------------------------------------------
 
@@ -97,6 +23,8 @@ create table r (a int4, b int4) distributed by (a);
 create table s (a int4, b int4) distributed by (a);
 insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
 insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
+analyze r;
+analyze s;
 update r set b = r.b + 1 from s where r.a = s.a;
 
 update r set b = r.b + 1 from s where r.a in (select a from s);
@@ -145,8 +73,10 @@ delete from s;
 insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
 insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
 
+explain update s set b = b + 1 where exists (select 1 from r where s.a = r.b);
 update s set b = b + 1 where exists (select 1 from r where s.a = r.b);
 
+explain delete from s where exists (select 1 from r where s.a = r.b);
 delete from s where exists (select 1 from r where s.a = r.b);
 
 
@@ -430,55 +360,8 @@ update s set b = b + 1 where exists (select 1 from r where s.a = r.b);
 delete from s where exists (select 1 from r where s.a = r.b);
 
 
--- ----------------------------------------------------------------------
--- Test: unsupported_cases0.sql
--- ----------------------------------------------------------------------
-
 ------------------------------------------------------------
--- Update with Motion: unsupported cases
---     	Updating the distribution key
-------------------------------------------------------------
-
--- start_ignore
-drop table if exists r;
-drop table if exists s;
-drop table if exists p;
--- end_ignore
-
-create table r (a int, b int) distributed by (a);
-create table s (a int, b int) distributed by (a);
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 4;
-
-create table p (a int, b int, c int) 
-	partition by range (c) (start(1) end(5) every(1), default partition extra);
-insert into p select generate_series(1,10000), generate_series(1,10000)*3, generate_series(1,10000)%6;
-
-update s set a = r.a from r where r.b = s.b;
-
-
-------------------------------------------------------------
---	Statement contains correlated subquery
-------------------------------------------------------------
-update s set b = (select min(a) from r where b = s.b);
-
-delete from s where b = (select min(a) from r where b = s.b);
-
-
-------------------------------------------------------------
---	Update partition key (requires moving tuples from one partition to another)
-------------------------------------------------------------
-update p set c = c + 1 where c = 0;
-
-update p set c = c + 1 where b in (select b from s) and c = 0;
-
-
--- ----------------------------------------------------------------------
--- Test: unsupported_cases1.sql
--- ----------------------------------------------------------------------
-
-------------------------------------------------------------
--- Update with Motion: unsupported cases
+-- Update with Motion:
 --     	Updating the distribution key
 ------------------------------------------------------------
 
@@ -499,27 +382,23 @@ insert into p select generate_series(1,10000), generate_series(1,10000)*3, gener
 
 update s set a = r.a from r where r.b = s.b;
 
-
 ------------------------------------------------------------
 --	Statement contains correlated subquery
 ------------------------------------------------------------
 update s set b = (select min(a) from r where b = s.b);
-
 delete from s where b = (select min(a) from r where b = s.b);
-
 
 ------------------------------------------------------------
 --	Update partition key (requires moving tuples from one partition to another)
 ------------------------------------------------------------
 update p set c = c + 1 where c = 0;
-
 update p set c = c + 1 where b in (select b from s) and c = 0;
--- ----------------------------------------------------------------------
--- Test: unsupported_cases2.sql
--- ----------------------------------------------------------------------
+
+select tableoid::regclass, c, count(*) from p group by 1, 2;
+
 
 ------------------------------------------------------------
--- Update with Motion: unsupported cases
+-- Update with Motion:
 --     	Updating the distribution key
 ------------------------------------------------------------
 
@@ -540,28 +419,23 @@ insert into p select generate_series(1,10000), generate_series(1,10000)*3, gener
 
 update s set a = r.a from r where r.b = s.b;
 
-
 ------------------------------------------------------------
 --	Statement contains correlated subquery
 ------------------------------------------------------------
 update s set b = (select min(a) from r where b = s.b);
-
 delete from s where b = (select min(a) from r where b = s.b);
-
 
 ------------------------------------------------------------
 --	Update partition key (requires moving tuples from one partition to another)
 ------------------------------------------------------------
-
 update p set c = c + 1 where c = 0;
-
 update p set c = c + 1 where b in (select b from s where b = 36);
--- ----------------------------------------------------------------------
--- Test: unsupported_cases3.sql
--- ----------------------------------------------------------------------
+
+select tableoid::regclass, c, count(*) from p group by 1, 2;
+
 
 ------------------------------------------------------------
--- Update with Motion: unsupported cases
+-- Update with Motion:
 --     	Updating the distribution key
 ------------------------------------------------------------
 
@@ -582,27 +456,23 @@ insert into p select generate_series(1,10000), generate_series(1,10000)*3, gener
 
 update s set a = r.a from r where r.b = s.b;
 
-
 ------------------------------------------------------------
 --	Statement contains correlated subquery
 ------------------------------------------------------------
 update s set b = (select min(a) from r where b = s.b);
-
 delete from s where b = (select min(a) from r where b = s.b);
-
 
 ------------------------------------------------------------
 --	Update partition key (requires moving tuples from one partition to another)
 ------------------------------------------------------------
 update p set c = c + 1 where c = 0;
-
 update p set c = c + 1 where b in (select b from s) and c = 0;
--- ----------------------------------------------------------------------
--- Test: unsupported_cases4.sql
--- ----------------------------------------------------------------------
+
+select tableoid::regclass, c, count(*) from p group by 1, 2;
+
 
 ------------------------------------------------------------
--- Update with Motion: unsupported cases
+-- Update with Motion:
 --     	Updating the distribution key
 ------------------------------------------------------------
 
@@ -623,29 +493,23 @@ insert into p select generate_series(1,10000), generate_series(1,10000)*3, gener
 
 update s set a = r.a from r where r.b = s.b;
 
-
 ------------------------------------------------------------
 --	Statement contains correlated subquery
 ------------------------------------------------------------
 update s set b = (select min(a) from r where b = s.b);
-
 delete from s where b = (select min(a) from r where b = s.b);
-
 
 ------------------------------------------------------------
 --	Update partition key (requires moving tuples from one partition to another)
 ------------------------------------------------------------
 update p set c = c + 1 where c = 0;
-
 update p set c = c + 1 where b in (select b from s) and c = 0;
 
+select tableoid::regclass, c, count(*) from p group by 1, 2;
 
--- ----------------------------------------------------------------------
--- Test: unsupported_cases5.sql
--- ----------------------------------------------------------------------
 
 ------------------------------------------------------------
--- Update with Motion: unsupported cases
+-- Update with Motion:
 --     	Updating the distribution key
 ------------------------------------------------------------
 
@@ -666,76 +530,20 @@ insert into p select generate_series(1,10000), generate_series(1,10000)*3, gener
 
 update s set a = r.a from r where r.b = s.b;
 
-
 ------------------------------------------------------------
 --	Statement contains correlated subquery
 ------------------------------------------------------------
 update s set b = (select min(a) from r where b = s.b);
-
 delete from s where b = (select min(a) from r where b = s.b);
-
 
 ------------------------------------------------------------
 --	Update partition key (requires moving tuples from one partition to another)
 ------------------------------------------------------------
 update p set c = c + 1 where c = 0;
-
 update p set c = c + 1 where b in (select b from s) and c = 0;
 
+select tableoid::regclass, c, count(*) from p group by 1, 2;
 
--- ----------------------------------------------------------------------
--- Test: partition_motion0.sql
--- ----------------------------------------------------------------------
-
-------------------------------------------------------------
--- Update with Motion:
-------------------------------------------------------------
-
--- start_ignore
-drop table if exists r;
-drop table if exists s;
-drop table if exists p;
--- end_ignore
-create table r (a int, b int) distributed by (a);
-create table s (a int, b int) distributed by (a);
-insert into r select generate_series(1, 10000), generate_series(1, 10000) * 3;
-insert into s select generate_series(1, 100), generate_series(1, 100) * 3;
-
-create table p (a int, b int, c int)
-	distributed by (a)
-        partition by range (c) (start(1) end(5) every(1), default partition extra);
-	
-insert into p select generate_series(1,10000), generate_series(1,10000) * 3, generate_series(1,10000) % 6;
-
-
-------------------------------------------------------------
--- Update with Motion:
---	Motion on p, append node, hash agg
-------------------------------------------------------------
-update p set b = b + 1 where a in (select b from r where a = p.c);
-
-delete from p where p.a in (select b from r where a = p.c);
-
-delete from p using r where p.a = r.b and r.a = p.c;
-
-
-------------------------------------------------------------
--- Updates with motion:
--- 	No motion, colocated distribution key
-------------------------------------------------------------
-delete from p where a in (select a from r where a = p.c);
-
-delete from p using r where p.a = r.a and r.a = p.c;
-
-
-------------------------------------------------------------
--- 	No motion of s
-------------------------------------------------------------
-delete from s where a in (select a from p where p.b = s.b);
-
-select count(*) from s;
-select * from s;
-delete from s where b in (select a from p where p.c = s.b);
 
 -- ----------------------------------------------------------------------
 -- Test: partition_motion1.sql
@@ -1276,9 +1084,7 @@ SELECT InsertManyIntoSales(20,'sales_par');
 
 -- update partition key
 select sales_par.* from sales_par where id in (select s.b from s, r where s.a = r.b) and day in (select a from r);
--- start_ignore
 update sales_par set region = 'new_region' where id in (select s.b from s, r where s.a = r.b) and day in (select a from r);
--- end_ignore
 select sales_par.* from sales_par where id in (select s.b from s, r where s.a = r.b) and day in (select a from r);
 
 select sales_par.* from sales_par,s,r where sales_par.id = s.b and sales_par.month = r.b+1;
@@ -1439,6 +1245,44 @@ PREPARE plan5 AS delete from sales_par where region='asia' and id in (select b f
 EXECUTE plan5;
 select * from sales_par where region='asia' and id in (select b from m where a = 2);
 
+-- ----------------------------------------------------------------------
+-- Test: Explicit redistributed motion may be removed.
+-- ----------------------------------------------------------------------
+create table tab1(a int, b int) distributed by (a);
+create table tab2(a int, b int) distributed by (a);
+
+analyze tab1;
+analyze tab2;
+
+-- colocate, no motion, thus no explicit redistributed motion
+explain (costs off) delete from tab1 using tab2 where tab1.a = tab2.a;
+-- redistribtued tab2, no motion above result relation, thus no explicit
+-- redistributed motion
+explain (costs off) delete from tab1 using tab2 where tab1.a = tab2.b;
+-- redistributed motion table, has to add explicit redistributed motion
+explain (costs off) delete from tab1 using tab2 where tab1.b = tab2.b;
+
+alter table tab1 set distributed by (b);
+create table tab3 (a int, b int) distributed by (b);
+
+insert into tab1 values (1, 1);
+insert into tab2 values (1, 1);
+insert into tab3 values (1, 1);
+analyze tab3;
+
+-- we must not write the WHERE condition as `relname='tab2'`, it matches tables
+-- in all the schemas, which will cause problems in other tests; we should use
+-- the `::regclass` way as it only matches the table in current search_path.
+set allow_system_table_mods=true;
+update pg_class set relpages = 10000 where oid='tab2'::regclass;
+update pg_class set reltuples = 100000000 where oid='tab2'::regclass;
+update pg_class set relpages = 100000000 where oid='tab3'::regclass;
+update pg_class set reltuples = 100000 where oid='tab3'::regclass;
+
+-- Planner: there is redistribute motion above tab1, however, we can also
+-- remove the explicit redistribute motion here because the final join
+-- co-locate with the result relation tab1.
+explain (costs off) delete from tab1 using tab2, tab3 where tab1.a = tab2.a and tab1.b = tab3.b;
 
 -- ----------------------------------------------------------------------
 -- Test: teardown.sql

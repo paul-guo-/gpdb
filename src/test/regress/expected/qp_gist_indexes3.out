@@ -11,7 +11,7 @@ set search_path to qp_gist_indexes3;
 ------------------------------------------------------------------------------
 -- start_ignore
 -- Portions Copyright (c) 2010, Greenplum, Inc.  All rights reserved.
--- Portions Copyright (c) 2012-Present Pivotal Software, Inc.
+-- Portions Copyright (c) 2012-Present VMware, Inc. or its affiliates.
 -- PURPOSE:
 --     Test VACUUM on GiST indexes.
 --     Also test somewhat larger data sets than most of my other GiST index 
@@ -58,6 +58,7 @@ BEGIN
    s2 = CAST((seed - 1) AS VARCHAR);
    str1 = '((' || ss || ', ' || ss || '), (' || s2 || ', ' || s2 || '))';
    INSERT INTO GistTable3(id, property) VALUES (seed, TO_BOX(CAST(str1 AS TEXT)) );
+   ANALYZE GistTable3;
 END;
 $$
 LANGUAGE PLPGSQL
@@ -168,14 +169,15 @@ SELECT id, property AS "ProperTee" FROM GistTable3
 
 EXPLAIN SELECT id, property AS "ProperTee" FROM GistTable3
  WHERE property ~= '( (999,999), (998,998) )';
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..200.28 rows=1 width=36)
-   ->  Index Scan using gistindex3a on gisttable3  (cost=0.00..200.28 rows=1 width=36)
-         Index Cond: property ~= '(999,999),(998,998)'::box
- Settings:  enable_seqscan=off
- Optimizer status: Postgres query optimizer
-(5 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)  (cost=100.18..395.33 rows=4 width=36)
+   ->  Bitmap Heap Scan on gisttable3  (cost=100.18..395.33 rows=2 width=36)
+         Recheck Cond: (property ~= '(999,999),(998,998)'::box)
+         ->  Bitmap Index Scan on gistindex3a  (cost=0.00..100.18 rows=2 width=0)
+               Index Cond: (property ~= '(999,999),(998,998)'::box)
+ Optimizer: Postgres query optimizer
+(6 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test07Reindex.sql
@@ -207,14 +209,15 @@ SELECT id, property AS "Property" FROM GistTable3
 
 EXPLAIN SELECT id, property AS "Property" FROM GistTable3
  WHERE property ~= '( (999,999), (998,998) )';
-                                      QUERY PLAN                                       
----------------------------------------------------------------------------------------
- Gather Motion 3:1  (slice1; segments: 3)  (cost=0.00..200.27 rows=1 width=36)
-   ->  Index Scan using gistindex3a on gisttable3  (cost=0.00..200.27 rows=1 width=36)
-         Index Cond: property ~= '(999,999),(998,998)'::box
- Settings:  enable_seqscan=off
- Optimizer status: Postgres query optimizer
-(5 rows)
+                                    QUERY PLAN                                    
+----------------------------------------------------------------------------------
+ Gather Motion 3:1  (slice1; segments: 3)  (cost=100.30..395.45 rows=4 width=36)
+   ->  Bitmap Heap Scan on gisttable3  (cost=100.30..395.45 rows=2 width=36)
+         Recheck Cond: (property ~= '(999,999),(998,998)'::box)
+         ->  Bitmap Index Scan on gistindex3a  (cost=0.00..100.30 rows=2 width=0)
+               Index Cond: (property ~= '(999,999),(998,998)'::box)
+ Optimizer: Postgres query optimizer
+(6 rows)
 
 -- ----------------------------------------------------------------------
 -- Test: test08UniqueAndPKey.sql
@@ -278,7 +281,7 @@ HINT:  You must specify an operator class or define a default operator class for
 ------------------------------------------------------------------------------
 -- PURPOSE:
 --     Test that you get a reasonable error message when you try to create a
---     HASH index (we no longer support those).
+--     HASH index ('box' datatype doesn't have a hash opclass).
 ------------------------------------------------------------------------------
 CREATE TABLE GistTable14 (
  id INTEGER,
@@ -287,9 +290,9 @@ CREATE TABLE GistTable14 (
  DISTRIBUTED BY (id);
 -- Try to create a hash index.
 CREATE INDEX GistIndex14a ON GistTable14 USING HASH (id);
-ERROR:  hash indexes are not supported
 CREATE INDEX GistIndex14b ON GistTable14 USING HASH (property);
-ERROR:  hash indexes are not supported
+ERROR:  data type box has no default operator class for access method "hash"
+HINT:  You must specify an operator class or define a default operator class for the data type.
 -- ----------------------------------------------------------------------
 -- Test GiST index on an AO table
 -- ----------------------------------------------------------------------

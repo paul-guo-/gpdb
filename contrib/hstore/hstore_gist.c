@@ -19,9 +19,6 @@
 typedef char BITVEC[SIGLEN];
 typedef char *BITVECP;
 
-#define SIGPTR(x)  ( (BITVECP) ARR_DATA_PTR(x) )
-
-
 #define LOOPBYTE \
 			for(i=0;i<SIGLEN;i++)
 
@@ -129,11 +126,13 @@ ghstore_compress(PG_FUNCTION_ARGS)
 		{
 			int			h;
 
-			h = crc32_sz((char *) HS_KEY(hsent, ptr, i), HS_KEYLEN(hsent, i));
+			h = crc32_sz((char *) HSTORE_KEY(hsent, ptr, i),
+						 HSTORE_KEYLEN(hsent, i));
 			HASH(GETSIGN(res), h);
-			if (!HS_VALISNULL(hsent, i))
+			if (!HSTORE_VALISNULL(hsent, i))
 			{
-				h = crc32_sz((char *) HS_VAL(hsent, ptr, i), HS_VALLEN(hsent, i));
+				h = crc32_sz((char *) HSTORE_VAL(hsent, ptr, i),
+							 HSTORE_VALLEN(hsent, i));
 				HASH(GETSIGN(res), h);
 			}
 		}
@@ -142,7 +141,7 @@ ghstore_compress(PG_FUNCTION_ARGS)
 		gistentryinit(*retval, PointerGetDatum(res),
 					  entry->rel, entry->page,
 					  entry->offset,
-					  FALSE);
+					  false);
 	}
 	else if (!ISALLTRUE(DatumGetPointer(entry->key)))
 	{
@@ -164,7 +163,7 @@ ghstore_compress(PG_FUNCTION_ARGS)
 		gistentryinit(*retval, PointerGetDatum(res),
 					  entry->rel, entry->page,
 					  entry->offset,
-					  FALSE);
+					  false);
 	}
 
 	PG_RETURN_POINTER(retval);
@@ -516,7 +515,7 @@ ghstore_consistent(PG_FUNCTION_ARGS)
 	if (strategy == HStoreContainsStrategyNumber ||
 		strategy == HStoreOldContainsStrategyNumber)
 	{
-		HStore	   *query = PG_GETARG_HS(1);
+		HStore	   *query = PG_GETARG_HSTORE_P(1);
 		HEntry	   *qe = ARRPTR(query);
 		char	   *qv = STRPTR(query);
 		int			count = HS_COUNT(query);
@@ -524,13 +523,15 @@ ghstore_consistent(PG_FUNCTION_ARGS)
 
 		for (i = 0; res && i < count; ++i)
 		{
-			int			crc = crc32_sz((char *) HS_KEY(qe, qv, i), HS_KEYLEN(qe, i));
+			int			crc = crc32_sz((char *) HSTORE_KEY(qe, qv, i),
+									   HSTORE_KEYLEN(qe, i));
 
 			if (GETBIT(sign, HASHVAL(crc)))
 			{
-				if (!HS_VALISNULL(qe, i))
+				if (!HSTORE_VALISNULL(qe, i))
 				{
-					crc = crc32_sz((char *) HS_VAL(qe, qv, i), HS_VALLEN(qe, i));
+					crc = crc32_sz((char *) HSTORE_VAL(qe, qv, i),
+								   HSTORE_VALLEN(qe, i));
 					if (!GETBIT(sign, HASHVAL(crc)))
 						res = false;
 				}
@@ -566,7 +567,7 @@ ghstore_consistent(PG_FUNCTION_ARGS)
 				continue;
 			crc = crc32_sz(VARDATA(key_datums[i]), VARSIZE(key_datums[i]) - VARHDRSZ);
 			if (!(GETBIT(sign, HASHVAL(crc))))
-				res = FALSE;
+				res = false;
 		}
 	}
 	else if (strategy == HStoreExistsAnyStrategyNumber)
@@ -581,7 +582,7 @@ ghstore_consistent(PG_FUNCTION_ARGS)
 						  TEXTOID, -1, false, 'i',
 						  &key_datums, &key_nulls, &key_count);
 
-		res = FALSE;
+		res = false;
 
 		for (i = 0; !res && i < key_count; ++i)
 		{
@@ -591,7 +592,7 @@ ghstore_consistent(PG_FUNCTION_ARGS)
 				continue;
 			crc = crc32_sz(VARDATA(key_datums[i]), VARSIZE(key_datums[i]) - VARHDRSZ);
 			if (GETBIT(sign, HASHVAL(crc)))
-				res = TRUE;
+				res = true;
 		}
 	}
 	else
