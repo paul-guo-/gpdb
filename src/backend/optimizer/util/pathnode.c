@@ -3318,9 +3318,11 @@ create_foreignscan_path(PlannerInfo *root, RelOptInfo *rel,
 			CdbPathLocus_MakeGeneral(&(pathnode->path.locus));
 			break;
 		case FTEXECLOCATION_ALL_SEGMENTS:
+		/* FIXME
 			if (rel->ftEntry->mpp_size > 0)
 				CdbPathLocus_MakeStrewn(&(pathnode->path.locus), rel->ftEntry->mpp_size);
 			else
+				*/
 				CdbPathLocus_MakeStrewn(&(pathnode->path.locus), getgpsegmentCount());
 			break;
 		case FTEXECLOCATION_COORDINATOR:

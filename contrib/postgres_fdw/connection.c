@@ -19,6 +19,7 @@
 #include "catalog/pg_user_mapping.h"
 #include "mb/pg_wchar.h"
 #include "miscadmin.h"
+#include "nodes/makefuncs.h"
 #include "pgstat.h"
 #include "storage/latch.h"
 #include "utils/hsearch.h"
@@ -45,7 +46,7 @@
  */
 typedef struct ConnCacheKey
 {
-	Oid			userid;			/* OID of local user whose mapping we use */
+	Oid			umid;			/* Oid of user mapping */
 	int			dbid;           /* the database ID of the foreign Greenplum cluster */
 } ConnCacheKey;
 
@@ -110,7 +111,7 @@ static bool pgfdw_get_cleanup_result(PGconn *conn, TimestampTz endtime,
 PGconn *
 GetConnection(UserMapping *user, bool will_prep_stmt)
 {
-	return GetCustomConnection(server, user, will_prep_stmt, 0, false);
+	return GetCustomConnection(user, will_prep_stmt, 0, false, NULL);
 }
 
 /*
@@ -122,8 +123,7 @@ GetConnection(UserMapping *user, bool will_prep_stmt)
  * The connection which runs `EXECUTE PARALLEL CURSOR` is not reusable.
  */
 PGconn *
-GetCustomConnection(ForeignServer *server, UserMapping *user,
-			  bool will_prep_stmt, int dbid, bool is_retrieve)
+GetCustomConnection(UserMapping *user, bool will_prep_stmt, int dbid, bool is_retrieve, List *server_options)
 {
 	bool		found;
 	ConnCacheEntry *entry;
@@ -159,7 +159,7 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 	xact_got_connection = true;
 
 	/* Create hash key for the entry.  Assume no pad bytes in key struct */
-	key.userid = user->umid;
+	key.umid = user->umid;
 	key.dbid = dbid;
 
 	/*
@@ -203,6 +203,29 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 	if (entry->conn == NULL)
 	{
 		ForeignServer *server = GetForeignServer(user->serverid);
+		ListCell   *cell;
+		DefElem    *dbname;
+
+		if (server_options != NULL)
+		{
+			/* Find the value of foreign sever option "dbname" */
+			dbname = NULL;
+			foreach(cell, server->options)
+			{
+				DefElem    *defel = (DefElem *) lfirst(cell);
+
+				if (strcmp(defel->defname, "dbname") == 0)
+				{
+					dbname = defel;
+					break;
+				}
+			}
+
+			Assert(dbname != NULL); // FIXME: Is this a correct assumption?
+			server_options = lappend(server_options, makeDefElem("dbname", dbname->arg, -1));
+
+			server->options = server_options;
+		}
 
 		/* Reset all transient state fields, to be sure all are clean */
 		entry->xact_depth = 0;
@@ -218,7 +241,7 @@ GetCustomConnection(ForeignServer *server, UserMapping *user,
 								  ObjectIdGetDatum(user->umid));
 
 		/* Now try to make the connection */
-		entry->conn = connect_pg_server(user, is_retrieve);
+		entry->conn = connect_pg_server(server, user, is_retrieve);
 		elog(DEBUG3, "new postgres_fdw connection %p for server \"%s\" (user mapping oid %u, userid %u)",
 			 entry->conn, server->servername, user->umid, user->userid);
 	}
@@ -1037,9 +1060,9 @@ pgfdw_reject_incomplete_xact_state_change(ConnCacheEntry *entry)
 
 	/* find server name to be shown in the message below */
 	tup = SearchSysCache1(USERMAPPINGOID,
-						  ObjectIdGetDatum(entry->key));
+						  ObjectIdGetDatum(entry->key.umid));
 	if (!HeapTupleIsValid(tup))
-		elog(ERROR, "cache lookup failed for user mapping %u", entry->key);
+		elog(ERROR, "cache lookup failed for user mapping %u on dbid%d", entry->key.umid, entry->key.dbid);
 	umform = (Form_pg_user_mapping) GETSTRUCT(tup);
 	server = GetForeignServer(umform->umserver);
 	ReleaseSysCache(tup);

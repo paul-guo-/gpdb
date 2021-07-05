@@ -393,8 +393,8 @@ foreign_expr_walker(Node *node,
 				Param	   *p = (Param *) node;
 
 				/* Otherwise gp2gp will try to get the param before executor, and fail */
-				if (glob_cxt->foreignrel->ftEntry->exec_location == FTEXECLOCATION_ALL_SEGMENTS
-					&& (p->paramkind == PARAM_EXEC_REMOTE || p->paramkind == PARAM_EXEC))
+				if (glob_cxt->foreignrel->exec_location == FTEXECLOCATION_ALL_SEGMENTS
+					&& p->paramkind == PARAM_EXEC)
 					return false;
 
 				/*
