@@ -288,7 +288,7 @@ EndpointNotifyQD(const char *message)
 }
 
 /*
- * Creates a dest receiver for PARALLEL RETRIEVE CURSOR. The dest reciever is
+ * Creates a dest receiver for PARALLEL RETRIEVE CURSOR. The dest receiver is
  * based on shm_mq that is used by the upstream parallel work.
  */
 void
@@ -724,6 +724,17 @@ unset_endpoint_sender_pid(Endpoint endpoint)
 static void
 abort_endpoint(EndpointExecState *state)
 {
+	if (state->dest)
+	{
+		/*
+		 * rShutdown callback will call shm_mq_detach(),
+		 * so need to call it before detach_mq() to clean up.
+		 */
+		DestReceiver    *endpointDest = state->dest;
+		(*endpointDest->rShutdown) (endpointDest);
+		(*endpointDest->rDestroy) (endpointDest);
+	}
+
 	if (state->endpoint)
 	{
 		LWLockAcquire(ParallelCursorEndpointLock, LW_EXCLUSIVE);

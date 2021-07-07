@@ -409,7 +409,7 @@ master=# SELECT * FROM GP_ENDPOINTS;
  tk071500004015dc6da471b20417afed65 | c1         |      5383 | mdw      | 25433 |    3 |     10 | ATTACHED  | c1_00001507_00000001
 (2 rows)
 -- To check if the retrieving finished
-master=# select gp_check_parallel_retrieve_cursor('c2');
+master=# select gp_check_parallel_retrieve_cursor('c1');
  gp_check_parallel_retrieve_cursor
 -----------------------------------
  f
