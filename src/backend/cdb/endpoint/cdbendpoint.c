@@ -352,6 +352,7 @@ DestroyTQDestReceiverForEndpoint(EndpointExecState *state)
 	 */
 	(*endpointDest->rShutdown) (endpointDest);
 	(*endpointDest->rDestroy) (endpointDest);
+	state->dest = NULL;
 
 	/*
 	 * Wait until all data is retrieved by receiver. This is needed because
@@ -733,6 +734,7 @@ abort_endpoint(EndpointExecState *state)
 		DestReceiver    *endpointDest = state->dest;
 		(*endpointDest->rShutdown) (endpointDest);
 		(*endpointDest->rDestroy) (endpointDest);
+		state->dest = NULL;
 	}
 
 	if (state->endpoint)
