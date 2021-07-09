@@ -366,8 +366,8 @@ DECLARE
 1: SET SESSION AUTHORIZATION u2;
 SET
 1: SELECT * from gp_endpoints();
- gp_segment_id | auth_token | cursorname | sessionid | hostname | port | userid | state | endpointname 
----------------+------------+------------+-----------+----------+------+--------+-------+--------------
+ dbid | auth_token | cursorname | sessionid | hostname | port | userid | state | endpointname 
+------+------------+------------+-----------+----------+------+--------+-------+--------------
 (0 rows)
 
 --- execute the cursor by u1

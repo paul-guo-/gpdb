@@ -233,7 +233,7 @@ gp_endpoints(PG_FUNCTION_ARGS)
 		TupleDesc	tupdesc =
 		CreateTemplateTupleDesc(9);
 
-		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "gp_segment_id", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "dbid", INT4OID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "auth_token", TEXTOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "cursorname", TEXTOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "sessionid", INT4OID, -1, 0);
@@ -377,7 +377,7 @@ gp_endpoints(PG_FUNCTION_ARGS)
 		MemSet(values, 0, sizeof(values));
 		MemSet(nulls, 0, sizeof(nulls));
 
-		values[0] = Int32GetDatum(segCnfInfo->segindex);
+		values[0] = Int32GetDatum(info->dbid);
 		endpoint_token_hex2str(info->token, tokenStr);
 		values[1] = CStringGetTextDatum(tokenStr);
 		values[2] = CStringGetTextDatum(info->cursorName);

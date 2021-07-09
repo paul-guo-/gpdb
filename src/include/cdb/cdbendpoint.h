@@ -123,9 +123,9 @@ extern EndpointExecState *allocEndpointExecState(void);
 /*
  * Below functions should run on Endpoints(QE/Entry DB).
  */
-extern void CreateTQDestReceiverForEndpoint(TupleDesc tupleDesc,
+extern void SetupEndpointExecState(TupleDesc tupleDesc,
 		const char *cursorName, EndpointExecState *state);
-extern void DestroyTQDestReceiverForEndpoint(EndpointExecState *state);
+extern void DestroyEndpointExecState(EndpointExecState *state);
 
 /* cdbendpointretrieve.c */
 

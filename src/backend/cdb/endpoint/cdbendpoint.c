@@ -20,17 +20,17 @@
  *
  * When a parallel retrieve cursor is declared, the query plan will be
  * dispatched to the corresponding QEs. Before the query execution, endpoints
- * will be created first on QEs. An struct of Endpoint in the shared memory
- * represents the endpoint. Through the Endpoint, the client could know the
- * endpoint's identification (endpoint name), location (dbid, host, port and
- * session id), and the state for the retrieve session. All of those
+ * will be created first on QEs. An instance of Endpoint struct in the shared
+ * memory represents the endpoint. Through the Endpoint, the client could know
+ * the endpoint's identification (endpoint name), location (dbid, host, port
+ * and session id), and the state for the retrieve session. All of those
  * information can be obtained on QD by UDF gp_endpoints() via dispatching
  * endpoint queries or on QE's retrieve session by UDF gp_segment_endpoints().
  *
  * Instead of returning the query result to QD through a normal dest receiver,
- * endpoints writes the results to TQueueDestReceiver which is a shared memory
+ * endpoints write the results to TQueueDestReceiver which is a shared memory
  * queue and can be retrieved from a different process. See
- * CreateTQDestReceiverForEndpoint(). The information about the message queue
+ * SetupEndpointExecState(). The information about the message queue
  * is also stored in the Endpoint so that the retrieve session on the same QE
  * can know.
  *
@@ -43,7 +43,7 @@
  *
  * When the query finishes, the endpoint won't be destroyed immediately since we
  * may still want to check its state on QD. In the implementation, the
- * DestroyTQDestReceiverForEndpoint is blocked until the parallel retrieve cursor
+ * DestroyEndpointExecState() is blocked until the parallel retrieve cursor
  * is closed explicitly through CLOSE statement or error happens.
  *
  * UDF gp_check_parallel_retrieve_cursor() and
@@ -292,8 +292,8 @@ EndpointNotifyQD(const char *message)
  * based on shm_mq that is used by the upstream parallel work.
  */
 void
-CreateTQDestReceiverForEndpoint(TupleDesc tupleDesc, const char *cursorName,
-								EndpointExecState *state)
+SetupEndpointExecState(TupleDesc tupleDesc, const char *cursorName,
+					   EndpointExecState *state)
 {
 	shm_mq_handle	*shmMqHandle;
 	DestReceiver	*endpointDest;
@@ -322,7 +322,7 @@ CreateTQDestReceiverForEndpoint(TupleDesc tupleDesc, const char *cursorName,
 
 
 /*
- * DestroyTQDestReceiverForEndpoint - destroy TupleQueueDestReceiver
+ * DestroyEndpointExecState - destroy TupleQueueDestReceiver
  *
  * If the queue is large enough for tuples to send, must wait for a receiver
  * to attach the message queue before endpoint detaches the message queue.
@@ -332,7 +332,7 @@ CreateTQDestReceiverForEndpoint(TupleDesc tupleDesc, const char *cursorName,
  * Should also clean all other endpoint info here.
  */
 void
-DestroyTQDestReceiverForEndpoint(EndpointExecState *state)
+DestroyEndpointExecState(EndpointExecState *state)
 {
 	DestReceiver	*endpointDest = state->dest;
 
@@ -356,7 +356,7 @@ DestroyTQDestReceiverForEndpoint(EndpointExecState *state)
 
 	/*
 	 * Wait until all data is retrieved by receiver. This is needed because
-	 * when endpoint send all data to shared message queue. The retrieve
+	 * when the endpoint sends all data to shared message queue. The retrieve
 	 * session may still not get all data from
 	 */
 	wait_receiver(state);
@@ -384,7 +384,7 @@ DestroyTQDestReceiverForEndpoint(EndpointExecState *state)
 	detach_mq(state->dsmSeg);
 	state->dsmSeg = NULL;
 
-	CurrEndpointExecState = state;
+	CurrEndpointExecState = NULL;
 }
 
 /*
@@ -981,7 +981,15 @@ generate_endpoint_name(char *name, const char *cursorName)
 	snprintf(name + len, ENDPOINT_NAME_SESSIONID_LEN + 1, "%08x", gp_session_id);
 	len += ENDPOINT_NAME_SESSIONID_LEN;
 
-	/* part3: gp_command_count */
+	/*
+	 * part3: gp_command_count
+	 * In theory cursor name + gp_session_id is enough, but we'd keep this part
+	 * to avoid confusion or potential issues for the scenario that in the same
+	 * session (thus same gp_session_id), two endpoints with same cursor names
+	 * (happens the cursor is dropped/rollbacked and then recreated) and
+	 * retrieve the endpoints would be confusing for users that in the same
+	 * retrieve connection.
+	 */
 	snprintf(name + len, ENDPOINT_NAME_COMMANDID_LEN + 1, "%08x", gp_command_count);
 	len += ENDPOINT_NAME_COMMANDID_LEN;
 
@@ -1013,7 +1021,7 @@ allocEndpointExecState()
 
 	if (unlikely(CurrEndpointExecState != NULL))
 		ereport(ERROR, (errcode(ERRCODE_INTERNAL_ERROR),
-						errmsg("Previous endpoint estate is cleaned up.")));
+						errmsg("Previous endpoint estate is not cleaned up.")));
 
 	oldcontext = MemoryContextSwitchTo(TopMemoryContext);
 
