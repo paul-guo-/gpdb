@@ -3474,9 +3474,9 @@ AbortTransaction(void)
 	 * do abort processing
 	 */
 	AfterTriggerEndXact(false); /* 'false' means it's abort */
+	AtAbort_EndpointExecState();
 	AtAbort_Portals();
 	AtAbort_DispatcherState();
-	AtAbort_EndpointExecState();
 	AtEOXact_SharedSnapshot();
 
 	/* Perform any Resource Scheduler abort procesing. */
