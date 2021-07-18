@@ -4781,7 +4781,6 @@ _outSortBy(StringInfo str, const SortBy *node)
 	WRITE_ENUM_FIELD(sortby_dir, SortByDir);
 	WRITE_ENUM_FIELD(sortby_nulls, SortByNulls);
 	WRITE_NODE_FIELD(useOp);
-	WRITE_NODE_FIELD(node);
 	WRITE_LOCATION_FIELD(location);
 }
 

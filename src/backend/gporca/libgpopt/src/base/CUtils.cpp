@@ -53,6 +53,7 @@
 #include "gpopt/operators/CScalarArrayCoerceExpr.h"
 #include "gpopt/operators/CScalarCast.h"
 #include "gpopt/operators/CScalarCmp.h"
+#include "gpopt/operators/CScalarCoerceViaIO.h"
 #include "gpopt/operators/CScalarIdent.h"
 #include "gpopt/operators/CScalarIsDistinctFrom.h"
 #include "gpopt/operators/CScalarNullTest.h"
@@ -3654,6 +3655,13 @@ CUtils::PexprCast(CMemoryPool *mp, CMDAccessor *md_accessor, CExpression *pexpr,
 				parrayCoerceCast->Location()),
 			pexpr);
 	}
+	else if (pmdcast->GetMDPathType() == IMDCast::EmdtCoerceViaIO)
+	{
+		CScalarCoerceViaIO *op = GPOS_NEW(mp)
+			CScalarCoerceViaIO(mp, mdid_dest, default_type_modifier,
+							   COperator::EcfImplicitCast, -1 /* location */);
+		pexprCast = GPOS_NEW(mp) CExpression(mp, op, pexpr);
+	}
 	else
 	{
 		CScalarCast *popCast =
@@ -3838,9 +3846,19 @@ CUtils::PcrMap(CColRef *pcrSource, CColRefArray *pdrgpcrSource,
 	return pcrTarget;
 }
 
+BOOL
+CUtils::FDuplicateHazardDistributionSpec(CDistributionSpec *pds)
+{
+	CDistributionSpec::EDistributionType edt = pds->Edt();
+
+	return CDistributionSpec::EdtStrictReplicated == edt ||
+		   CDistributionSpec::EdtUniversal == edt;
+}
+
 // Check if duplicate values can be generated when executing the given Motion expression,
-// duplicates occur if Motion's input has replicated/universal distribution,
-// which means that we have exactly the same copy of input on each host,
+// duplicates occur if Motion's input has strict-replicated/universal distribution,
+// which means that we have exactly the same copy of input on each host. Note that
+// tainted-replicated does not satisfy the assertion of identical input copies.
 BOOL
 CUtils::FDuplicateHazardMotion(CExpression *pexprMotion)
 {
@@ -3851,14 +3869,8 @@ CUtils::FDuplicateHazardMotion(CExpression *pexprMotion)
 	CDrvdPropPlan *pdpplanChild =
 		CDrvdPropPlan::Pdpplan(pexprChild->PdpDerive());
 	CDistributionSpec *pdsChild = pdpplanChild->Pds();
-	CDistributionSpec::EDistributionType edtChild = pdsChild->Edt();
 
-	BOOL fReplicatedInput =
-		CDistributionSpec::EdtStrictReplicated == edtChild ||
-		CDistributionSpec::EdtUniversal == edtChild ||
-		CDistributionSpec::EdtTaintedReplicated == edtChild;
-
-	return fReplicatedInput;
+	return CUtils::FDuplicateHazardDistributionSpec(pdsChild);
 }
 
 // Collapse the top two project nodes like this, if unable return NULL;

@@ -3246,6 +3246,83 @@ select * from sqall_t1 where a not in (
 	    select b.a from sqall_t1 a left join sqall_t1 b on false);
 reset optimizer_join_order;
 
+create table tt_varchar(
+	data character varying
+) distributed by (data);
+insert into tt_varchar values('test');
+create table tt_int(
+	id integer
+) distributed by (id);
+insert into tt_int values(1);
+
+set optimizer_enforce_subplans = 1;
+-- test collation in subplan testexpr
+select data from tt_varchar where data > any(select id::text from tt_int);
+-- test implicit coerce via io
+CREATE CAST (integer AS text) WITH INOUT AS IMPLICIT;
+select data from tt_varchar where data > any(select id from tt_int);
+
+DROP CAST (integer AS text);
+reset optimizer_enforce_subplans;
+
+create table left_outer_index_nl_foo (a integer, b integer, c integer) distributed randomly;
+create table left_outer_index_nl_bar (a integer, b integer, c integer) distributed randomly;
+create index left_outer_index_nl_bar_idx on left_outer_index_nl_bar using btree (b);
+
+insert into left_outer_index_nl_foo select i, i, i from generate_series(1, 4)i;
+insert into left_outer_index_nl_bar select i, i, i from generate_series(2, 6)i;
+
+analyze left_outer_index_nl_foo;
+analyze left_outer_index_nl_bar;
+
+set optimizer_enable_hashjoin=off;
+set enable_nestloop=on;
+set enable_hashjoin=off;
+
+--- verify that the inner half of a left outer nested loop join is non-randomly distributed
+explain select r.a, r.b, r.c, l.c from left_outer_index_nl_foo r left outer join left_outer_index_nl_bar l on r.b=l.b;
+select r.a, r.b, r.c, l.c from left_outer_index_nl_foo r left outer join left_outer_index_nl_bar l on r.b=l.b;
+
+create table left_outer_index_nl_foo_hash (a integer, b integer, c text);
+create table left_outer_index_nl_bar_hash (a integer, b integer, c text);
+create index left_outer_index_nl_bar_hash_idx on left_outer_index_nl_bar_hash using btree (b);
+
+insert into left_outer_index_nl_foo_hash select i, i, i from generate_series(1, 4)i;
+insert into left_outer_index_nl_bar_hash select i, i, i from generate_series(2, 6)i;
+
+analyze left_outer_index_nl_foo_hash;
+analyze left_outer_index_nl_bar_hash;
+
+--- verify that the inner half of a left outer nested loop join is non-randomly distributed
+explain select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_hash r left outer join left_outer_index_nl_bar l on r.b=l.b;
+select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_hash r left outer join left_outer_index_nl_bar l on r.b=l.b;
+
+--- verify that a motion is introduced such that joins on each segment are internal to that segment (distributed by join key)
+explain select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_hash r left outer join left_outer_index_nl_bar_hash l on r.b=l.b;
+select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_hash r left outer join left_outer_index_nl_bar_hash l on r.b=l.b;
+
+create table left_outer_index_nl_foo_repl (a integer, b integer, c integer) distributed replicated;
+create table left_outer_index_nl_bar_repl (a integer, b integer, c integer) distributed replicated;
+create index left_outer_index_nl_bar_repl_idx on left_outer_index_nl_bar_repl using btree (b);
+
+insert into left_outer_index_nl_foo_repl select i, i, i from generate_series(1, 4)i;
+insert into left_outer_index_nl_bar_repl select i, i, i from generate_series(2, 6)i;
+
+analyze left_outer_index_nl_foo_repl;
+analyze left_outer_index_nl_bar_repl;
+
+--- replicated on both sides shouldn't require a motion
+explain select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_repl r left outer join left_outer_index_nl_bar_repl l on r.b=l.b;
+select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_repl r left outer join left_outer_index_nl_bar_repl l on r.b=l.b;
+
+--- outer side replicated, inner side hashed can have interesting cases (gather + join on one segment of inner side and redistribute + join + gather are both valid)
+explain select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_repl r left outer join left_outer_index_nl_bar_hash l on r.b=l.b;
+select r.a, r.b, r.c, l.c from left_outer_index_nl_foo_repl r left outer join left_outer_index_nl_bar_hash l on r.b=l.b;
+
+reset optimizer_enable_hashjoin;
+reset enable_nestloop;
+reset enable_hashjoin;
+
 -- start_ignore
 DROP SCHEMA orca CASCADE;
 -- end_ignore
