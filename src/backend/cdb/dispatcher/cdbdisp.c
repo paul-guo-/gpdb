@@ -328,6 +328,7 @@ cdbdisp_makeDispatcherState(bool isExtendedQuery)
 #endif
 	handle->dispatcherState->allocatedGangs = NIL;
 	handle->dispatcherState->largestGangSize = 0;
+	handle->dispatcherState->rootGangSize = 0;
 	handle->dispatcherState->destroyIdleReaderGang = false;
 
 	return handle->dispatcherState;
@@ -414,7 +415,8 @@ cdbdisp_destroyDispatcherState(CdbDispatcherState *ds)
 	ds->allocatedGangs = NIL;
 	ds->dispatchParams = NULL;
 	ds->primaryResults = NULL;
-	ds->largestGangSize= 0;
+	ds->largestGangSize = 0;
+	ds->rootGangSize = 0;
 
 	if (h != NULL)
 		destroy_dispatcher_handle(h);

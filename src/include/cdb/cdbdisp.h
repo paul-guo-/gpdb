@@ -44,6 +44,7 @@ typedef struct CdbDispatcherState
 	struct CdbDispatchResults *primaryResults;
 	void *dispatchParams;
 	int	largestGangSize;
+	int rootGangSize;
 	bool forceDestroyGang;
 	bool isExtendedQuery;
 #ifdef USE_ASSERT_CHECKING

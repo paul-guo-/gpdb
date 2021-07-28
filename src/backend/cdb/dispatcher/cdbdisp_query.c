@@ -1135,6 +1135,8 @@ cdbdisp_dispatchX(QueryDesc* queryDesc,
 		}
 
 		primaryGang = slice->primaryGang;
+		if (si == slice->rootIndex)
+			ds->rootGangSize = primaryGang->size;
 		Assert(primaryGang != NULL);
 		AssertImply(queryDesc->extended_query,
 					primaryGang->type == GANGTYPE_PRIMARY_READER ||

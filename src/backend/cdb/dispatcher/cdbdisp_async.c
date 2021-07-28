@@ -474,6 +474,7 @@ checkDispatchResult(CdbDispatcherState *ds,
 		int			sock;
 		int			n;
 		int			nfds = 0;
+		int			all_acked = 0;
 		PGconn		*conn;
 
 		/*
@@ -500,15 +501,19 @@ checkDispatchResult(CdbDispatcherState *ds,
 			segdbDesc = dispatchResult->segdbDesc;
 			conn = segdbDesc->conn;
 
+			if (pParms->waitMode == DISPATCH_WAIT_ACK_MESSAGE &&
+				checkAckMessage(dispatchResult, pParms->ackMessage))
+			{
+				all_acked++;
+				continue;
+			}
+
 			/*
 			 * Already finished with this QE?
 			 */
 			if (!dispatchResult->stillRunning)
 				continue;
 
-			if (pParms->waitMode == DISPATCH_WAIT_ACK_MESSAGE &&
-				checkAckMessage(dispatchResult, pParms->ackMessage))
-				continue;
 
 			Assert(!cdbconn_isBadConnection(segdbDesc));
 
@@ -539,9 +544,10 @@ checkDispatchResult(CdbDispatcherState *ds,
 		}
 
 		/*
-		 * Break out when no QEs still running.
+		 * Break out when no QEs still running or the root slice all acked.
 		 */
-		if (nfds <= 0)
+		if (nfds <= 0 ||
+			(pParms->waitMode == DISPATCH_WAIT_ACK_MESSAGE && all_acked == ds->rootGangSize))
 			break;
 
 		/*
