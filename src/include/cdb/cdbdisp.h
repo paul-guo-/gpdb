@@ -34,7 +34,6 @@ typedef enum DispatchWaitMode
 {
 	DISPATCH_WAIT_NONE = 0,			/* wait until QE fully completes */
 	DISPATCH_WAIT_ACK_ROOT,			/* wait until root slice QE send acknowledge message */
-	DISPATCH_WAIT_ACK_ALL,			/* wait until all QE send acknowledge message */
 	DISPATCH_WAIT_FINISH,			/* send query finish */
 	DISPATCH_WAIT_CANCEL			/* send query cancel */
 } DispatchWaitMode;
