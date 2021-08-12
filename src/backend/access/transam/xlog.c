@@ -12900,7 +12900,7 @@ wait_to_avoid_large_repl_lag(void)
 	 */
 	if (wal_bytes_written > throttle_size &&
 		!IS_QUERY_DISPATCHER() &&
-		gp_get_walsender_state() == WALSNDSTATE_CATCHUP)
+		gp_is_walsender_catchup())
 	{
 		XLogRecPtr ori_min_lsn, cur_min_lsn;
 		int64_t ori_lag, cur_lag;
@@ -12929,7 +12929,7 @@ wait_to_avoid_large_repl_lag(void)
 			 * reduce the catchup time by 50% during heavy write load.
 			 */
 			if ((ori_lag - cur_lag) >= 2 * throttle_size ||
-				gp_get_walsender_state() != WALSNDSTATE_CATCHUP)
+				!gp_is_walsender_catchup())
 				break;
 
 		}

@@ -581,13 +581,12 @@ GetMirrorStatus(FtsResponse *response, bool *ready_for_syncrep)
 }
 
 /*
- * Get the state of the wal sender for primary-mirror wal streaming.
+ * Is the mirror catching up?
  */
-WalSndState
-gp_get_walsender_state()
+bool
+gp_is_walsender_catchup()
 {
 	int			i;
-	WalSndState state = WALSNDSTATE_STARTUP;
 
 	for (i = 0; i < max_wal_senders; i++)
 	{
@@ -595,17 +594,18 @@ gp_get_walsender_state()
 
 		SpinLockAcquire(&walsender->mutex);
 
-		if (walsender->is_for_gp_walreceiver)
+		if (walsender->is_for_gp_walreceiver &&
+			walsender->pid != 0 &&
+			walsender->state == WALSNDSTATE_CATCHUP)
 		{
-			state = walsender->state;
 			SpinLockRelease(&walsender->mutex);
-			break;
+			return true;
 		}
 
 		SpinLockRelease(&walsender->mutex);
 	}
 
-	return state;
+	return false;
 }
 
 /*
