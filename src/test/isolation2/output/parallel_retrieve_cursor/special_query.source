@@ -35,12 +35,12 @@ DECLARE
  endpoint_id1 | token_id | host_id | port_id | READY
 (3 rows)
 
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
  finished 
 ----------
  f        
 (1 row)
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);  <waiting ...>
 
 *U: @pre_run 'set_endpoint_variable @ENDPOINT1': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT1';
  state 

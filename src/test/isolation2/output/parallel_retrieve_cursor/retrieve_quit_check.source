@@ -1,6 +1,6 @@
 -- @Description Tests retrieve quit
 -- Test quitting retrieve sessions interfering with multiple endpoints when calling
--- gp_check_parallel_retrieve_cursor.
+-- gp_wait_parallel_retrieve_cursor.
 DROP TABLE IF EXISTS t1;
 DROP
 CREATE TABLE t1 (a INT) DISTRIBUTED by (a);
@@ -147,7 +147,7 @@ ERROR:  another session (pid: 49941) used the endpoint and completed retrieving
           
 (1 row)
 -- make sure no error for c2
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
  finished 
 ----------
  f        
@@ -179,11 +179,11 @@ ERROR:  another session (pid: 49941) used the endpoint and completed retrieving
 
 -- Now check on c1 will trigger the error, all endpoints should be aborted since the transaction
 -- will be terminated.
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
-ERROR:  canceling MPP operation: "Endpoint retrieve session is quitting. All unfinished parallel retrieve cursors on the session will be terminated."  (seg0 192.168.235.128:7002 pid=69700)
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
+ERROR:  canceling MPP operation: "Endpoint retrieve session is quitting. All unfinished parallel retrieve cursors on the session will be terminated."  (seg0 192.168.235.128:7002 pid=78585)
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c3');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', 0);
 ERROR:  current transaction is aborted, commands ignored until end of transaction block
 2: SELECT cursorname, state FROM gp_endpoints();
  cursorname | state 

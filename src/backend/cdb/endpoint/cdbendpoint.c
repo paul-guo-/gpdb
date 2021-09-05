@@ -46,8 +46,7 @@
  * DestroyEndpointExecState() is blocked until the parallel retrieve cursor
  * is closed explicitly through CLOSE statement or error happens.
  *
- * UDF gp_check_parallel_retrieve_cursor() and
- * gp_wait_parallel_retrieve_cursor() are supplied as helper functions
+ * UDF gp_wait_parallel_retrieve_cursor() is supplied as helper function
  * to monitor the retrieve state. They should be run in the declare transaction
  * block on QD.
  *
@@ -250,7 +249,7 @@ WaitEndpointsReady(EState *estate)
 	Assert(estate);
 	CdbDispatcherState *ds = estate->dispatcherState;
 
-	cdbdisp_checkDispatchAckMessage(ds, ENDPOINT_READY_ACK_MSG, true, DISPATCH_WAIT_ACK_ROOT);
+	cdbdisp_checkDispatchAckMessage(ds, ENDPOINT_READY_ACK_MSG, -1);
 	check_parallel_retrieve_cursor_errors(estate);
 }
 

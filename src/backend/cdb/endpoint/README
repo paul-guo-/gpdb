@@ -224,44 +224,21 @@ postgres=# select * from gp_segment_endpoints();
  51c6cd7f4c10c4a36579fbbb24cc6371 |      13361 |      3854 |          -1 | READY |    2 |         8 |     10 | c30000000800000003 | c3
 (1 row)
 
-
-Check Parallel Retrieve Cursor Retrieving Status
-================================================
-
-UDF gp_check_parallel_retrieve_cursor(text) is designed for checking if all
-endpoints have been fully retrieved for the given parallel retrieve cursor or
-not. It will abort the current transaction if any error happens in the
-retrieving sessions. If error happens, the parallel retrieve cursor will be
-closed and all related endpoints will be freed.
-
-Definition: gp_check_parallel_retrieve_cursor(cursor_name)
-
-cursor_name is the parallel retrieve cursor name to be checked.  It returns
-true if all endpoints have been fully retrieved. If any endpoint for the cursor
-has data remained, it returns false. It throws error message if any error
-happens during retrieving on segments.
-
-Examples:
-
-postgres=# SELECT gp_check_parallel_retrieve_cursor('c2');
- gp_check_parallel_retrieve_cursor
------------------------------------
- t
-(1 row)
-
-
 Wait Parallel Retrieve Cursor To Be Fully Retrieved
 ===================================================
 
 UDF gp_wait_parallel_retrieve_cursor(text) is designed to block until all the
-endpoints have been fully retrieved for the given parallel retrieve cursor. It
-will block the coordinator session until all the relevant endpoints are fully
-retrieved or any error happens in the retrieving sessions. When error happens,
-the current transaction will be aborted, all parallel retrieve cursors and
-their endpoints in current transaction will be freed. If it is interrupted by
-signals, the transaction will be aborted as well.
+endpoints have been fully retrieved for the given parallel retrieve cursor
+until timeout happens. It will block the coordinator session until all the
+relevant endpoints are fully retrieved unless timeout or error happens. When
+error happens, the current transaction will be aborted, all parallel retrieve
+cursors and their endpoints in current transaction will be freed. If it is
+interrupted by signals, the transaction will be aborted as well. When timeout
+happens, it will report whether all retrieve operations finish or not. Specify
+timeout_sec as 0 to check the status immediately and specify timeout_sec as -1
+to block until retrieve finishes or error happens.
 
-Definition: gp_wait_parallel_retrieve_cursor(cursor_name)
+Definition: gp_wait_parallel_retrieve_cursor(cursor_name, timeout_sec)
 
 It will only return true if all endpoints fully retrieved. In any other cases,
 an error message will be thrown.
@@ -280,9 +257,8 @@ Error Handling In Retrieve Session
 
 When error happens in a retrieve session, the endpoint will be removed from QE.
 The other retrieve sessions can still retrieve from other endpoints which
-belong to this session at this time. But if
-gp_check_parallel_retrieve_cursor(), gp_wait_parallel_retrieve_cursor() or
-CLOSE are executed on QD, the other retrieve sessions will be canceled since
+belong to this session at this time. But if gp_wait_parallel_retrieve_cursor()
+or CLOSE are executed on QD, the other retrieve sessions will be canceled since
 the error is delivered to QD and treated as an error happens in the
 transaction.
 
@@ -402,8 +378,8 @@ postgres=# SELECT * FROM gp_endpoints();
 (3 rows)
 
 -- To check if the retrieving finished on the coordinator connection.
-postgres =# select gp_check_parallel_retrieve_cursor('c1');
- gp_check_parallel_retrieve_cursor
+postgres =# select gp_wait_parallel_retrieve_cursor('c1', 0);
+ gp_wait_parallel_retrieve_cursor
 -----------------------------------
  f
 (1 row)

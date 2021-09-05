@@ -1,5 +1,5 @@
 -- @Description Tests the state for pg_endpoints AND gp_segment_endpoints(), focus in nowait mode
--- need to fault injection to gp_check_parallel_retrieve_cursor() 
+-- need to fault injection to gp_wait_parallel_retrieve_cursor()
 -- 
 DROP TABLE IF EXISTS t1;
 CREATE TABLE t1 (a INT) DISTRIBUTED by (a);
@@ -9,12 +9,12 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c1 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 1 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c1';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
 
 *U: @pre_run 'set_endpoint_variable @ENDPOINT1': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT1';
 *R: @pre_run 'set_endpoint_variable @ENDPOINT1': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT1";
 
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
 1: CLOSE c1;
 -- check no endpoint info
 1: SELECT auth_token,state FROM gp_endpoints() WHERE cursorname='c1';
@@ -22,7 +22,7 @@ insert into t1 select generate_series(1,100);
 *U: SELECT * FROM gp_segment_endpoints() WHERE cursorname='c1';
 
 -- error out for closed cursor
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
 1: ROLLBACK;
 
 ---------- Test2: enhanced test for parallel retrieve interface state & cursor auto closed when transaction closed
@@ -31,7 +31,7 @@ insert into t1 select generate_series(1,100);
 1: @post_run 'parse_endpoint_info 2 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c2';
 -- test RETRIEVE success on seg1
 0R: @pre_run 'set_endpoint_variable @ENDPOINT2': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT2";
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
 
 -- check initial state after "CHECK PARALLEL RETRIEVE CURSOR"
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c2';
@@ -48,7 +48,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c2';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c2';
 
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
 1: COMMIT;
 -- check the cursor auto closed when transaction closed
 -- check no endpoint info
@@ -57,14 +57,14 @@ insert into t1 select generate_series(1,100);
 *U: SELECT * FROM gp_segment_endpoints() WHERE cursorname='c2';
 
 -- error out for closed cursor
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
 1: ROLLBACK;
 
 ---------- Test3: 2 retrieving sessions connect to the same endpoint report error & cancel QE exec backend
 1: BEGIN;
 1: DECLARE c3 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 3 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c3';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c3');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', 0);
 0R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
 -- a new retrieve session should report error
 3R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
@@ -79,12 +79,12 @@ insert into t1 select generate_series(1,100);
 -- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1: SELECT pg_sleep(0.4);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c3';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c3');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', 0);
 -- check no endpoint info left
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c3';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c3';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c3');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', 0);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c3';
@@ -94,7 +94,7 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c4 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 4 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c4';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c4');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', 0);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT4";
 1R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT4";
@@ -108,13 +108,13 @@ insert into t1 select generate_series(1,100);
 -- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1: SELECT pg_sleep(0.4);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c4';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c4');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', 0);
 -- check no endpoint info left
 2q:
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c4';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c4';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c4');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', 0);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c4';
@@ -125,7 +125,7 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c5 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 5 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c5';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c5');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5', 0);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT5': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT5";
 -- 1R still bind to Test4 session, so can not retrieve from current endpoint.
@@ -140,12 +140,12 @@ insert into t1 select generate_series(1,100);
 -- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1: SELECT pg_sleep(0.4);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c5';
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c5');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5', 0);
 -- check no endpoint info left
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c5';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c5';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c5');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5', 0);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c5';
@@ -153,8 +153,8 @@ insert into t1 select generate_series(1,100);
 
 ---------- Test6: Cancel (using signal INT) the process of 'CHECK PARALLEL RETRIEVE CURSOR'
 -- faul injection on QD
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'reset', 1); 
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'reset', 1);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
 1: BEGIN;
 1: DECLARE c6 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 6 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c6';
@@ -165,15 +165,15 @@ insert into t1 select generate_series(1,100);
 1R: @pre_run 'set_endpoint_variable @ENDPOINT6': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT6";
 -- run 'kill -s INT QDPid' to cancel the endpoint execution backend, retrieve session still can work
 -- fault injection sleep to wait for canceling the endpoint execution backend, retrieve session still can work
-1&: SELECT * FROM gp_check_parallel_retrieve_cursor('c6');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6', 0);
 0U: @pre_run 'kill -s INT ${PID61} && echo "${RAW_STR}" ': SELECT 1;
--- check it can cancel the "gp_check_parallel_retrieve_cursor"
+-- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1<:
 -- check no endpoint info left
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c6';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c6';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c6');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6', 0);
 1: ROLLBACK;
 -- check no endpoint info
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c6';
@@ -181,8 +181,8 @@ insert into t1 select generate_series(1,100);
 
 ---------- Test6.1: Cancel (using signal INT) the process of 'CHECK PARALLEL RETRIEVE CURSOR' without rollback
 -- faul injection on QD
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'reset', 1); 
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'reset', 1);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
 1: BEGIN;
 1: DECLARE c61 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 61 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c61';
@@ -193,9 +193,9 @@ insert into t1 select generate_series(1,100);
 1R: @pre_run 'set_endpoint_variable @ENDPOINT61': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT61";
 -- run 'kill -s INT QDPid' to cancel the endpoint execution backend, retrieve session still can work
 -- fault injection sleep to wait for canceling the endpoint execution backend, retrieve session still can work
-1&: SELECT * FROM gp_check_parallel_retrieve_cursor('c61');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c61', 0);
 0U: @pre_run 'kill -s INT ${PID611} && echo "${RAW_STR}" ': SELECT 1;
--- check it can cancel the "gp_check_parallel_retrieve_cursor"
+-- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1<:
 -- check no endpoint info left
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c61';
@@ -209,8 +209,8 @@ insert into t1 select generate_series(1,100);
 1Rq:
 
 ---------- Test7: terminate (using signal QUIT) the process of 'CHECK PARALLEL RETRIEVE CURSOR'
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'reset', 1); 
-1: SELECT gp_inject_fault('check_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'reset', 1);
+1: SELECT gp_inject_fault('gp_wait_parallel_retrieve_cursor_after_udf', 'sleep', '', '', '', 1, 1, 1, 1::smallint);
 1: BEGIN;
 1: DECLARE c7 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 7 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c7';
@@ -222,7 +222,7 @@ insert into t1 select generate_series(1,100);
 2U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c7';
 -- run 'kill -s QUIT QDPid' to cancel the endpoint execution backend, retrieve session still can work
 -- here need to sleep sometime to wait for endpoint QE backend to detect QD connection lost.
-1&: SELECT * FROM gp_check_parallel_retrieve_cursor('c7');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7', 0);
 0U: @pre_run 'kill -s QUIT ${PID71}&& sleep 5 && echo "${RAW_STR}" ': SELECT 1;
 -- check it can cancel the "gp_wait_parallel_retrieve_cursor"
 1<:
@@ -234,7 +234,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c7';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c7';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7', -1);
 1: ROLLBACK;
 -- check no endpoint info
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c7';

@@ -58,7 +58,7 @@ typedef struct DispatcherInternalFuncs
 	bool (*checkForCancel)(struct CdbDispatcherState *ds);
 	int (*getWaitSocketFd)(struct CdbDispatcherState *ds);
 	void* (*makeDispatchParams)(int maxSlices, int largestGangSize, char *queryText, int queryTextLen);
-	bool (*checkAckMessage)(struct CdbDispatcherState *ds, const char* message, bool wait, DispatchWaitMode waitMode);
+	bool (*checkAckMessage)(struct CdbDispatcherState *ds, const char* message, int timeout_sec);
 	void (*checkResults)(struct CdbDispatcherState *ds, DispatchWaitMode waitMode);
 	void (*dispatchToGang)(struct CdbDispatcherState *ds, struct Gang *gp, int sliceIndex);
 	void (*waitDispatchFinish)(struct CdbDispatcherState *ds);
@@ -130,14 +130,12 @@ cdbdisp_waitDispatchFinish(struct CdbDispatcherState *ds);
  * message: specifies the expected ACK message to check.
  * wait: if true, this function will wait until required ACK messages
  *       have been received from required QEs.
- * waitMode: DISPATCH_WAIT_ACK_ROOT only waits ACK of the root slice;
- *           DISPATCH_WAIT_ACK_ALL waits ACK of all slices.
  *
  * QEs should call cdbdisp_sendAckMessageToQD to send acknowledge messages to QD.
  */
 bool
 cdbdisp_checkDispatchAckMessage(struct CdbDispatcherState *ds, const char *message,
-								bool wait, DispatchWaitMode waitMode);
+								int timeout_sec);
 
 /*
  * CdbCheckDispatchResult:

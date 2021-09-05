@@ -8,7 +8,7 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c1 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 1 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c1';
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
 
 *U: @pre_run 'set_endpoint_variable @ENDPOINT1': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT1';
 *R: @pre_run 'set_endpoint_variable @ENDPOINT1': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT1";
@@ -21,7 +21,7 @@ insert into t1 select generate_series(1,100);
 *U: SELECT * FROM gp_segment_endpoints() WHERE cursorname='c1';
 
 -- error out for closed cursor
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
 1: ROLLBACK;
 
 ---------- Test2: enhanced test for parallel retrieve interface state & cursor auto closed when transaction closed
@@ -30,7 +30,7 @@ insert into t1 select generate_series(1,100);
 1: @post_run 'parse_endpoint_info 2 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c2';
 -- test RETRIEVE success on seg1
 0R: @pre_run 'set_endpoint_variable @ENDPOINT2': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT2";
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);
 
 -- check initial state after "CHECK PARALLEL RETRIEVE CURSOR"
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c2';
@@ -56,14 +56,14 @@ insert into t1 select generate_series(1,100);
 *U: SELECT * FROM gp_segment_endpoints() WHERE cursorname='c2';
 
 -- error out for closed cursor
-1: SELECT * FROM gp_check_parallel_retrieve_cursor('c2');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', 0);
 1: ROLLBACK;
 
 ---------- Test3: 2 retrieving sessions connect to the same endpoint report error & cancel QE exec backend
 1: BEGIN;
 1: DECLARE c3 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 3 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c3';
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);
 0R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
 -- a new retrieve session should report error
 3R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
@@ -81,7 +81,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c3';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c3';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c3';
@@ -91,7 +91,7 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c4 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 4 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c4';
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', -1);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT4";
 1R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT4";
@@ -109,7 +109,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c4';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c4';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', -1);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c4';
@@ -120,7 +120,7 @@ insert into t1 select generate_series(1,100);
 1: BEGIN;
 1: DECLARE c5 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
 1: @post_run 'parse_endpoint_info 5 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c5';
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5', -1);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT5': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT5";
 -- 1R still bind to Test4 session, so can not retrieve from current endpoint.
@@ -138,7 +138,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c5';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c5';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c5', -1);
 1: ROLLBACK;
 -- check no endpoint info 
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c5';
@@ -150,7 +150,7 @@ insert into t1 select generate_series(1,100);
 1: @post_run 'parse_endpoint_info 6 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c6';
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID61 1 1 ; create_sub "${PID61}[ \t]*" QDPid61': select pg_backend_pid();
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6', -1);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT6': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT6";
 1R: @pre_run 'set_endpoint_variable @ENDPOINT6': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT6";
@@ -162,7 +162,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c6';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c6';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c6', -1);
 1: ROLLBACK;
 -- check no endpoint info
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c6';
@@ -174,7 +174,7 @@ insert into t1 select generate_series(1,100);
 1: @post_run 'parse_endpoint_info 61 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c61';
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID611 1 1 ; create_sub "${PID611}[ \t]*" QDPid611': select pg_backend_pid();
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c61');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c61', -1);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT61': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT61";
 1R: @pre_run 'set_endpoint_variable @ENDPOINT61': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT61";
@@ -199,7 +199,7 @@ insert into t1 select generate_series(1,100);
 1: @post_run 'parse_endpoint_info 7 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c7';
 -- get backend pid of this session which run 'gp_wait_parallel_retrieve_cursor'
 1: @post_run 'get_tuple_cell PID71 1 1 ; create_sub "${PID71}[ \t]*" QDPid71': select pg_backend_pid();
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7', -1);
 -- some endpoint retrieve partial results, some endpoint finished retrieving, some endpoint not start retrieving
 0R: @pre_run 'set_endpoint_variable @ENDPOINT7': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT7";
 1R: @pre_run 'set_endpoint_variable @ENDPOINT7': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT7";
@@ -217,7 +217,7 @@ insert into t1 select generate_series(1,100);
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c7';
 *U: SELECT senderpid<>-1, receiverpid<>-1, state FROM gp_segment_endpoints() WHERE cursorname='c7';
 -- report error for EXECUTE canceled PARALLEL RETRIEVE CURSOR
-1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7');
+1: SELECT * FROM gp_wait_parallel_retrieve_cursor('c7', -1);
 1: ROLLBACK;
 -- check no endpoint info
 2: SELECT state FROM gp_endpoints() WHERE cursorname='c7';

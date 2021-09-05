@@ -47,9 +47,9 @@ DECLARE
 4: @post_run 'parse_endpoint_info 2 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
  endpoint_id2 | token_id | host_id | port_id | READY
 (1 row)
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);  <waiting ...>
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);  <waiting ...>
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);  <waiting ...>
 *U: @pre_run 'set_endpoint_variable @ENDPOINT2': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT2';
  state 
 -------
@@ -141,9 +141,9 @@ DECLARE
 4: @post_run 'parse_endpoint_info 3 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
  endpoint_id3 | token_id | host_id | port_id | READY
 (1 row)
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);  <waiting ...>
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);  <waiting ...>
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);  <waiting ...>
 *U: @pre_run 'set_endpoint_variable @ENDPOINT3': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT3';
  state 
 -------
@@ -235,9 +235,9 @@ DECLARE
 4: @post_run 'parse_endpoint_info 4 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
  endpoint_id4 | token_id | host_id | port_id | READY
 (1 row)
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');  <waiting ...>
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);  <waiting ...>
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);  <waiting ...>
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);  <waiting ...>
 *U: @pre_run 'set_endpoint_variable @ENDPOINT4': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT4';
  state 
 -------

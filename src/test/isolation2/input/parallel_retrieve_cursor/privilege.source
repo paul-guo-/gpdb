@@ -89,7 +89,7 @@ RESET SESSION AUTHORIZATION;
 1: SET SESSION AUTHORIZATION u1;
 --- c1 is declared and executed by u1
 1: DECLARE c1 PARALLEL RETRIEVE CURSOR FOR SELECT * FROM t1;
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
 
 2: @post_run 'parse_endpoint_info 40 1 2 3 4' : SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE cursorname='c0';
 
@@ -101,7 +101,7 @@ RESET SESSION AUTHORIZATION;
 *R: SELECT SESSION_USER, CURRENT_USER;
 *R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT4";
 -- cancel the no privilege retrieving endpoints, otherwise it will wait until statement_timeout
-42: select pg_cancel_backend(pid) from pg_stat_activity where query like 'SELECT * FROM gp_wait_parallel_retrieve_cursor(''c1'');';
+42: select pg_cancel_backend(pid) from pg_stat_activity where query like 'SELECT * FROM gp_wait_parallel_retrieve_cursor(''c1'', -1);';
 
 1<:
 1: CLOSE c1;
@@ -142,7 +142,7 @@ RESET SESSION AUTHORIZATION;
 
 --- execute the cursor by u1
 1: SET SESSION AUTHORIZATION u1;
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', -1);
 
 --- u2 is not able to see u1's endpoints in RETRIEVE mode
 *R: @pre_run 'export CURRENT_ENDPOINT_POSTFIX=50 ; export RETRIEVE_USER="adminuser" ; echo $RAW_STR' : SET SESSION AUTHORIZATION u2;
@@ -151,7 +151,7 @@ RESET SESSION AUTHORIZATION;
 --- u2 is not able to retrieve from u1's endpoints in RETRIEVE mode
 *R: @pre_run 'set_endpoint_variable @ENDPOINT5': RETRIEVE ALL FROM ENDPOINT "@ENDPOINT5";
 -- cancel the no privilege retrieving endpoints, otherwise it will wait until statement_timeout
-42: select pg_cancel_backend(pid) from pg_stat_activity where query like 'SELECT * FROM gp_wait_parallel_retrieve_cursor(''c4'');';
+42: select pg_cancel_backend(pid) from pg_stat_activity where query like 'SELECT * FROM gp_wait_parallel_retrieve_cursor(''c4'', -1);';
 
 1<:
 1: CLOSE c4;

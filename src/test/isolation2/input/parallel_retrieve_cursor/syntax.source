@@ -29,11 +29,11 @@ ROLLBACK;
 -- Test3: non-PARALLEL RETRIEVE CURSOR can not support the PARALLEL RETRIEVE CURSOR related UDF
 BEGIN;
 DECLARE c1 CURSOR FOR SELECT * FROM t1;
-SELECT * FROM gp_check_parallel_retrieve_cursor('c1');
+SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', 0);
 ROLLBACK;
 BEGIN;
 DECLARE c1 CURSOR FOR SELECT * FROM t1;
-SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
+SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
 ROLLBACK;
 
 -- Test4: PARALLEL RETRIEVE CURSOR can not support in SPI

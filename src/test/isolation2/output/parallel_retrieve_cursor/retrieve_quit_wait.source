@@ -34,7 +34,7 @@ DECLARE
 (3 rows)
 
 -- Wait until the c2 has been fully retrieved
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);  <waiting ...>
 
 2: SELECT cursorname, state FROM gp_endpoints();
  cursorname | state 
@@ -290,7 +290,7 @@ DECLARE
 (3 rows)
 
 -- Wait until retrieving session for c4 quits
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4');  <waiting ...>
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c4', -1);  <waiting ...>
 
 -- in one retrieve session, retrieve multiple tokens (begin retrieving, finished retrieving, not yet retrieve)
 *R: @pre_run 'set_endpoint_variable @ENDPOINT4' : RETRIEVE 10 FROM ENDPOINT "@ENDPOINT4";

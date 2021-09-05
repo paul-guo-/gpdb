@@ -109,12 +109,12 @@ cdbdisp_waitDispatchFinish(struct CdbDispatcherState *ds)
  */
 bool
 cdbdisp_checkDispatchAckMessage(struct CdbDispatcherState *ds,
-							   const char *message, bool wait, DispatchWaitMode waitMode)
+							   const char *message, int timeout_sec)
 {
 	if (pDispatchFuncs == NULL || pDispatchFuncs->checkAckMessage == NULL)
 		return false;
 
-	return (pDispatchFuncs->checkAckMessage) (ds, message, wait, waitMode);
+	return (pDispatchFuncs->checkAckMessage) (ds, message, timeout_sec);
 }
 
 /*

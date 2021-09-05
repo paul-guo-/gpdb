@@ -44,7 +44,7 @@
 #include "commands/sequence.h"
 #include "access/xact.h"
 #include "utils/timestamp.h"
-#define DISPATCH_WAIT_TIMEOUT_MSEC 2000
+#define DISPATCH_WAIT_TIMEOUT_MSEC 1000
 
 /*
  * Ideally, we should set timeout to zero to cancel QEs as soon as possible,
@@ -96,7 +96,7 @@ typedef struct CdbDispatchCmdAsync
 static void *cdbdisp_makeDispatchParams_async(int maxSlices, int largestGangSize, char *queryText, int len);
 
 static bool cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message,
-									bool wait, DispatchWaitMode waitMode);
+									int timeout_sec);
 
 static void cdbdisp_checkDispatchResult_async(struct CdbDispatcherState *ds,
 								  DispatchWaitMode waitMode);
@@ -125,8 +125,7 @@ static void dispatchCommand(CdbDispatchResult *dispatchResult,
 				const char *query_text,
 				int query_text_len);
 
-static void checkDispatchResult(CdbDispatcherState *ds,
-					bool wait);
+static void checkDispatchResult(CdbDispatcherState *ds, int timeout_sec);
 
 static bool processResults(CdbDispatchResult *dispatchResult);
 
@@ -156,7 +155,7 @@ cdbdisp_checkForCancel_async(struct CdbDispatcherState *ds)
 {
 	Assert(ds);
 
-	checkDispatchResult(ds, false);
+	checkDispatchResult(ds, 0);
 	return cdbdisp_checkResultsErrcode(ds->primaryResults);
 }
 
@@ -334,12 +333,10 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
  * message: specifies the expected ACK message to check.
  * wait: if true, this function will wait until required ACK messages
  *       have been received from all required QEs.
- * waitMode: DISPATCH_WAIT_ACK_ROOT only waits ACK of the root slice;
- *           DISPATCH_WAIT_ACK_ALL waits ACK of all slices.
  */
 static bool
 cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message,
-								bool wait, DispatchWaitMode waitMode)
+							  int timeout_sec)
 {
 	DispatchWaitMode prevWaitMode;
 	CdbDispatchCmdAsync *pParms;
@@ -354,7 +351,7 @@ cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message
 
 	pParms->ackMessage = message;
 	prevWaitMode = pParms->waitMode;
-	pParms->waitMode = waitMode;
+	pParms->waitMode = DISPATCH_WAIT_ACK_ROOT;
 
 	/*
 	 * Each time wait for an acknowledge message, must set
@@ -363,7 +360,7 @@ cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message
 	for (int i = 0; i < pParms->dispatchCount; i++)
 		pParms->dispatchResultPtrArray[i]->receivedAckMsg = false;
 
-	checkDispatchResult(ds, wait);
+	checkDispatchResult(ds, timeout_sec);
 
 	for (int i = 0; i < pParms->dispatchCount; i++)
 	{
@@ -405,7 +402,7 @@ cdbdisp_checkDispatchResult_async(struct CdbDispatcherState *ds,
 	if (waitMode != DISPATCH_WAIT_NONE)
 		pParms->waitMode = waitMode;
 
-	checkDispatchResult(ds, true);
+	checkDispatchResult(ds, -1);
 
 	/*
 	 * It looks like everything went fine, make sure we don't miss a user
@@ -445,15 +442,11 @@ cdbdisp_makeDispatchParams_async(int maxSlices, int largestGangSize, char *query
 /*
  * Receive and process results from all running QEs.
  *
- * wait: true, wait until all dispatch works are completed.
- *       false, return immediate when there's no more data.
- *
  * Don't throw out error, instead, append the error message to
  * CdbDispatchResult.error_message.
  */
 static void
-checkDispatchResult(CdbDispatcherState *ds,
-					bool wait)
+checkDispatchResult(CdbDispatcherState *ds, int timeout_sec)
 {
 	CdbDispatchCmdAsync *pParms = (CdbDispatchCmdAsync *) ds->dispatchParams;
 	CdbDispatchResults *meleeResults = ds->primaryResults;
@@ -465,6 +458,8 @@ checkDispatchResult(CdbDispatcherState *ds,
 	bool		sentSignal = false;
 	struct pollfd *fds;
 	uint8 ftsVersion = 0;
+	struct timeval start_ts, now;
+	int64		diff_us;
 
 	db_count = pParms->dispatchCount;
 	fds = (struct pollfd *) palloc(db_count * sizeof(struct pollfd));
@@ -473,6 +468,7 @@ checkDispatchResult(CdbDispatcherState *ds,
 	 * OK, we are finished submitting the command to the segdbs. Now, we have
 	 * to wait for them to finish.
 	 */
+	gettimeofday(&start_ts, NULL);
 	for (;;)
 	{
 		int			sock;
@@ -561,7 +557,7 @@ checkDispatchResult(CdbDispatcherState *ds,
 		 *
 		 * Lower the timeout if: - we need send signal to QEs.
 		 */
-		if (!wait)
+		if (timeout_sec == 0)
 			timeout = 0;
 		else if (pParms->waitMode == DISPATCH_WAIT_NONE ||
 				 pParms->waitMode == DISPATCH_WAIT_ACK_ROOT ||
@@ -602,7 +598,10 @@ checkDispatchResult(CdbDispatcherState *ds,
 				sentSignal = true;
 			}
 
-			if (!wait)
+			gettimeofday(&now, NULL);
+			diff_us = (now.tv_sec - start_ts.tv_sec) * 1000000;
+			diff_us += (int) now.tv_usec - (int) start_ts.tv_usec;
+			if (timeout_sec >= 0 && diff_us >= timeout_sec * 1000000L)
 				break;
 		}
 		/* If the time limit expires, poll() returns 0 */
@@ -628,7 +627,10 @@ checkDispatchResult(CdbDispatcherState *ds,
 				checkSegmentAlive(pParms);
 			}
 
-			if (!wait)
+			gettimeofday(&now, NULL);
+			diff_us = (now.tv_sec - start_ts.tv_sec) * 1000000;
+			diff_us += (int) now.tv_usec - (int) start_ts.tv_usec;
+			if (timeout_sec >= 0 && diff_us >= timeout_sec * 1000000L)
 				break;
 		}
 		/* We have data waiting on one or more of the connections. */

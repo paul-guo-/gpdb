@@ -47,7 +47,6 @@ typedef struct
 
 /* Used in UDFs */
 static EndpointState state_string_to_enum(const char *state);
-static bool check_parallel_retrieve_cursor(const char *cursorName, bool wait);
 
 /*
  * Convert the string-format token to int (e.g. "123456789" to 0x123456789).
@@ -93,60 +92,26 @@ endpoint_name_equals(const char *name1, const char *name2)
 }
 
 /*
- * gp_check_parallel_retrieve_cursor
- *
- * Check whether given parallel retrieve cursor is finished immediately.
- *
- * Return true means finished.
- * Error out when the cursor has exception raised.
- */
-Datum
-gp_check_parallel_retrieve_cursor(PG_FUNCTION_ARGS)
-{
-	const char *cursorName = NULL;
-
-	cursorName = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-	PG_RETURN_BOOL(check_parallel_retrieve_cursor(cursorName, false));
-}
-
-/*
  * gp_wait_parallel_retrieve_cursor
  *
- * Wait until the given parallel retrieve cursor is finished.
+ * Wait until the given parallel retrieve cursor finishes.  If timeout_sec is
+ * less than 0, hang until parallel retrieve cursor finished, else it will hang
+ * at most the specified timeout second.
  *
- * Return true when the cursor finishes.
- * Error out when the cursor has exception raised.
+ * Return true means finished, false for unfinished. Error out when parallel
+ * retrieve cursor has exception raised.
  */
 Datum
 gp_wait_parallel_retrieve_cursor(PG_FUNCTION_ARGS)
 {
 	const char *cursorName = NULL;
-
-	cursorName = text_to_cstring(PG_GETARG_TEXT_P(0));
-
-	PG_RETURN_BOOL(check_parallel_retrieve_cursor(cursorName, true));
-}
-
-/*
- * check_parallel_retrieve_cursor
- *
- * Support function for UDFs:
- * gp_check_parallel_retrieve_cursor
- * gp_wait_parallel_retrieve_cursor
- *
- * Check whether given parallel retrieve cursor is finishes.
- * If wait is true, hang until parallel retrieve cursor finished.
- *
- * Return true means finished. Error out when parallel retrieve cursor has
- * exception raised.
- */
-static bool
-check_parallel_retrieve_cursor(const char *cursorName, bool wait)
-{
+	int			timeout_sec = 0;
 	bool		retVal = false;
 	Portal		portal;
 	EState	   *estate = NULL;
+
+	cursorName = text_to_cstring(PG_GETARG_TEXT_P(0));
+	timeout_sec = PG_GETARG_INT32(1);
 
 	/* get the portal from the portal name */
 	portal = GetPortalByName(cursorName);
@@ -154,22 +119,22 @@ check_parallel_retrieve_cursor(const char *cursorName, bool wait)
 	{
 		ereport(ERROR, (errcode(ERRCODE_UNDEFINED_CURSOR),
 						errmsg("cursor \"%s\" does not exist", cursorName)));
-		return false;
+		PG_RETURN_BOOL(false);
 	}
 	if (!PortalIsParallelRetrieveCursor(portal))
 	{
 		ereport(ERROR,
 				(errcode(ERRCODE_SYNTAX_ERROR),
 				 errmsg("this UDF only works for PARALLEL RETRIEVE CURSOR.")));
-		return false;
+		PG_RETURN_BOOL(false);
 	}
 
 	estate = portal->queryDesc->estate;
-	retVal = cdbdisp_checkDispatchAckMessage(estate->dispatcherState, ENDPOINT_FINISHED_ACK_MSG, wait, DISPATCH_WAIT_ACK_ROOT);
-	SIMPLE_FAULT_INJECTOR("check_parallel_retrieve_cursor_after_udf");
+	retVal = cdbdisp_checkDispatchAckMessage(estate->dispatcherState, ENDPOINT_FINISHED_ACK_MSG, timeout_sec);
+	SIMPLE_FAULT_INJECTOR("gp_wait_parallel_retrieve_cursor_after_udf");
 	check_parallel_retrieve_cursor_errors(estate);
 
-	return retVal;
+	PG_RETURN_BOOL(retVal);
 }
 
 /*

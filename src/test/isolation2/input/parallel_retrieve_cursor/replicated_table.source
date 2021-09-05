@@ -29,9 +29,9 @@ insert into rt1 select generate_series(1,100);
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 2 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);
 *U: @pre_run 'set_endpoint_variable @ENDPOINT2': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT2';
 *R: @pre_run 'set_endpoint_variable @ENDPOINT2': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT2";
 -- cancel all 3 sessions
@@ -65,9 +65,9 @@ insert into rt1 select generate_series(1,100);
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 3 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);
 *U: @pre_run 'set_endpoint_variable @ENDPOINT3': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT3';
 *R: @pre_run 'set_endpoint_variable @ENDPOINT3': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT3";
 -- cancel all 3 sessions
@@ -101,9 +101,9 @@ insert into rt1 select generate_series(1,100);
 -- so that there should have specific session: MOD(sessionid,3)=1;
 -- Get token only in specific session id and retrieve this token.
 4: @post_run 'parse_endpoint_info 4 1 2 3 4': SELECT endpointname,auth_token,hostname,port,state FROM gp_endpoints() WHERE MOD(sessionid,3)=1;
-1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1');
-2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2');
-3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3');
+1&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c1', -1);
+2&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c2', -1);
+3&: SELECT * FROM gp_wait_parallel_retrieve_cursor('c3', -1);
 *U: @pre_run 'set_endpoint_variable @ENDPOINT4': SELECT state FROM gp_segment_endpoints() WHERE endpointname='@ENDPOINT4';
 *R: @pre_run 'set_endpoint_variable @ENDPOINT4': RETRIEVE 10 FROM ENDPOINT "@ENDPOINT4";
 -- cancel all 3 sessions
