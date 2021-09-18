@@ -328,11 +328,12 @@ cdbdisp_dispatchToGang_async(struct CdbDispatcherState *ds,
  * Check the specified acknowledge messages from QEs.
  *
  * Check all dispatch connections to get expected acknowledge message.
- * Return true if receive all required QEs' acknowledge message.
+ * Return true if all required QEs' acknowledge messages have been received.
  *
  * message: specifies the expected ACK message to check.
- * wait: if true, this function will wait until required ACK messages
- *       have been received from all required QEs.
+ * timeout_sec: the second that the dispatcher waits for the ack messages at most.
+ *              0 means checking immediately, and -1 means waiting until all ack
+ *              messages are received.
  */
 static bool
 cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message,
@@ -353,10 +354,6 @@ cdbdisp_checkAckMessage_async(struct CdbDispatcherState *ds, const char *message
 	prevWaitMode = pParms->waitMode;
 	pParms->waitMode = DISPATCH_WAIT_ACK_ROOT;
 
-	/*
-	 * Each time wait for an acknowledge message, must set
-	 * receivedAckMsg to false.
-	 */
 	for (int i = 0; i < pParms->dispatchCount; i++)
 		pParms->dispatchResultPtrArray[i]->receivedAckMsg = false;
 
@@ -1143,12 +1140,13 @@ processResults(CdbDispatchResult *dispatchResult)
 		if (strcmp(qnotifies->relname, CDB_NOTIFY_NEXTVAL) == 0)
 		{
 			/*
-			 * If there was nextval request then respond back on this libpq connection
-			 * with the next value. Check and process nextval message only if QD has not
-			 * already hit the error. Since QD could have hit the error while processing
-			 * the previous nextval_qd() request itself and since full error handling is
-			 * not complete yet like releasing all the locks, etc.., shouldn't attempt
-			 * to call nextval_qd() again.
+			 * If there was nextval request then respond back on this libpq
+			 * connection with the next value. Check and process nextval
+			 * message only if QD has not already hit the error. Since QD could
+			 * have hit the error while processing the previous nextval_qd()
+			 * request itself and since full error handling is not complete yet
+			 * (ex: releasing all the locks, etc.), shouldn't attempt to call
+			 * nextval_qd() again.
 			 */
 			int64 last;
 			int64 cached;

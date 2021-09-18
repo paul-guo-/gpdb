@@ -2015,7 +2015,7 @@ SharedRecordTypmodRegistryAttach(SharedRecordTypmodRegistry *registry)
 
 	/*
 	 * gpdb: comment this line out since we use this function for parallel
-	 * retrieve cursor also
+	 * retrieve cursor also while upstream uses this for parallel work only.
 	 */
 #if 0
 	Assert(IsParallelWorker());

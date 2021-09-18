@@ -78,7 +78,7 @@ struct EndpointData
 								 * queue */
 	Latch		ackDone;		/* Latch to sync EPR_SENDER and EPR_RECEIVER
 								 * status */
-	EndpointState state;		/* The state of the endpoint */
+	EndpointState	state;		/* The state of the endpoint */
 	int			sessionID;		/* Connection session id */
 	Oid			userID;			/* User ID of the current executed PARALLEL
 								 * RETRIEVE CURSOR */
@@ -96,8 +96,8 @@ typedef struct EndpointData *Endpoint;
 typedef struct EndpointExecState
 {
 	Endpoint			 endpoint;      /* endpoint entry */
-	DestReceiver        *dest;
-	dsm_segment         *dsmSeg;        /* dsm_segment pointer */
+	DestReceiver		*dest;
+	dsm_segment			*dsmSeg;        /* dsm_segment pointer */
 } EndpointExecState;
 
 extern bool am_cursor_retrieve_handler;

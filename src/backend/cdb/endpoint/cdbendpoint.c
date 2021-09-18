@@ -219,7 +219,7 @@ InitSharedEndpoints()
 }
 
 /*
- * Get where is the endpoint located? Currently used in EXPLAIN only.
+ * Get the endpoint location. Currently used in EXPLAIN only.
  */
 enum EndPointExecPosition
 GetParallelCursorEndpointPosition(PlannedStmt *plan)
@@ -493,14 +493,14 @@ static void
 create_and_connect_mq(TupleDesc tupleDesc, dsm_segment **mqSeg /* out */ ,
 					  shm_mq_handle **mqHandle /* out */ )
 {
-	shm_toc    *toc;
-	shm_mq	   *mq;
-	shm_toc_estimator tocEst;
-	Size		tocSize;
-	int			tupdescLen;
-	char	   *tupdescSer;
-	char	   *tdlenSpace;
-	char	   *tupdescSpace;
+	shm_toc		*toc;
+	shm_mq		*mq;
+	shm_toc_estimator	tocEst;
+	Size		 tocSize;
+	int			 tupdescLen;
+	char		*tupdescSer;
+	char		*tdlenSpace;
+	char		*tupdescSpace;
 	TupleDescNode *node = makeNode(TupleDescNode);
 
 	elog(DEBUG3,
@@ -520,7 +520,7 @@ create_and_connect_mq(TupleDesc tupleDesc, dsm_segment **mqSeg /* out */ ,
 	shm_toc_estimate_keys(&tocEst, 3);
 	tocSize = shm_toc_estimate(&tocEst);
 
-	/* Create dsm and initilaize toc. */
+	/* Create dsm and initialize toc. */
 	*mqSeg = dsm_create(tocSize, 0);
 	dsm_pin_mapping(*mqSeg);
 

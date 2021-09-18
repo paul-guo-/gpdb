@@ -100,7 +100,7 @@ cdbdisp_waitDispatchFinish(struct CdbDispatcherState *ds)
  *
  * On QD, check if any expected acknowledge messages from QEs have arrived.
  * In some cases, QD needs to check or wait the expected acknowledge messages
- * from QEs, e.g. when define a parallel retrieve cursor, so that QD can
+ * from QEs, e.g. when defining a parallel retrieve cursor, so that QD can
  * know if QEs run as expected.
  *
  * message: specifies the expected ACK message to check.

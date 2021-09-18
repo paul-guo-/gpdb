@@ -113,10 +113,11 @@ postgres=# select * from gp_endpoints();
 (3 rows)
 
 The userid of the endpoint is the session user, not the current user. For
-example, if login the database with "user1", then set role to another user
-"user2" and declare a parallel retrieve cursor.  The userid of these endpoints
+example, if login the database with user1, then set role to another user
+user2 and declare a parallel retrieve cursor.  The userid of these endpoints
 is user1's oid, not user2's oid. The session user should be used to start a
-retrieve connection.
+retrieve connection. This is typically due to the security concern, e.g. if
+user2 is nologin, we surely do not expect to retrieive using user2.
 
 There is another similar gp_session_endpoints() that shows the endpoint
 informations that belong to this session only.
@@ -221,7 +222,7 @@ $> PGOPTIONS="-c gp_role=utility" psql -h host67 -p 7002 -d postgres
 postgres=# select * from gp_segment_endpoints();
             auth_token            | databaseid | senderpid | receiverpid | state | dbid | sessionid | userid |    endpointname    | cursorname
 ----------------------------------+------------+-----------+-------------+-------+------+-----------+--------+--------------------+------------
- 51c6cd7f4c10c4a36579fbbb24cc6371 |      13361 |      3854 |          -1 | READY |    2 |         8 |     10 | c30000000800000003 | c3
+ 75ebe7b49c3e09f35e017fc0181c62cf |      13361 |      3854 |          -1 | READY |    2 |       105 |     10 | c30000006900000005 | c3
 (1 row)
 
 Wait Parallel Retrieve Cursor To Be Fully Retrieved
@@ -245,7 +246,7 @@ an error message will be thrown.
 
 Examples:
 
-postgres=# SELECT gp_wait_parallel_retrieve_cursor('c2'); <waiting...>
+postgres=# SELECT gp_wait_parallel_retrieve_cursor('c3'); <waiting...>
  gp_wait_parallel_retrieve_cursor
 -----------------------------------
  t
@@ -280,7 +281,7 @@ CLOSE cursorname;
 
 Examples:
 
-postgres=# CLOSE C1
+postgres=# CLOSE C3
 CLOSE
 
 
@@ -329,7 +330,7 @@ $> PGOPTIONS="-c gp_retrieve_conn=true" psql -h host67 -p 7002 -d postgres
 Password: c5c116a13e2fdb8b436cdbc8e1bc7365
 
 -- Retrieve all rows of this endpoint
-postgres=# RETRIEVE ALL FROM ENDPOINT c10000001f00000003;
+postgres=# RETRIEVE ALL FROM ENDPOINT c1000000160000000a;
  id
 ----
   2
@@ -337,16 +338,16 @@ postgres=# RETRIEVE ALL FROM ENDPOINT c10000001f00000003;
   4
 (3 rows)
 
-Now the state of endpoint c10000001f00000003 should become "FINISHED" since all
-results on the segment have been retrieved.
+Now the state of endpoint c1000000160000000a for dbid 2 (host67:7002) should
+become "FINISHED" since all results on the segment have been retrieved.
 
 -- List endpoints on coordinator to check
 postgres=# SELECT * FROM gp_endpoints();
  dbid |            auth_token            | cursorname | sessionid | hostname | port | userid |  state   |    endpointname
 ------+----------------------------------+------------+-----------+----------+------+--------+----------+--------------------
-    2 | bb98d2e0b50c6733414a7295bfff5c72 | c1         |        31 | host67   | 7002 |     10 | FINISHED | c10000001f00000003
-    3 | 5f59f7f3338212f20d3bb1527fac9fcd | c1         |        31 | host67   | 7003 |     10 | READY    | c10000001f00000003
-    4 | ee62f79379b07ad3b411cd59ab78aff8 | c1         |        31 | host67   | 7004 |     10 | READY    | c10000001f00000003
+    2 | c5c116a13e2fdb8b436cdbc8e1bc7365 | c1         |        22 | host67   | 7002 |     10 | FINISHED | c1000000160000000a
+    3 | ecf4af4e0e50f2530afda2af178a5bf8 | c1         |        22 | host67   | 7003 |     10 | READY    | c1000000160000000a
+    4 | a522dc766936be8a88710fa137d52df2 | c1         |        22 | host67   | 7004 |     10 | READY    | c1000000160000000a
 (3 rows)
 
 Start another retrieve session on host67:7003
@@ -355,7 +356,7 @@ $> PGOPTIONS="-c gp_retrieve_conn=true" psql -h host67 -p 7003 -d postgres
 Password: 5f59f7f3338212f20d3bb1527fac9fcd
 
 -- Retrieve 1 row on this endpoint
-postgres=# RETRIEVE 1 FROM ENDPOINT c10000001f00000003;
+postgres=# RETRIEVE 1 FROM ENDPOINT c1000000160000000a;
  id
 ----
   0
@@ -363,18 +364,18 @@ postgres=# RETRIEVE 1 FROM ENDPOINT c10000001f00000003;
 
 The state of endpoint  will firstly becomes "RETRIEVING", then becomes
 "ATTACHED".  RETRIEVING means that a receiver is retrieving data from the
-endpoint. If a receiver finishes retrieving a part of data (but not retrieve
-all the data), the state becomes ATTACHED, means that this endpoint has been
-attached by a receiver. If the receiver has retrieved all the data from the
-endpoint, the state becomes FINISHED.
+endpoint. If a receiver finishes retrieving a part of data (but has not
+retrieved all the data), the state becomes ATTACHED, means that this endpoint
+has been attached by a receiver. If the receiver has retrieved all the data
+from the endpoint, the state becomes FINISHED.
 
 -- List endpoints on coordinator to check
 postgres=# SELECT * FROM gp_endpoints();
  dbid |            auth_token            | cursorname | sessionid | hostname | port | userid |  state   |    endpointname
 ------+----------------------------------+------------+-----------+----------+------+--------+----------+--------------------
-    2 | bb98d2e0b50c6733414a7295bfff5c72 | c1         |        31 | host67   | 7002 |     10 | FINISHED | c10000001f00000003
-    3 | 5f59f7f3338212f20d3bb1527fac9fcd | c1         |        31 | host67   | 7003 |     10 | ATTACHED | c10000001f00000003
-    4 | ee62f79379b07ad3b411cd59ab78aff8 | c1         |        31 | host67   | 7004 |     10 | READY    | c10000001f00000003
+    2 | c5c116a13e2fdb8b436cdbc8e1bc7365 | c1         |        22 | host67   | 7002 |     10 | FINISHED | c1000000160000000a
+    3 | ecf4af4e0e50f2530afda2af178a5bf8 | c1         |        22 | host67   | 7003 |     10 | ATTACHED | c1000000160000000a
+    4 | a522dc766936be8a88710fa137d52df2 | c1         |        22 | host67   | 7004 |     10 | READY    | c1000000160000000a
 (3 rows)
 
 -- To check if the retrieving finished on the coordinator connection.

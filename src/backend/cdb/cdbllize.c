@@ -1573,7 +1573,7 @@ adjust_top_path_for_parallel_retrieve_cursor(Path *path, PlanSlice *slice)
 	{
 		/*
 		 * For these scenarios, parallel retrieve cursor needs to run on entrydb
-		 * since endpoint QE needs to interacts with the retrieve connections.
+		 * since endpoint QE needs to interact with the retrieve connections.
 		 */
 		slice->numsegments = 1;
 		slice->gangType = GANGTYPE_ENTRYDB_READER;
